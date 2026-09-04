@@ -128,7 +128,11 @@ async def fetch_feed(
 
     try:
         response = await client.get(url, headers=headers, follow_redirects=True)
-    except httpx.HTTPError as exc:
+    # `InvalidURL` is not an `HTTPError` - httpx raises it while *building* the
+    # request, before any transport runs, for things like `http://[::1` or an
+    # un-encodable IDNA host. A stored feed URL like that would otherwise escape
+    # `asyncio.gather` in the collect node and take the whole run down with it.
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         return FetchResult(ok=False, status=type(exc).__name__, error=str(exc)[:400])
 
     if response.status_code == 304:
