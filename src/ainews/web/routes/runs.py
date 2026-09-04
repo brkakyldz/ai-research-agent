@@ -53,12 +53,16 @@ def is_running() -> bool:
 async def _execute(language: str) -> None:
     from ainews.pipeline.runner import run_digest
 
-    token = f"manual:{language}"
-    _running.add(token)
     try:
         await run_digest(language=language, mode="manual")  # type: ignore[arg-type]
     except Exception:
         log.exception("manual run failed")
+
+
+async def _guarded(language: str, token: str) -> None:
+    """Hold the claim for exactly as long as the run lasts, however it ends."""
+    try:
+        await _execute(language)
     finally:
         _running.discard(token)
 
@@ -98,8 +102,14 @@ async def start_run(
     async with _run_lock:
         if is_running():
             return HTMLResponse(t["busy"])
+        # Claim the slot here, inside the lock, rather than inside the task.
+        # `create_task` only schedules; the task's first line does not run until
+        # this handler yields, so a second press arriving in that window would
+        # find `_running` still empty and start a second - paid - digest.
+        token = f"manual:{language}"
+        _running.add(token)
         # Fire and forget: the caller gets an answer now, the run finishes later.
-        task = asyncio.create_task(_execute(language))
+        task = asyncio.create_task(_guarded(language, token))
         _tasks.add(task)
         task.add_done_callback(_tasks.discard)
 

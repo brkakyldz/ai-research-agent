@@ -12,7 +12,11 @@ def test_health_reports_state_without_leaking_keys(settings: Settings) -> None:
         payload = client.get("/health").json()
 
     assert payload["status"] == "ok"
-    assert payload["counts"] == {"sources": 0, "articles": 0, "runs": 0}
+    # Starting the app seeds feeds.yaml, so a fresh install already has sources
+    # and nothing else.
+    assert payload["counts"]["sources"] >= 15
+    assert payload["counts"]["articles"] == 0
+    assert payload["counts"]["runs"] == 0
     assert payload["llm_configured"] is True
     assert payload["tavily_configured"] is False
     assert settings.openai_api_key not in repr(payload)

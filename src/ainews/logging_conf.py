@@ -25,6 +25,11 @@ def configure_logging(level: str = "INFO") -> None:
     root.handlers = [handler]
     root.setLevel(level.upper())
     # These are chatty at INFO and say nothing we act on.
-    for noisy in ("httpx", "httpcore", "openai", "apscheduler.executors.default", "trafilatura"):
+    for noisy in ("httpx", "httpcore", "openai", "apscheduler.executors.default"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # trafilatura logs at ERROR for every page it cannot parse - "empty HTML
+    # tree", "discarding data" - which for us is an expected outcome that
+    # `enrich` already handles by falling through to the next tier. Left at
+    # ERROR it puts a red line in the log for something that is working.
+    logging.getLogger("trafilatura").setLevel(logging.CRITICAL)
     _CONFIGURED = True

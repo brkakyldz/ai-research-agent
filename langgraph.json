@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "digest": "./src/ainews/pipeline/graph.py:build_graph"
+  },
+  "env": ".env"
+}

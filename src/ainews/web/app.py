@@ -1,9 +1,9 @@
 """FastAPI application factory.
 
-The app owns the database lifecycle (created on start, WAL-checkpointed on
-stop), the routes and the templates. The scheduler joins it in M5 - ADR 0004
-puts it in this process so the cron path and the "Run now" button call the same
-function.
+The app owns three things: the database lifecycle (created on start,
+WAL-checkpointed on stop), the seeded feed list, and the scheduler - which lives
+here rather than in its own process so that the cron path and the "Run now"
+button call the same function (ADR 0004).
 """
 
 from __future__ import annotations
@@ -18,8 +18,10 @@ from fastapi.staticfiles import StaticFiles
 
 from ainews.config import Settings, get_settings
 from ainews.db import dispose_engine, get_engine, init_db
-from ainews.db.session import checkpoint_wal
+from ainews.db.session import checkpoint_wal, session_scope
 from ainews.logging_conf import configure_logging
+from ainews.scheduler import start_scheduler
+from ainews.sources.seed import sync_sources
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +37,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db(get_engine())
     log.info("database ready at %s", settings.sqlite_path)
 
+    # Seeding on every start, not only the first: a feed added to feeds.yaml in a
+    # later version has to reach an existing installation, and the sync is
+    # additive so nothing the operator changed is touched.
+    async with session_scope() as session:
+        await sync_sources(session)
+
+    scheduler = None
+    if settings.scheduler_enabled:
+        scheduler = start_scheduler(settings)
+    else:
+        log.info("scheduler disabled by configuration")
+    app.state.scheduler = scheduler
+
     try:
         yield
     finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
         await checkpoint_wal()
         await dispose_engine()
         log.info("shutdown complete")

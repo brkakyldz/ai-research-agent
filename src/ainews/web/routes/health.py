@@ -8,6 +8,7 @@ never returns the keys themselves, only whether they are set.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,3 +35,13 @@ async def health(
         "llm_configured": settings.llm_configured,
         "tavily_configured": settings.tavily_configured,
     }
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    """No icon, answered as no icon.
+
+    The page declares an empty `data:` icon, but browsers ask for /favicon.ico
+    anyway, and a 404 on every visit is a red line in the log for nothing.
+    """
+    return Response(status_code=204)
