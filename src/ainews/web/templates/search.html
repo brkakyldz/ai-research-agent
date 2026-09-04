@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="intro">
+    <p class="mono">{{ t.search_heading }}</p>
+    <form action="/search" method="get" class="controls" style="padding-top:6px">
+      <input type="hidden" name="lang" value="{{ language }}">
+      <input class="field" type="search" name="q" value="{{ query }}"
+             placeholder="{{ t.search_placeholder }}" aria-label="{{ t.search }}" autofocus>
+      <button class="lnk" type="submit" style="font-size:13px">{{ t.search }}</button>
+      <a class="lnk" href="/?lang={{ language }}" style="font-size:13px">{{ t.back_to_today }}</a>
+    </form>
+  </section>
+
+  {% if stories %}
+    {% include "_stories.html" %}
+  {% else %}
+    <p class="empty">{{ t.empty_search }}</p>
+  {% endif %}
+{% endblock %}

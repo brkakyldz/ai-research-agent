@@ -1,0 +1,51 @@
+{# The shell every page shares: the status strip, and nothing else.
+   There is no navigation bar because there are four pages and they fit in the
+   footer; a nav would be a component earning its keep by existing. #}
+<!doctype html>
+<html lang="{{ language }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>{% block title %}{{ t.title }}{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', path='fonts.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='theme.css') }}">
+<link rel="icon" href="data:,">
+<script src="{{ url_for('static', path='htmx.min.js') }}" defer></script>
+</head>
+<body>
+
+<header class="bar" id="bar">
+  <div class="wrap bar__in">
+    <span class="mono">{{ header.stamp }}</span>
+    {% block action %}
+    <button class="lnk" style="font-size:13px"
+            hx-post="/runs/start?lang={{ language }}"
+            hx-target="#run-status" hx-swap="innerHTML"
+            hx-on::before-request="document.getElementById('bar').classList.add('is-running')">
+      {{ t.run_now }}
+    </button>
+    {% endblock %}
+    <span id="run-status" class="mono"></span>
+    <span class="bar__stats mono">
+      {% for stat in header.stats %}<span>{{ stat }}</span>{% endfor %}
+    </span>
+  </div>
+  <div class="bar__prog"></div>
+</header>
+
+<main class="wrap">
+{% block content %}{% endblock %}
+
+  <p class="foot mono">
+    <a class="lnk" href="/?lang={{ language }}" {% if page == 'digest' %}aria-current="true"{% endif %}>{{ t.nav_digest }}</a>
+    <a class="lnk" href="/archive?lang={{ language }}" {% if page == 'archive' %}aria-current="true"{% endif %}>{{ t.nav_archive }}</a>
+    <a class="lnk" href="/sources?lang={{ language }}" {% if page == 'sources' %}aria-current="true"{% endif %}>{{ t.nav_sources }}</a>
+    <a class="lnk" href="/runs?lang={{ language }}" {% if page == 'runs' %}aria-current="true"{% endif %}>{{ t.nav_runs }}</a>
+    {# The language toggle is a link, not a control: one other language exists. #}
+    <a class="lnk" href="{{ toggle_url }}">{{ t.other_language }}</a>
+  </p>
+
+</main>
+</body>
+</html>

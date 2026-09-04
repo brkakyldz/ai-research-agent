@@ -12,3 +12,6 @@ __pycache__/
 
 # Runtime data (SQLite DB + WAL files)
 data/
+
+# Editor/agent scratch
+.claude/

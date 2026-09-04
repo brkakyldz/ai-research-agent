@@ -1,0 +1,235 @@
+/* =========================================================
+   AI DIGEST - a daily reading tool
+   ---------------------------------------------------------
+   Copied from mockups/digest.html, which stays the source of
+   truth for palette and scale. The rationale is in DESIGN.md;
+   what is repeated here is only what a line needs to be read.
+
+   This is not a portfolio page, it is a tool. Nobody has to be
+   persuaded, so there is no hero, no card, no glass, no grain,
+   no scroll reveal. All of those are atmosphere, and atmosphere
+   is an instrument of persuasion.
+
+   The only hierarchy device on the page is typography, and it
+   is not invented: a headline's size comes from the story's
+   importance score. That is why there is no rank number, no
+   importance badge and no coloured marker - all three were
+   annotations repeating what the type already said.
+   ========================================================= */
+
+:root {
+  --bg:      #0F1113;   /* flat. no layer, no wash, no vignette */
+  --bg-soft: #15181B;   /* hover and table rows only */
+
+  /* Ink steps. The importance score moves between these; with no
+     separate accent colour, the steps do real work. */
+  --ink-0: #EDEEF0;
+  --ink-1: #C3C7CC;
+  --ink-2: #979CA4;
+  --ink-3: #6B7079;
+
+  --line:      rgba(255, 255, 255, 0.07);
+  --line-soft: rgba(255, 255, 255, 0.035);
+
+  /* The ONLY colour on the page. Not decoration - errors. */
+  --alarm: #D4756A;
+
+  --sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur: 180ms;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink-1);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; letter-spacing: -0.015em; color: var(--ink-0); }
+p, ul, ol { margin: 0; }
+a { color: inherit; text-decoration: none; }
+::selection { background: rgba(255,255,255,0.16); }
+:focus-visible { outline: 1px solid var(--ink-1); outline-offset: 3px; }
+
+.wrap { max-width: 47rem; margin-inline: auto; padding: 0 24px; }
+
+/* mono micro-label - date, source, counter, table heading */
+.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* Link = underline. Not colour. There is no accent here at all:
+   the rule turns to ink on hover. */
+.lnk {
+  border: 0; padding: 0; background: none; cursor: pointer;
+  font: inherit; color: var(--ink-1);
+  border-bottom: 1px solid var(--line);
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.lnk:hover, .lnk:focus-visible { color: var(--ink-0); border-bottom-color: var(--ink-2); }
+.lnk[aria-current="true"] { color: var(--ink-0); border-bottom-color: var(--ink-1); }
+.lnk:disabled { color: var(--ink-3); cursor: default; }
+
+/* =========================================================
+   TOP STRIP - one line. Not a title, a status.
+   A masthead would be a persuasion gesture here: you already
+   know what this page is, you open it yourself every morning.
+   ========================================================= */
+.bar {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  position: sticky; top: 0; z-index: 5;
+}
+.bar__in {
+  display: flex; align-items: center; gap: 20px;
+  height: 46px;
+}
+.bar__stats { display: flex; gap: 16px; margin-left: auto; }
+@media (max-width: 640px) { .bar__stats span:nth-child(n+3) { display: none; } }
+
+/* Work indicator: a 1px line advancing left to right.
+   Not a spinner - a spinner says "waiting", this says "working".
+   In the mockup the width was animated on a fixed timer; a real run
+   takes as long as it takes, so it loops instead of pretending to
+   know a duration it cannot know. */
+.bar__prog {
+  height: 1px; width: 0; background: var(--ink-2);
+}
+.bar.is-running .bar__prog {
+  width: 100%;
+  animation: sweep 2.4s var(--ease) infinite;
+  transform-origin: left;
+}
+@keyframes sweep {
+  0%   { transform: scaleX(0); opacity: 0.9; }
+  70%  { transform: scaleX(1); opacity: 0.9; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+
+/* =========================================================
+   INTRO - the editor's note. The system genuinely produces it,
+   so it stays. It is not dressed up in serif, italic or a huge
+   size: a note is a note.
+   ========================================================= */
+.intro { padding: 44px 0 34px; border-bottom: 1px solid var(--line); }
+.intro p { max-width: 60ch; color: var(--ink-1); font-size: 16px; }
+.intro .mono { margin-bottom: 14px; }
+
+/* =========================================================
+   STORIES
+   ---------------------------------------------------------
+   One column, no boxes. A card draws a frame, and a frame's job
+   is to separate an object from a background; there is no
+   background here to separate from. Between items there is only
+   space and a rule.
+
+   Headline size and colour come from the importance score
+   (.p5 ... .p1). No number states the order; the order is the order.
+   ========================================================= */
+.list { list-style: none; padding: 0; }
+
+.item {
+  padding: 26px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.item:last-child { border-bottom: 0; }
+
+.item__meta { display: flex; gap: 12px; margin-bottom: 7px; flex-wrap: wrap; }
+.item__meta .src { color: var(--ink-2); }
+
+.item__title { display: inline; }
+.item__title a {
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--dur) var(--ease);
+}
+.item__title a:hover, .item__title a:focus-visible { border-bottom-color: var(--ink-2); }
+
+.item__sum { margin-top: 9px; max-width: 66ch; color: var(--ink-2); }
+/* "Why it matters" is not a separate block with a label: it is bold
+   inside the sentence, one feature doing the whole job. */
+.item__sum b { font-weight: 500; color: var(--ink-1); }
+
+/* --- importance steps ---------------------------------------
+   The score is visible only here. You can tell a 5 from a 2 by
+   the shape of the page, without reading either. */
+.p5 .item__title { font-size: 25px; color: var(--ink-0); font-weight: 600; }
+.p4 .item__title { font-size: 21px; color: var(--ink-0); font-weight: 600; }
+.p3 .item__title { font-size: 18px; color: var(--ink-1); font-weight: 500; }
+.p2 .item__title { font-size: 15.5px; color: var(--ink-2); font-weight: 500; }
+.p1 .item__title { font-size: 15px;   color: var(--ink-3); font-weight: 400; }
+
+/* A low-scoring story shows no summary. Everything was summarised
+   and is in the archive; showing it here only lengthened the list. */
+.p2 .item__sum, .p1 .item__sum { display: none; }
+.p2, .p1 { padding: 13px 0; }
+
+.more { padding: 30px 0 0; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+
+/* =========================================================
+   TABLES - runs and sources. Same page, different density.
+   ========================================================= */
+.runs { margin-top: 56px; padding-top: 30px; border-top: 1px solid var(--line); }
+.runs h2 { font-size: 15px; font-weight: 500; color: var(--ink-2); margin-bottom: 16px; }
+.runs table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+.runs th {
+  text-align: left; font-weight: 500; font-size: 10px; letter-spacing: 0.13em;
+  text-transform: uppercase; color: var(--ink-3);
+  padding: 0 12px 8px 0; border-bottom: 1px solid var(--line);
+}
+.runs td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line-soft); color: var(--ink-2); }
+.runs tr:hover td { color: var(--ink-1); background: var(--bg-soft); }
+.runs td:last-child, .runs th:last-child { padding-right: 0; }
+.runs .bad { color: var(--alarm); }
+/* A table has to be able to scroll rather than push the page sideways. */
+.scroll { overflow-x: auto; }
+
+.foot { padding: 26px 0 60px; display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; }
+
+/* =========================================================
+   ADDITIONS BEYOND THE MOCKUP
+   ---------------------------------------------------------
+   The mockup showed one screen. These are the controls the real
+   pages need, each built from the same three materials the rest
+   of the page uses: the rule, the ink step, and the mono label.
+   Nothing new was introduced - no accent, no fill, no shadow.
+   ========================================================= */
+
+/* Search and "add a feed": a field is a baseline, not a box. */
+.field {
+  border: 0; border-bottom: 1px solid var(--line); background: none;
+  font: inherit; color: var(--ink-0); padding: 4px 0; min-width: 12rem;
+  transition: border-color var(--dur) var(--ease);
+}
+.field::placeholder { color: var(--ink-3); }
+.field:focus { outline: none; border-bottom-color: var(--ink-2); }
+
+.controls { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; padding: 22px 0 0; }
+.controls form { display: flex; gap: 10px; align-items: baseline; }
+
+/* Tag filter. Tags were deliberately removed from the story rows
+   (fifteen lines of noise); their place is here, once. */
+.tags { display: flex; gap: 12px; flex-wrap: wrap; padding: 14px 0 0; }
+.tags a { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: var(--ink-3); }
+.tags a:hover, .tags a[aria-current="true"] { color: var(--ink-1); }
+
+.empty { padding: 60px 0; color: var(--ink-3); max-width: 52ch; }
+.note { color: var(--ink-3); }
+.bad { color: var(--alarm); }
+
+/* Source rows carry one toggle each; the button is the same link. */
+.runs form { display: inline; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}

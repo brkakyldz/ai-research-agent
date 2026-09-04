@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if not runs %}
+    <p class="empty">{{ t.empty_archive }}</p>
+  {% else %}
+  <section class="intro">
+    <p class="mono">{{ t.archive_heading }}</p>
+    <p class="tags" style="padding-top:8px">
+      {% for r in runs %}
+      <a href="/archive?lang={{ language }}&amp;run={{ r.id }}"
+         {% if selected and r.id == selected.id %}aria-current="true"{% endif %}>{{ r.started_at|clock }}</a>
+      {% endfor %}
+    </p>
+  </section>
+
+  {% if selected %}
+    {% if selected.editor_note %}
+    <section class="intro">
+      <p class="mono">{{ t.note_label }}</p>
+      <p>{{ selected.editor_note }}</p>
+    </section>
+    {% endif %}
+    {% include "_stories.html" %}
+  {% endif %}
+  {% endif %}
+{% endblock %}

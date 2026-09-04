@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 # Outlets append their own name to the headline; two feeds carrying one story
 # would otherwise differ by exactly that suffix.
 # The en and em dashes are deliberate: real headlines separate with them.
-_SOURCE_SUFFIX = re.compile(r"\s*[|–—-]\s*[\w .'&]{2,30}$")  # noqa: RUF001
+_SOURCE_SUFFIX = re.compile(r"\s*[|–—-]\s*[\w .'&]{2,30}$")
 # Section prefixes from aggregators, which say nothing about the story.
 _PREFIX = re.compile(r"^\s*(show hn|ask hn|tell hn|launch hn|video|watch|opinion)\s*:\s*", re.I)
 _NON_WORD = re.compile(r"[^\w\s]", re.UNICODE)

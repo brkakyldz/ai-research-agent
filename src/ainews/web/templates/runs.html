@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="runs" style="margin-top:44px;border-top:0;padding-top:0">
+    <h2>{{ t.runs_heading }}</h2>
+    <div class="scroll">{% include "_runs_table.html" %}</div>
+  </section>
+
+  {% if failures %}
+  <section class="runs">
+    <h2>{{ t.status_error }}</h2>
+    {% for r in failures %}
+    <p class="mono" style="margin-bottom:10px">
+      <span class="bad">{{ r.started_at|clock }}</span>
+      <span style="text-transform:none;letter-spacing:0">{{ r.error }}</span>
+    </p>
+    {% endfor %}
+  </section>
+  {% endif %}
+{% endblock %}

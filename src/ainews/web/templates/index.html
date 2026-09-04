@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% if not run %}
+    <p class="empty">{{ t.empty_digest }}</p>
+  {% else %}
+
+  {% if editor_note %}
+  <section class="intro">
+    <p class="mono">{{ t.note_label }}</p>
+    <p>{{ editor_note }}</p>
+  </section>
+  {% endif %}
+
+  {% include "_stories.html" %}
+
+  {% if n_others %}
+  <p class="more">
+    {# The expander is a link, not a toggle: the URL has to survive a reload
+       and be shareable, which a JavaScript-only disclosure would not. #}
+    <a class="lnk" style="font-size:14px" href="/?lang={{ language }}&amp;all=1{% if tag %}&amp;tag={{ tag }}{% endif %}">
+      {{ t.show_others.format(n=n_others) }}
+    </a>
+    <span class="mono">{{ t.all_summarised }}</span>
+  </p>
+  {% endif %}
+
+  <div class="controls">
+    <form action="/search" method="get">
+      <input type="hidden" name="lang" value="{{ language }}">
+      <input class="field" type="search" name="q" placeholder="{{ t.search_placeholder }}" aria-label="{{ t.search }}">
+      <button class="lnk" type="submit" style="font-size:13px">{{ t.search }}</button>
+    </form>
+  </div>
+
+  {% if tags %}
+  <p class="tags">
+    <a href="/?lang={{ language }}{% if show_all %}&amp;all=1{% endif %}"
+       {% if not tag %}aria-current="true"{% endif %}>{{ t.all_tags }}</a>
+    {% for name, count in tags %}
+    <a href="/?lang={{ language }}&amp;tag={{ name }}{% if show_all %}&amp;all=1{% endif %}"
+       {% if tag == name %}aria-current="true"{% endif %}>{{ name }} {{ count }}</a>
+    {% endfor %}
+  </p>
+  {% endif %}
+
+  <section class="runs">
+    <h2>{{ t.runs_heading }}</h2>
+    <div class="scroll">{% include "_runs_table.html" %}</div>
+  </section>
+
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,22 @@
+{# The story list. Shared by the digest page, the archive and search results,
+   because they are the same list read at three different times. #}
+<ol class="list">
+  {% for story in stories %}
+  <li class="item p{{ story.importance }}">
+    <p class="item__meta mono">
+      {# lang="en" is load-bearing, not decoration. The page is lang="tr", and
+         CSS `text-transform: uppercase` follows the element's language: Turkish
+         maps i to İ, so "OpenAI" renders as "OPENAİ" and "TechCrunch AI" as
+         "TECHCRUNCH Aİ". A source name is a brand, not Turkish prose. #}
+      <span class="src" lang="en">{{ story.source|lower }}</span>
+      {% if story.age %}<span>{{ story.age }}</span>{% endif %}
+    </p>
+    <h2 class="item__title"><a href="{{ story.url }}" target="_blank" rel="noreferrer noopener">{{ story.title_local }}</a></h2>
+    <p class="item__sum">
+      {{ story.summary }}
+      {# "Why it matters" is bold inside the sentence, not a labelled block. #}
+      {% if story.why_it_matters %}<b>{{ story.why_it_matters }}</b>{% endif %}
+    </p>
+  </li>
+  {% endfor %}
+</ol>

@@ -8,7 +8,6 @@ never returns the keys themselves, only whether they are set.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,16 +34,3 @@ async def health(
         "llm_configured": settings.llm_configured,
         "tavily_configured": settings.tavily_configured,
     }
-
-
-@router.get("/", response_class=HTMLResponse)
-async def index() -> str:
-    """Placeholder until M4 replaces it with the digest page."""
-    return (
-        "<!doctype html><meta charset='utf-8'><title>AI News Digest</title>"
-        "<body style='font:14px/1.6 system-ui;max-width:40rem;margin:4rem auto;color:#ddd;"
-        "background:#111'>"
-        "<h1 style='font-size:1.1rem'>AI News Digest</h1>"
-        "<p>Scaffold is up. The digest page lands in M4 &mdash; "
-        "<a href='/health' style='color:#ddd'>/health</a> works now.</p>"
-    )

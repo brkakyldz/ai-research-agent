@@ -56,7 +56,10 @@ extend-exclude = ["*.md", "mockups", "reports"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
-ignore = ["B008"]  # FastAPI Depends() in defaults is the framework's idiom.
+ignore = [
+    "B008",    # FastAPI Depends() in a default argument is the framework's idiom.
+    "RUF001",  # This project writes Turkish; 'ı' and '–' are content, not typos.
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
