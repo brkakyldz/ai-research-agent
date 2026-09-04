@@ -14,3 +14,5 @@ data/
 
 # Editor/agent scratch
 .claude/
+.waltest*/
+scratch/
