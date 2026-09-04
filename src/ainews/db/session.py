@@ -8,6 +8,8 @@ leaves them off by default).
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +24,8 @@ from sqlalchemy.ext.asyncio import (
 
 from ainews.config import Settings, get_settings
 
+log = logging.getLogger(__name__)
+
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
@@ -29,7 +33,24 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 def _apply_pragmas(dbapi_connection, _connection_record) -> None:
     cursor = dbapi_connection.cursor()
     try:
-        cursor.execute("PRAGMA journal_mode=WAL")
+        # WAL needs a shared-memory file next to the database, and some
+        # filesystems cannot provide one - notably a Windows host directory
+        # bind-mounted into a Linux container, where this raises "disk I/O
+        # error" and takes the whole application down at startup. That is a
+        # terrible error message for its cause, so it is caught and named here.
+        # The tool still works without WAL; a reading page can just block behind
+        # a writing digest, which for one reader is a pause, not a failure.
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError as exc:
+            log.warning(
+                "could not enable WAL (%s). The database file is probably on a "
+                "filesystem without shared-memory support, such as a Windows "
+                "directory bind-mounted into a container - use a named Docker "
+                "volume instead (see docs/decisions/0007-named-volume-for-sqlite.md). "
+                "Continuing with the default rollback journal.",
+                exc,
+            )
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA busy_timeout=10000")

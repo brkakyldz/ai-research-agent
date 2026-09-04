@@ -1,7 +1,6 @@
-# Secrets
+# Secrets. The committed template is env.example.template.
 .env
 .env.*
-!.env.example
 
 # Python
 .venv/
@@ -10,7 +9,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Runtime data (SQLite DB + WAL files)
+# Runtime data (SQLite DB, WAL files, checkpoints, backups)
 data/
 
 # Editor/agent scratch

@@ -13,6 +13,7 @@ thing the /runs page could not explain.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -31,6 +32,31 @@ log = logging.getLogger(__name__)
 # is six. The limit is set far above that anyway: it is free insurance against a
 # future node that loops, and the default of 25 is not obviously above six.
 RECURSION_LIMIT = 200
+
+# One digest at a time, whatever started it. SQLite has a single writer (ADR 0003)
+# and the scheduler shares this process (ADR 0004), so a module-level claim is the
+# whole concurrency story - but only if every path takes it. It lives here rather
+# than in the web layer because the 07:00 cron never goes through a route, and two
+# digests over the same candidates means paying the model twice for one day.
+_digest_lock = asyncio.Lock()
+_digest_running: set[str] = set()
+
+
+def digest_in_flight() -> bool:
+    return bool(_digest_running)
+
+
+async def try_claim_digest(token: str) -> bool:
+    """Take the digest slot, or report that someone else holds it."""
+    async with _digest_lock:
+        if _digest_running:
+            return False
+        _digest_running.add(token)
+        return True
+
+
+def release_digest(token: str) -> None:
+    _digest_running.discard(token)
 
 
 async def _open_run(kind: str, language: str) -> str:

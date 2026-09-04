@@ -8,7 +8,9 @@ than at seven in the morning.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -234,26 +236,39 @@ def test_run_now_refuses_without_a_key(client: TestClient, monkeypatch: pytest.M
 
 
 def test_run_now_starts_one_run_and_refuses_a_second(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two presses must not become two runs competing for the same candidates."""
+    """Two presses must not become two runs competing for the same candidates.
+
+    This one builds its own client inside a `with`, unlike the shared fixture.
+    Without the context manager TestClient closes its event loop after every
+    response; that destroys the pending digest task, which runs `_guarded`'s
+    `finally` and releases the claim - so the second press would look free for a
+    reason that has nothing to do with the application.
+    """
     import asyncio
 
     from ainews.web.routes import runs as runs_route
 
     started = 0
 
-    async def _slow(language: str) -> None:
+    async def _never_finishes(language: str) -> None:
+        """Stands in for a two-minute digest, so the claim is still held.
+
+        It deliberately never returns. Sleeping for a fixed time instead would
+        make the assertion a race: `_guarded` releases the claim as soon as this
+        returns, and the second request takes longer to arrive than any sleep
+        short enough to keep the test fast.
+        """
         nonlocal started
         started += 1
-        runs_route._running.add("manual:test")
-        await asyncio.sleep(0.3)
-        runs_route._running.discard("manual:test")
+        await asyncio.Event().wait()
 
-    monkeypatch.setattr(runs_route, "_execute", _slow)
+    monkeypatch.setattr(runs_route, "_execute", _never_finishes)
 
-    first = client.post("/runs/start?lang=tr")
-    second = client.post("/runs/start?lang=tr")
+    with TestClient(create_app(settings)) as client:
+        first = client.post("/runs/start?lang=tr")
+        second = client.post("/runs/start?lang=tr")
 
     assert "çalışıyor" in first.text
     assert "zaten" in second.text
@@ -272,3 +287,56 @@ def test_the_page_loads_no_third_party_assets(client: TestClient, digest: Run) -
 def test_fonts_and_scripts_are_served_locally(client: TestClient) -> None:
     for path in ("/static/theme.css", "/static/fonts.css", "/static/htmx.min.js"):
         assert client.get(path).status_code == 200
+
+
+@pytest.fixture(autouse=True)
+def _no_run_claim_leaks() -> Iterator[None]:
+    """Clear the module-level run claim around every test.
+
+    `_running` lives for the life of the process, and a fire-and-forget task that
+    the test's event loop tears down before it finishes leaves its token behind.
+    The next test then sees a run in flight that does not exist.
+    """
+    from ainews.pipeline import runner
+
+    runner._digest_running.clear()
+    yield
+    runner._digest_running.clear()
+
+
+async def test_two_simultaneous_presses_start_one_run(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard has to hold when both presses are genuinely in flight at once.
+
+    `TestClient` cannot show this: its calls block, so the first task always gets
+    to run before the second request is made. Only two coroutines awaited together
+    reach the window between `create_task` scheduling the task and the task's own
+    first line - the window a fire-and-forget run has to claim its slot before.
+    """
+    import asyncio
+
+    from ainews.pipeline import runner
+    from ainews.web.routes import runs as runs_route
+
+    started: list[str] = []
+
+    async def _fake_digest(language: str | None = None, mode: str | None = None) -> str:
+        started.append(language or "")
+        await asyncio.sleep(0.2)
+        return "fake-run-id"
+
+    monkeypatch.setattr(runner, "run_digest", _fake_digest)
+    request = SimpleNamespace(cookies={}, query_params={})
+
+    first, second = await asyncio.gather(
+        runs_route.start_run(request, lang="tr", settings=settings),  # type: ignore[arg-type]
+        runs_route.start_run(request, lang="tr", settings=settings),  # type: ignore[arg-type]
+    )
+    bodies = {first.body.decode(), second.body.decode()}
+
+    await asyncio.sleep(0.4)
+    assert started == ["tr"], "a second press must not become a second paid run"
+    assert any("hx-get" in b for b in bodies), "one press must start the run"
+    assert any("hx-get" not in b for b in bodies), "the other must be refused as busy"
+    assert not runs_route.is_running(), "the claim must be released when the run ends"

@@ -14,7 +14,12 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      # A named volume, not a bind mount to ./data. WAL needs a shared-memory
+      # file beside the database, and a Windows host directory mounted into a
+      # Linux container cannot provide one: `PRAGMA journal_mode=WAL` fails with
+      # "disk I/O error" and the app never starts. ADR 0007.
+      # To read the database from the host: docker cp ainews:/app/data/app.db .
+      - ainews-data:/app/data
     healthcheck:
       test:
         - CMD
@@ -25,3 +30,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+volumes:
+  ainews-data:

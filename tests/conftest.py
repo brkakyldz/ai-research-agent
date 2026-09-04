@@ -35,6 +35,17 @@ def _isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> It
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _release_the_digest_claim() -> Iterator[None]:
+    """The digest claim is module-level state, so a test that takes it and fails
+    would otherwise make every later test think a run is in flight."""
+    from ainews.pipeline import runner
+
+    runner._digest_running.clear()
+    yield
+    runner._digest_running.clear()
+
+
 @pytest.fixture
 def settings() -> Settings:
     return get_settings()

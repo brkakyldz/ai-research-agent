@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import Run, db_session
+from ainews.pipeline.runner import digest_in_flight, release_digest, try_claim_digest
 from ainews.web import queries
 from ainews.web.i18n import strings
 from ainews.web.views import (
@@ -35,19 +36,17 @@ from ainews.web.views import (
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# One writer at a time (ADR 0003), and one scheduler in one process (ADR 0004),
-# so a module-level flag is the whole concurrency story. A second press while a
-# run is in flight is refused, not queued: the second run would find no
-# candidates anyway, because the first has already claimed them.
-_run_lock = asyncio.Lock()
-_running: set[str] = set()
+# The claim itself lives in `pipeline.runner`, because the 07:00 cron never goes
+# through a route and has to take the same one. A second press while a run is in
+# flight is refused, not queued.
 # The event loop keeps only a weak reference to a task, so a fire-and-forget
 # digest can be garbage-collected mid-run. Holding it here is what stops that.
 _tasks: set[asyncio.Task[None]] = set()
 
 
 def is_running() -> bool:
-    return bool(_running)
+
+    return digest_in_flight()
 
 
 async def _execute(language: str) -> None:
@@ -61,10 +60,11 @@ async def _execute(language: str) -> None:
 
 async def _guarded(language: str, token: str) -> None:
     """Hold the claim for exactly as long as the run lasts, however it ends."""
+
     try:
         await _execute(language)
     finally:
-        _running.discard(token)
+        release_digest(token)
 
 
 @router.get("/runs", response_class=HTMLResponse)
@@ -99,19 +99,16 @@ async def start_run(
     if not settings.llm_configured:
         return HTMLResponse(f'<span class="bad">{t["no_key"]}</span>')
 
-    async with _run_lock:
-        if is_running():
-            return HTMLResponse(t["busy"])
-        # Claim the slot here, inside the lock, rather than inside the task.
-        # `create_task` only schedules; the task's first line does not run until
-        # this handler yields, so a second press arriving in that window would
-        # find `_running` still empty and start a second - paid - digest.
-        token = f"manual:{language}"
-        _running.add(token)
-        # Fire and forget: the caller gets an answer now, the run finishes later.
-        task = asyncio.create_task(_guarded(language, token))
-        _tasks.add(task)
-        task.add_done_callback(_tasks.discard)
+    # Claim before creating the task, not inside it: `create_task` only schedules,
+    # so a second press arriving before the task's first line would find the claim
+    # still free and start a second - paid - digest.
+    token = f"manual:{language}"
+    if not await try_claim_digest(token):
+        return HTMLResponse(t["busy"])
+    # Fire and forget: the caller gets an answer now, the run finishes later.
+    task = asyncio.create_task(_guarded(language, token))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
 
     return HTMLResponse(
         f'<span hx-get="/runs/status?lang={language}" hx-trigger="every 3s" '

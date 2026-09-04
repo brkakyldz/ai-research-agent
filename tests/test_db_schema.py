@@ -83,3 +83,38 @@ async def test_fts_index_follows_summary_writes(session: AsyncSession) -> None:
         )
     ).all()
     assert after == []
+
+
+def test_a_filesystem_without_shared_memory_degrades_instead_of_crashing() -> None:
+    """A Windows directory bind-mounted into a Linux container cannot do WAL.
+
+    Left unhandled, `PRAGMA journal_mode=WAL` raises "disk I/O error" inside a
+    connect listener, so the application dies at startup with a message naming
+    neither the cause nor the fix (ADR 0007). The pragma has to be survivable,
+    and the pragmas after it still have to be applied - foreign keys are a
+    correctness feature, not a performance one.
+    """
+    import sqlite3
+
+    from ainews.db.session import _apply_pragmas
+
+    executed: list[str] = []
+
+    class Cursor:
+        def execute(self, sql: str) -> None:
+            executed.append(sql)
+            if "journal_mode=WAL" in sql:
+                raise sqlite3.OperationalError("disk I/O error")
+
+        def close(self) -> None:
+            pass
+
+    class Connection:
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+    _apply_pragmas(Connection(), None)  # must not raise
+
+    assert any("journal_mode=WAL" in sql for sql in executed)
+    assert any("foreign_keys=ON" in sql for sql in executed)
+    assert any("busy_timeout" in sql for sql in executed)

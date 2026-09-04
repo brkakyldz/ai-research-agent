@@ -43,16 +43,24 @@ async def _collect_job() -> None:
 
 
 async def _digest_job() -> None:
-    from ainews.pipeline.runner import run_digest
+    from ainews.pipeline.runner import release_digest, run_digest, try_claim_digest
 
     settings = get_settings()
     if not settings.llm_configured:
         log.warning("skipping the scheduled digest: OPENAI_API_KEY is not set")
         return
+    # `max_instances=1` only stops this job overlapping itself. It knows nothing
+    # about a "Run now" press at 06:59, which is still in flight at 07:00 and is
+    # summarising exactly the articles this run would summarise again.
+    if not await try_claim_digest("scheduled"):
+        log.warning("skipping the scheduled digest: a run is already in flight")
+        return
     try:
         await run_digest(mode="digest")
     except Exception:
         log.exception("scheduled digest failed")
+    finally:
+        release_digest("scheduled")
 
 
 def build_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
