@@ -1,0 +1,93 @@
+# Seed feed list. Loaded into the `sources` table on first start and re-synced on
+# every start: new entries are inserted, removed entries are left alone (a feed
+# you deleted here but already collected from keeps its articles). Everything an
+# operator changes afterwards - enabled, weight - lives in the database and in
+# the /sources page, and is never overwritten from this file.
+#
+# `weight` (0.5-2.0) does two jobs: it breaks ranking ties, and it decides which
+# items are worth spending a Tavily credit on. Primary sources - the lab that did
+# the thing - outrank commentary about it.
+#
+# No arXiv, deliberately (PLAN.md): ~300 items/day would dominate ranking, and
+# the papers that matter reach the digest through Hacker News, Hugging Face and
+# Simon Willison anyway.
+#
+# Verified live on 2026-09-04; see reports/research/2026-09-04_ai-news-newsletter-agent.md.
+
+- name: OpenAI
+  url: https://openai.com/news/rss.xml
+  weight: 2.0
+
+- name: Google DeepMind
+  url: https://deepmind.google/blog/rss.xml
+  weight: 2.0
+
+- name: Google AI
+  url: https://blog.google/technology/ai/rss/
+  weight: 1.6
+
+- name: Microsoft Research
+  url: https://www.microsoft.com/en-us/research/feed/
+  weight: 1.4
+
+- name: Hugging Face
+  url: https://huggingface.co/blog/feed.xml
+  weight: 1.6
+
+- name: LangChain
+  url: https://www.langchain.com/blog/rss.xml
+  weight: 1.2
+
+# Community mirror: Anthropic publishes no official feed (404 on 2026-09-04).
+# Expect this one to be the first to rot; /sources will show it when it does.
+- name: Anthropic (community mirror)
+  url: https://rsshub.bestblogs.dev/anthropic/news
+  weight: 1.8
+
+# Aggregators and commentary.
+- name: Hacker News (100+ points)
+  url: https://hnrss.org/newest?points=100
+  weight: 1.1
+
+- name: Simon Willison
+  url: https://simonwillison.net/atom/everything/
+  weight: 1.5
+
+- name: Import AI
+  url: https://importai.substack.com/feed
+  weight: 1.3
+
+- name: Last Week in AI
+  url: https://lastweekin.ai/feed
+  weight: 1.0
+
+# The beehiiv address in the research report 404s; the site's own feed works.
+- name: Ben's Bites
+  url: https://www.bensbites.com/feed
+  weight: 0.9
+
+# Trade press. Higher volume, lower signal per item, so a lower weight.
+- name: TechCrunch AI
+  url: https://techcrunch.com/category/artificial-intelligence/feed/
+  weight: 1.0
+
+- name: VentureBeat AI
+  url: https://venturebeat.com/category/ai/feed/
+  weight: 0.9
+
+- name: MIT Technology Review - AI
+  url: https://www.technologyreview.com/topic/artificial-intelligence/feed
+  weight: 1.2
+
+- name: The Verge - AI
+  url: https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+  weight: 1.0
+
+- name: Ars Technica - AI
+  url: https://arstechnica.com/ai/feed/
+  weight: 1.0
+
+# Rate-limits aggressively without a browser User-Agent, and sometimes anyway.
+- name: r/LocalLLaMA
+  url: https://www.reddit.com/r/LocalLLaMA/.rss
+  weight: 0.8

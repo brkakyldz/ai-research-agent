@@ -1,7 +1,9 @@
-"""Typed settings, loaded once from the environment (and a dotenv file in development).
+"""Typed settings, read once from the environment and cached.
 
 Every knob the operator is expected to touch lives here and in the environment
-template; nothing else in the codebase reads `os.environ` directly.
+template; nothing else in the codebase reads `os.environ`. One door, for one
+reason: "where did this setting come from" should always be answered by a single
+file.
 """
 
 from __future__ import annotations
@@ -31,9 +33,12 @@ class Settings(BaseSettings):
 
     # -- LLM ------------------------------------------------------------------
     openai_model: str = "gpt-5.6-luna"
+    # Its own knob: if Turkish quality disappoints, only this node moves up to
+    # terra and ranking stays on luna (ADR 0001).
     openai_model_summarize: str = "gpt-5.6-luna"
     openai_timeout_seconds: int = 60
     openai_max_retries: int = 5
+    # Send fan-out batch size; keeps concurrent requests under the rate limit.
     summarize_batch_size: int = Field(default=10, ge=1, le=50)
 
     # -- Digest ---------------------------------------------------------------
@@ -59,7 +64,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
 
     # -- Web ------------------------------------------------------------------
-    host: str = "0.0.0.0"  # Yerel arac: baglanti konteyner icinde, disari acilan port compose'da.
+    host: str = "0.0.0.0"  # Local tool: bound inside the container, port published by compose.
     port: int = 8000
     log_level: str = "INFO"
     environment: Literal["development", "production"] = "development"
@@ -67,7 +72,7 @@ class Settings(BaseSettings):
     @field_validator("openai_api_key", "tavily_api_key", mode="before")
     @classmethod
     def _blank_placeholders(cls, v: object) -> object:
-        """Treat the template's `xxxx` placeholders as "not configured"."""
+        """A key still holding the template's `xxxx` is not a configured key."""
         if isinstance(v, str) and ("xxxx" in v or v.strip() == ""):
             return ""
         return v

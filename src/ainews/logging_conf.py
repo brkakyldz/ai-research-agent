@@ -1,7 +1,8 @@
 """One place that decides what logs look like.
 
 Plain text, not JSON: this runs on one machine and is read by one person in a
-terminal, so a line a human can scan beats a line a log shipper can parse.
+terminal, so a line a human can scan beats a line a log shipper can parse. There
+is no log shipper here.
 """
 
 from __future__ import annotations
