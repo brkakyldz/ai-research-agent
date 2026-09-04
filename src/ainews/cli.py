@@ -55,7 +55,9 @@ async def _sources() -> int:
     async with session_scope() as session:
         rows = (await session.execute(select(Source).order_by(Source.name))).scalars()
         for source in rows:
-            mark = " " if source.enabled else "x"
+            # Checkbox reading: [x] is on. The inverse looked like every feed
+            # was disabled.
+            mark = "x" if source.enabled else " "
             print(f"[{mark}] {source.name:38} {source.last_status or '-'}")
     return 0
 
