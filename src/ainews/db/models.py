@@ -3,9 +3,10 @@
 Four tables carry the pipeline: `sources` (what to poll), `articles` (what came
 back), `summaries` (what the LLM made of it) and `runs` (what each execution did
 and cost). A fifth, `daily_counters`, is the durable side of the Tavily credit
-cap - it has to survive a restart, so it cannot live in memory. A sixth,
-`verdicts`, is the reader's own call on a summary - the ground truth the
-evaluation layer is calibrated against (PLAN-EVALS E2).
+cap - it has to survive a restart, so it cannot live in memory. Two more belong
+to the evaluation layer: `verdicts`, the reader's own call on a summary, and
+`eval_results`, what the sampled judge and the rank probe measured and what it
+cost (PLAN-EVALS E2, E3).
 
 An FTS5 virtual table mirrors `summaries` for the dashboard's search box; it is
 created and kept in sync by triggers in `ainews.db.schema`, not by the ORM.
@@ -208,6 +209,38 @@ class Verdict(Base):
     summary: Mapped[Summary] = relationship()
 
     __table_args__ = (CheckConstraint("verdict in ('ok', 'wrong')", name="ck_verdicts_verdict"),)
+
+
+class EvalResult(Base):
+    """One measurement that cost money: a judged summary, or a rank probe.
+
+    Eval spend is on the record the same way product spend is, so
+    `ainews eval report` can total the two side by side. `summary_id` is null
+    for a `rank_stability` row, which is about a run rather than a summary.
+    `passed` is null when the judge answered but could not be parsed - recorded,
+    not raised, so a bad afternoon at the API is a row and not a traceback.
+    """
+
+    __tablename__ = "eval_results"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"))
+    summary_id: Mapped[int | None] = mapped_column(ForeignKey("summaries.id"), default=None)
+    kind: Mapped[str] = mapped_column(String(20))
+    passed: Mapped[bool | None] = mapped_column(default=None)
+    # The unsupported claim for a grounding row; tau and overlap as JSON for a
+    # rank-stability row.
+    detail: Mapped[str | None] = mapped_column(Text, default=None)
+    model: Mapped[str] = mapped_column(String(60), default="")
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        CheckConstraint("kind in ('grounding', 'rank_stability')", name="ck_eval_results_kind"),
+        Index("ix_eval_results_run_kind", "run_id", "kind"),
+    )
 
 
 class DailyCounter(Base):

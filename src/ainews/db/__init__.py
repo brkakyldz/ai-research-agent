@@ -1,6 +1,15 @@
 """Persistence layer: models, engine/session wiring and schema creation."""
 
-from ainews.db.models import Article, Base, DailyCounter, Run, Source, Summary, Verdict
+from ainews.db.models import (
+    Article,
+    Base,
+    DailyCounter,
+    EvalResult,
+    Run,
+    Source,
+    Summary,
+    Verdict,
+)
 from ainews.db.schema import init_db
 from ainews.db.session import (
     create_engine,
@@ -15,6 +24,7 @@ __all__ = [
     "Article",
     "Base",
     "DailyCounter",
+    "EvalResult",
     "Run",
     "Source",
     "Summary",

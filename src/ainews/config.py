@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Its own knob: if Turkish quality disappoints, only this node moves up to
     # terra and ranking stays on luna (ADR 0001).
     openai_model_summarize: str = "gpt-5.6-luna"
+    # The grounding judge (`ainews eval judge`), one tier up from the model it
+    # checks: a judge no stronger than the summariser mostly agrees with it.
+    # Never used by the pipeline; sampled, so ~$2/month at one judged run a day.
+    openai_model_judge: str = "gpt-5.6-terra"
     openai_timeout_seconds: int = 60
     openai_max_retries: int = 5
     # Send fan-out batch size; keeps concurrent requests under the rate limit.

@@ -94,3 +94,11 @@ def summarizer(settings: Settings | None = None) -> ChatOpenAI:
 def ranker(settings: Settings | None = None) -> ChatOpenAI:
     settings = settings or get_settings()
     return make_llm(settings.openai_model, settings, temperature=0.1)
+
+
+def judge(settings: Settings | None = None) -> ChatOpenAI:
+    """The grounding judge (`ainews eval judge`): a stronger tier of the same
+    vendor, at temperature 0 so a re-run judges the same way. Never called by
+    the pipeline - only the evals layer constructs it (ADR 0019)."""
+    settings = settings or get_settings()
+    return make_llm(settings.openai_model_judge, settings, temperature=0)

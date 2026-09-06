@@ -16,7 +16,10 @@ from typing import Literal
 
 PROMPT_DIR = Path(__file__).resolve().parent
 
-PromptName = Literal["summarize", "rank"]
+# `judge_grounding` exists in English only: the judge reads an English body and
+# a Turkish or English summary, and the instruction language is the judge's,
+# not the summary's (PLAN-EVALS E3.2).
+PromptName = Literal["summarize", "rank", "judge_grounding"]
 
 
 @lru_cache(maxsize=8)
