@@ -300,8 +300,7 @@ GOLDEN_PAIRS = [
         True,
     ),
     (
-        "Sam Altman apologizes for &#8216;messy&#8217; GPT-6 Astra "
-        "rollout ",
+        "Sam Altman apologizes for &#8216;messy&#8217; GPT-6 Astra rollout "
         "that’s locked out paying users",
         "Sam Altman apologizes for ‘messy’ GPT-6 Astra rollout that’s locked out paying users",
         True,

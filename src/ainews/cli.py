@@ -14,6 +14,7 @@ import sys
 from ainews.config import get_settings
 from ainews.db import get_engine, init_db
 from ainews.db.session import dispose_engine, session_scope
+from ainews.evals.cli import add_eval_parser, run_eval
 from ainews.logging_conf import configure_logging
 from ainews.sources.seed import sync_sources
 
@@ -98,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("sources", help="list the seeded feeds and their last status")
     sub.add_parser("init", help="create the database and seed the feed list")
     sub.add_parser("serve", help="run the dashboard on HOST:PORT from the environment")
+    add_eval_parser(sub)
 
     args = parser.parse_args(argv)
     configure_logging(get_settings().log_level)
@@ -113,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
                 return await _digest(args.language, args.mode)
             if args.command == "sources":
                 return await _sources()
+            if args.command == "eval":
+                return await run_eval(args)
             await _prepare()
             print(f"database ready at {get_settings().sqlite_path}")
             return 0
