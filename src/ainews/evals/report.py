@@ -326,5 +326,11 @@ def append_report(text: str, path: Path | None = None) -> Path:
     existing = path.read_text(encoding="utf-8") if path.exists() else HEADER
     if not existing.endswith("\n"):
         existing += "\n"
-    path.write_text(existing + "\n" + text, encoding="utf-8", newline="\n")
+    # This is the one file here that is never edited, so a rewrite that dies
+    # halfway would take every earlier section with it. Write beside it and
+    # rename: `replace` is atomic, so the record is either the old section
+    # list or the new one, never a truncated prefix of either.
+    tmp = path.parent / (path.name + ".tmp")
+    tmp.write_text(existing + "\n" + text, encoding="utf-8", newline="\n")
+    tmp.replace(path)
     return path

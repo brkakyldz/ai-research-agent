@@ -41,6 +41,10 @@ dev = [
 # Screenshots only. Kept out of `dev` so a clone that just wants to run the
 # tests does not download a browser.
 docs = ["playwright>=1.62"]
+obs = [
+    "arize-phoenix-otel>=0.6",
+    "openinference-instrumentation-langchain>=0.1",
+]
 
 [build-system]
 requires = ["hatchling"]

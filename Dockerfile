@@ -20,12 +20,12 @@ WORKDIR /app
 # edit to src/ rebuilds in seconds.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --group obs
 
 COPY src/ ./src/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --group obs
 
 # The database lives on a mounted volume; the image ships none.
 RUN mkdir -p /app/data

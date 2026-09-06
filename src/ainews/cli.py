@@ -16,6 +16,11 @@ from ainews.db import get_engine, init_db
 from ainews.db.session import dispose_engine, session_scope
 from ainews.evals.cli import add_eval_parser, run_eval
 from ainews.logging_conf import configure_logging
+from ainews.observability import enable_tracing
+
+# `pricing` and not `llm`: the model *names* are needed to build the parser, and
+# `llm` costs 1.3 seconds of langchain that `ainews sources` has no use for.
+from ainews.pipeline.pricing import MODEL_NAMES
 from ainews.sources.seed import sync_sources
 
 
@@ -34,7 +39,12 @@ async def _collect() -> int:
     return 0
 
 
-async def _digest(language: str | None, mode: str) -> int:
+async def _digest(
+    language: str | None,
+    mode: str,
+    model_summarize: str | None = None,
+    model_rank: str | None = None,
+) -> int:
     from ainews.pipeline.runner import run_digest
 
     settings = get_settings()
@@ -42,7 +52,12 @@ async def _digest(language: str | None, mode: str) -> int:
         print("OPENAI_API_KEY is not set; a digest needs it.", file=sys.stderr)
         return 2
     await _prepare()
-    run_id = await run_digest(language=language, mode=mode)  # type: ignore[arg-type]
+    run_id = await run_digest(
+        language=language,  # type: ignore[arg-type]
+        mode=mode,  # type: ignore[arg-type]
+        model_summarize=model_summarize,
+        model_rank=model_rank,
+    )
     print(f"digest run {run_id} finished")
     return 0
 
@@ -81,7 +96,23 @@ def _serve() -> int:
     return 0
 
 
+def _utf8_stdio() -> None:
+    """Print UTF-8 whatever the console's code page is.
+
+    Windows hands a Python process the console's ANSI code page - cp1254 on a
+    Turkish install - and `eval report` renders a table row that starts with an
+    arrow no such page can encode. The report died on `print` before it reached
+    `append_report`, so the numbers were computed, paid for, and thrown away.
+    The file itself was never at fault: it is written UTF-8 either way.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:  # a captured or wrapped stream may not have it
+            reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_stdio()
     parser = argparse.ArgumentParser(prog="ainews", description="AI news digest agent")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -95,6 +126,21 @@ def main(argv: list[str] | None = None) -> int:
         default="manual",
         help="'manual' is what the dashboard button writes; 'digest' is the same work, labelled",
     )
+    # The same two choices the confirmation on /runs offers (ADR 0020), so a
+    # terminal run and a press can be made identical - which is what makes the
+    # dashboard reproducible from a shell rather than merely similar.
+    digest.add_argument(
+        "--model-summarize",
+        choices=MODEL_NAMES,
+        default=None,
+        help="model for the per-article summaries (default: OPENAI_MODEL_SUMMARIZE)",
+    )
+    digest.add_argument(
+        "--model-rank",
+        choices=MODEL_NAMES,
+        default=None,
+        help="model for the single ranking call (default: OPENAI_MODEL)",
+    )
 
     sub.add_parser("sources", help="list the seeded feeds and their last status")
     sub.add_parser("init", help="create the database and seed the feed list")
@@ -103,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     configure_logging(get_settings().log_level)
+    enable_tracing()
 
     if args.command == "serve":
         return _serve()
@@ -112,7 +159,9 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "collect":
                 return await _collect()
             if args.command == "digest":
-                return await _digest(args.language, args.mode)
+                return await _digest(
+                    args.language, args.mode, args.model_summarize, args.model_rank
+                )
             if args.command == "sources":
                 return await _sources()
             if args.command == "eval":

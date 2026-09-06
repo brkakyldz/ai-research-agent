@@ -110,6 +110,14 @@ class PipelineState(TypedDict, total=False):
     run_id: str
     language: Language
     mode: RunMode
+    # Which model each paid node runs, decided at the press or on the command
+    # line and carried here rather than read from settings inside the node
+    # (ADR 0020). In the state and not in a module global because two of these
+    # nodes run a hundred branches wide: a global would be one value for a
+    # process, and this has to be one value for a *run*. `persist` prices the
+    # run off these two names, so the run row cannot disagree with what ran.
+    model_summarize: str
+    model_rank: str
     candidate_ids: list[int]
     summaries: Annotated[list[SummaryPayload], operator.add]
     ranked: list[RankedItem]
@@ -119,9 +127,15 @@ class PipelineState(TypedDict, total=False):
     n_new: int
 
 
-class SummarizeTask(TypedDict):
-    """Payload of a single `Send` into the summarize node."""
+class SummarizeTask(TypedDict, total=False):
+    """Payload of a single `Send` into the summarize node.
+
+    `model` is optional so a checkpoint written before ADR 0020 can still be
+    resumed: the node falls back to the configured summariser when the key is
+    absent, which is what that run was using anyway.
+    """
 
     run_id: str
     language: Language
     article_id: int
+    model: str

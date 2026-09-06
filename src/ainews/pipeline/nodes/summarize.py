@@ -70,7 +70,9 @@ async def summarize_article(
         )
 
     try:
-        model = summarizer(settings).with_structured_output(ArticleSummary, include_raw=True)
+        model = summarizer(settings, state.get("model")).with_structured_output(
+            ArticleSummary, include_raw=True
+        )
         response = await model.ainvoke(prompt)
     except Exception as exc:
         log.warning("summarise failed for article %d: %s", article_id, exc)

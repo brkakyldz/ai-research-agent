@@ -148,7 +148,7 @@ async def post_verdict(
     request: Request,
     summary_id: int = Form(...),
     verdict: str = Form(...),
-    note: str = Form(""),
+    note: str | None = Form(None),
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     """The reader's call on one summary (PLAN-EVALS E2.3).
@@ -168,7 +168,18 @@ async def post_verdict(
     row = (
         await session.execute(select(Verdict).where(Verdict.summary_id == summary_id))
     ).scalar_one_or_none()
-    cleaned = note.strip() or None if verdict == "wrong" else None
+    # Three cases, not two. "right" drops the note, because "right, and here is
+    # why" is not a thing a reader writes. A submitted note - even an empty one -
+    # is what the reader now wants. But the two words post no `note` field at
+    # all, so a reader pressing "wrong" a second time on a story they have
+    # already explained used to silently erase the explanation, which is the one
+    # row E5 rewrites the judge prompt from.
+    if verdict != "wrong":
+        cleaned = None
+    elif note is None:
+        cleaned = row.note if row is not None else None
+    else:
+        cleaned = note.strip() or None
     if row is None:
         session.add(Verdict(summary_id=summary_id, verdict=verdict, note=cleaned))
     else:

@@ -85,9 +85,16 @@ async def persist_run(
     run.n_summarized = len(by_article)
     run.tokens_in = tokens_in
     run.tokens_out = tokens_out
-    run.est_cost_usd = estimate_cost(
-        settings.openai_model_summarize, summarize_in, summarize_out
-    ) + estimate_cost(settings.openai_model, rank_in, rank_out)
+    # Priced at the models this run actually used, which since ADR 0020 is a
+    # choice made at the press and may be nothing like the environment's
+    # default. Reading `settings` here would have re-introduced the bug fixed
+    # above in a worse form: the two knobs would agree with each other and both
+    # disagree with the run.
+    model_summarize = state.get("model_summarize") or settings.openai_model_summarize
+    model_rank = state.get("model_rank") or settings.openai_model
+    run.est_cost_usd = estimate_cost(model_summarize, summarize_in, summarize_out) + estimate_cost(
+        model_rank, rank_in, rank_out
+    )
     run.editor_note = state.get("editor_note") or None
     run.error = "\n".join(errors[:MAX_STORED_ERRORS]) or None
     # "partial" is a real outcome, not a failure: a feed 404ed or three articles

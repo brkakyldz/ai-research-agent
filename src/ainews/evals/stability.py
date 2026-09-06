@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import Article, EvalResult, Run, Source, Summary
-from ainews.pipeline.llm import estimate_cost
+from ainews.pipeline.llm import estimate_cost, resolve_model
 from ainews.pipeline.nodes.rank import FALLBACK_NOTE, rank_summaries
 from ainews.pipeline.state import SummaryPayload
 
@@ -68,6 +68,11 @@ def mean_pairwise(orders: list[list[int]], measure) -> float:  # type: ignore[no
 class StabilityReport:
     run_id: str
     times: int
+    # Which model was probed. On the report and not only on the row it writes,
+    # because the number this produces - tau - is meaningless without it: two
+    # tiers disagreeing about a day is not the same finding as one tier
+    # disagreeing with itself.
+    model: str = ""
     orders: list[list[int]] = field(default_factory=list)
     tau: float = 1.0
     jaccard: float = 1.0
@@ -130,10 +135,16 @@ async def rank_stability(
     times: int = DEFAULT_TIMES,
     seed: int = 0,
     settings: Settings | None = None,
+    model: str | None = None,
 ) -> StabilityReport:
     settings = settings or get_settings()
+    # The probe measures a *model's* agreement with itself, so the model has to
+    # be nameable (ADR 0020): asking whether luna ranks stably is a different
+    # question from asking it of terra, and the answer is filed against whichever
+    # one ran.
+    model = resolve_model(model, settings.openai_model)
     payloads, meta, language = await load_table(session, run_id)
-    report = StabilityReport(run_id=run_id, times=times)
+    report = StabilityReport(run_id=run_id, times=times, model=model)
     if not payloads:
         return report
 
@@ -141,7 +152,7 @@ async def rank_stability(
         shuffled = list(payloads)
         random.Random(seed + i).shuffle(shuffled)
         ordered, note, tokens_in, tokens_out = await rank_summaries(
-            shuffled, meta, language, settings
+            shuffled, meta, language, settings, model=model
         )
         report.orders.append(ordered)
         report.tokens_in += tokens_in
@@ -154,7 +165,7 @@ async def rank_stability(
 
     report.tau = mean_pairwise(report.orders, kendall_tau)
     report.jaccard = mean_pairwise(report.orders, jaccard)
-    report.est_cost_usd = estimate_cost(settings.openai_model, report.tokens_in, report.tokens_out)
+    report.est_cost_usd = estimate_cost(model, report.tokens_in, report.tokens_out)
 
     session.add(
         EvalResult(
@@ -163,7 +174,7 @@ async def rank_stability(
             kind="rank_stability",
             passed=None if report.n_fallback else report.tau >= 0.6,
             detail=report.detail(),
-            model=settings.openai_model,
+            model=model,
             tokens_in=report.tokens_in,
             tokens_out=report.tokens_out,
             est_cost_usd=report.est_cost_usd,

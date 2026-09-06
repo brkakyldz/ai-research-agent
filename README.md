@@ -99,7 +99,18 @@ The CLI is the same code the feed poll and the dashboard's button call:
 uv run ainews collect     # poll the feeds, no LLM, no cost
 uv run ainews digest      # the full pipeline
 uv run ainews sources     # what is being polled and what it last said
+
+# Which model does the work is an argument, not an environment edit and a
+# restart (ADR 0020). The OPENAI_MODEL* variables are the defaults these
+# fall back to.
+uv run ainews digest --model-summarize gpt-5.6-terra --model-rank gpt-5.6-luna
 ```
+
+The dashboard asks the same two questions at the press: the confirmation on
+`/runs` carries a model for the summariser and one for the ranker, with the
+price per million tokens for the pair drawn under them. The tiers differ by up
+to fifty times, so the number is on screen before the button is, not afterwards
+in a billing dashboard.
 
 ## The pages
 
@@ -161,6 +172,7 @@ failed run. `DESIGN.md` lists everything that was deleted and why.
 | [0007](docs/decisions/0007-named-volume-for-sqlite.md) | A named volume for the container's database |
 | [0017](docs/decisions/0017-the-language-switch-stops-choosing-the-content.md) | The switch translates the interface; the press chooses the bulletin's language |
 | [0019](docs/decisions/0019-evaluation-is-a-sibling-command-not-a-test.md) | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth |
+| [0018](docs/decisions/0018-phoenix-behind-a-dev-profile.md) | Per-call tracing in a local Phoenix, behind a dev profile |
 
 ## Known limits
 
@@ -195,7 +207,7 @@ failed run. `DESIGN.md` lists everything that was deleted and why.
 
 ```bash
 uv sync
-uv run pytest          # 295 tests, no API key needed, no network calls
+uv run pytest          # 296 tests, no API key needed, no network calls
 uv run ruff check .
 uv run pre-commit install
 ```
@@ -203,6 +215,34 @@ uv run pre-commit install
 Tests use a fake model and `respx` for HTTP, so the whole suite runs offline in
 about six seconds. `langgraph.json` is checked in for `langgraph dev` if you want
 to step through the graph in Studio.
+
+### Looking inside a run
+
+The digest stores what the model produced, not what it was given. When a summary
+is wrong, that difference is the whole question: a prompt that was fine and a
+model that drifted needs a different fix from an extractor that handed the model
+a cookie banner. Tracing makes the call itself visible - the exact prompt, the
+raw response, the duration and the token count, with the graph's nodes around
+them.
+
+It is off by default and is not part of the product. To turn it on, set
+`PHOENIX_ENABLED=true` in your environment file and start the extra container:
+
+```bash
+docker compose --profile dev up -d
+```
+
+Then open <http://localhost:6006> and run a digest from `/runs`. Without the
+profile flag, `docker compose up` starts one container as before and the running
+app is unchanged. ADR 0018 says why this is a development instrument rather than
+a page in the dashboard.
+
+To trace a run started from the terminal instead of the container:
+
+```bash
+uv sync --group obs
+PHOENIX_ENABLED=true uv run ainews digest
+```
 
 ### Evaluation
 
@@ -215,6 +255,7 @@ commands that spend money say so and refuse above a cap.
 uv run ainews eval record --run latest        # a run -> tests/fixtures/runs/<date>_<lang>.json, no key
 uv run ainews eval judge --run latest         # 12 sampled summaries on the judge tier, ~$0.05
 uv run ainews eval rank-stability --run latest  # 3 shuffled rank calls, Kendall tau, ~$0.01
+uv run ainews eval judge --run latest --model gpt-5.6-luna   # or judge on another tier
 uv run ainews eval report                     # every number, appended to docs/evals.md
 ```
 

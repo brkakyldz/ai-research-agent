@@ -60,6 +60,7 @@ async def rank_summaries(
     meta: dict[int, tuple[str, float]],
     language: str,
     settings: Settings | None = None,
+    model: str | None = None,
 ) -> tuple[list[int], str, int, int]:
     """Return (ordered article ids, editor's note, tokens in, tokens out)."""
     settings = settings or get_settings()
@@ -74,8 +75,8 @@ async def rank_summaries(
     )
 
     try:
-        model = ranker(settings).with_structured_output(RankedDigest, include_raw=True)
-        response = await model.ainvoke(prompt)
+        client = ranker(settings, model).with_structured_output(RankedDigest, include_raw=True)
+        response = await client.ainvoke(prompt)
         parsed = response.get("parsed") if isinstance(response, dict) else None
         if parsed is None:
             raise ValueError("ranker returned unparsable output")

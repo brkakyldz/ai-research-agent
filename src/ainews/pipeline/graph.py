@@ -74,6 +74,10 @@ def fan_out_summaries(state: PipelineState) -> list[Send] | str:
     candidate_ids = state.get("candidate_ids") or []
     if not candidate_ids:
         return "persist"
+    # The model rides on every `Send` rather than being read inside the node:
+    # the branches are the run, and a run has to be summarised by one model even
+    # if the environment changes halfway through it.
+    model = state.get("model_summarize")
     return [
         Send(
             "summarize",
@@ -81,6 +85,7 @@ def fan_out_summaries(state: PipelineState) -> list[Send] | str:
                 "run_id": state["run_id"],
                 "language": state["language"],
                 "article_id": article_id,
+                "model": model,
             },
         )
         for article_id in candidate_ids
@@ -102,7 +107,9 @@ async def rank_node(state: PipelineState) -> PipelineState:
                 source.weight if source else 1.0,
             )
 
-    ordered, note, tokens_in, tokens_out = await rank_summaries(summaries, meta, state["language"])
+    ordered, note, tokens_in, tokens_out = await rank_summaries(
+        summaries, meta, state["language"], model=state.get("model_rank")
+    )
     return {
         "ranked": [{"article_id": aid, "rank": i} for i, aid in enumerate(ordered, start=1)],
         "editor_note": note,

@@ -17,25 +17,66 @@
   <p class="act__c">{{ t.confirm_cost.format(c=last_cost|money) }}</p>
   {%- endif %}
 
-  {# The one choice the press carries, and the only place in the app where a
-     language decision costs money. It is deliberately not the bar's TR/EN
-     switch: that one says what the buttons are written in, this one says what
-     the model will write (ADR 0017). Same two-slot shape as the switch, because
-     it is the same kind of question - both states drawn, the current one marked
-     - and each slot re-renders the question with the other `out=`, so choosing
-     is a swap rather than client state. It starts on the page's language,
-     because that is what a reader pressing here almost always wants. #}
-  <div class="act__l">
+  {# The three choices the press carries, in one grid so their labels share a
+     column and their controls start on one edge. They were three separate rows
+     first and the ragged left edge of the tracks read as three unrelated
+     controls rather than one question with three parts.
+
+     The language is the only place in the app where a language decision costs
+     money. It is deliberately not the bar's TR/EN switch: that one says what
+     the buttons are written in, this one says what the model will write
+     (ADR 0017). It starts on the page's language, because that is what a reader
+     pressing here almost always wants.
+
+     The two model rows are the same kind of question and the one carrying a
+     ten- to fifty-fold price (ADR 0020). Two rows and not one: the summariser
+     is the ninety-odd calls and the language risk, the ranker is a single call
+     over the whole day, and ADR 0001 split the two knobs precisely so they
+     could move apart. Slots run cheapest-first, so the default sits on the left
+     and an expensive tier is a reach to the right rather than a neighbour.
+
+     Every slot is an `hx-get` of this same fragment with one parameter changed
+     and the other two carried through, so choosing costs no JavaScript and no
+     client state - and picking a model cannot silently reset the language the
+     reader had just picked. #}
+  <div class="act__ch">
     <span class="act__lb">{{ t.out_language }}</span>
     <div class="seg seg--out" role="group" aria-label="{{ t.out_language }}">
       {%- for code in ('tr', 'en') %}
       <button type="button" lang="{{ code }}"
               {% if out == code %}aria-current="true"{% endif %}
-              hx-get="/runs/confirm?lang={{ language }}&amp;out={{ code }}"
+              hx-get="/runs/confirm?lang={{ language }}&amp;out={{ code }}&amp;ms={{ ms }}&amp;mr={{ mr }}"
               hx-target="#run-action" hx-swap="outerHTML">{{ t['lang_' ~ code] }}</button>
       {%- endfor %}
     </div>
+
+    <span class="act__lb">{{ t.model_summarize }}</span>
+    <div class="seg seg--model" role="group" aria-label="{{ t.model_summarize }}">
+      {%- for m in models %}
+      <button type="button" title="{{ m.id }}"
+              {% if ms == m.id %}aria-current="true"{% endif %}
+              hx-get="/runs/confirm?lang={{ language }}&amp;out={{ out }}&amp;ms={{ m.id }}&amp;mr={{ mr }}"
+              hx-target="#run-action" hx-swap="outerHTML">{{ m.short }}</button>
+      {%- endfor %}
+    </div>
+
+    <span class="act__lb">{{ t.model_rank }}</span>
+    <div class="seg seg--model" role="group" aria-label="{{ t.model_rank }}">
+      {%- for m in models %}
+      <button type="button" title="{{ m.id }}"
+              {% if mr == m.id %}aria-current="true"{% endif %}
+              hx-get="/runs/confirm?lang={{ language }}&amp;out={{ out }}&amp;ms={{ ms }}&amp;mr={{ m.id }}"
+              hx-target="#run-action" hx-swap="outerHTML">{{ m.short }}</button>
+      {%- endfor %}
+    </div>
   </div>
+
+  {# The prices, in the same figure face as the last run's cost directly above,
+     because they are the two halves of one judgement: what it cost, and what
+     the tier now selected is priced at. No projected total is drawn from them -
+     the run row keeps one token count, not a per-node split, so the product
+     would be a number with a decimal point and no basis. #}
+  <p class="act__c act__m">{{ t.model_price.format(si=ms_price.price_in, so=ms_price.price_out, ri=mr_price.price_in, ro=mr_price.price_out) }}</p>
 
   <div class="act__r">
     {# The one press that costs money. It answers into the bar's status readout,
@@ -44,7 +85,7 @@
        carrying both, so `/runs/start` stays the short path a second press
        races against. #}
     <button class="btn btn--pri"
-            hx-post="/runs/start?lang={{ language }}&amp;out={{ out }}"
+            hx-post="/runs/start?lang={{ language }}&amp;out={{ out }}&amp;ms={{ ms }}&amp;mr={{ mr }}"
             hx-target="#run-status" hx-swap="innerHTML"
             hx-disabled-elt="this"
             hx-on::before-request="document.getElementById('bar').classList.add('is-running')"

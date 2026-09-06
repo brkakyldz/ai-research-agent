@@ -21,6 +21,7 @@ from ainews.config import Settings, get_settings
 from ainews.db import dispose_engine, get_engine, init_db
 from ainews.db.session import checkpoint_wal, session_scope
 from ainews.logging_conf import configure_logging
+from ainews.observability import enable_tracing
 from ainews.scheduler import start_scheduler
 from ainews.sources.seed import sync_sources
 
@@ -35,6 +36,7 @@ TEMPLATE_DIR = WEB_DIR / "templates"
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
     configure_logging(settings.log_level)
+    enable_tracing(settings)
     await init_db(get_engine())
     log.info("database ready at %s", settings.sqlite_path)
 

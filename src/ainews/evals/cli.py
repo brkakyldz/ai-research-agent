@@ -15,6 +15,7 @@ from pathlib import Path
 from ainews.config import get_settings
 from ainews.db import get_engine, init_db
 from ainews.db.session import session_scope
+from ainews.pipeline.pricing import MODEL_NAMES
 
 NO_KEY = "OPENAI_API_KEY is not set; the judge needs it."
 
@@ -40,6 +41,16 @@ def add_eval_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore[ty
     judge.add_argument(
         "--max-cost", type=float, default=0.10, help="refuse above this estimate, USD"
     )
+    # Named, not assumed (ADR 0020). The judge runs a tier above the pipeline,
+    # which is ten times the price per token, so the one command most likely to
+    # surprise a monthly bill is the one that should say out loud what it is
+    # about to spend it on.
+    judge.add_argument(
+        "--model",
+        choices=MODEL_NAMES,
+        default=None,
+        help="model to judge with (default: OPENAI_MODEL_JUDGE)",
+    )
     judge.add_argument(
         "--labelled",
         action="store_true",
@@ -52,6 +63,12 @@ def add_eval_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore[ty
     stability.add_argument("--run", default="latest")
     stability.add_argument("--times", type=int, default=3)
     stability.add_argument("--seed", type=int, default=0)
+    stability.add_argument(
+        "--model",
+        choices=MODEL_NAMES,
+        default=None,
+        help="model to probe (default: OPENAI_MODEL, the ranker)",
+    )
 
     report = evals.add_parser(
         "report", help="print every number and append a dated section to docs/evals.md (no key)"
@@ -76,6 +93,7 @@ async def _record(run_ref: str, out: Path | None) -> int:
 async def _judge(args: argparse.Namespace) -> int:
     from ainews.evals.judge import CostGuard, format_calibration, judge_labelled, judge_run
     from ainews.evals.record import resolve_run_id
+    from ainews.pipeline.llm import resolve_model
 
     settings = get_settings()
     if not settings.llm_configured:
@@ -85,13 +103,21 @@ async def _judge(args: argparse.Namespace) -> int:
     try:
         async with session_scope() as session:
             if args.labelled:
-                table, outcomes = await judge_labelled(session, max_cost=args.max_cost)
-                print(f"judged {len(outcomes)} labelled summaries on {settings.openai_model_judge}")
+                table, outcomes = await judge_labelled(
+                    session, max_cost=args.max_cost, model=args.model
+                )
+                model = resolve_model(args.model, settings.openai_model_judge)
+                print(f"judged {len(outcomes)} labelled summaries on {model}")
                 print(format_calibration(table))
                 return 0
             run_id = await resolve_run_id(session, args.run)
             report = await judge_run(
-                session, run_id, sample=args.sample, seed=args.seed, max_cost=args.max_cost
+                session,
+                run_id,
+                sample=args.sample,
+                seed=args.seed,
+                max_cost=args.max_cost,
+                model=args.model,
             )
     except CostGuard as exc:
         print(str(exc), file=sys.stderr)
@@ -121,9 +147,11 @@ async def _stability(args: argparse.Namespace) -> int:
     await init_db(get_engine())
     async with session_scope() as session:
         run_id = await resolve_run_id(session, args.run)
-        report = await rank_stability(session, run_id, times=args.times, seed=args.seed)
+        report = await rank_stability(
+            session, run_id, times=args.times, seed=args.seed, model=args.model
+        )
     print(
-        f"run {run_id}: {report.times} shuffled rank calls, "
+        f"run {run_id}: {report.times} shuffled rank calls on {report.model}, "
         f"mean tau {report.tau:.3f}, mean top-N Jaccard {report.jaccard:.3f}, "
         f"~${report.est_cost_usd:.4f}"
         + (f", {report.n_fallback} fell back to importance order" if report.n_fallback else "")

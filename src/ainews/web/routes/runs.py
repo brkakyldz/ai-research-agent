@@ -6,12 +6,21 @@ the `kind` written on the run row. When it is worth pressing is the advice block
 above it, computed in `views.build_advice` and never enforced here: this route
 refuses a press for two reasons only, a run in flight and a missing key.
 
-The press carries one choice: which language the bulletin will be written in.
-It lives here and not in the bar's TR/EN switch, which translates the interface
-and nothing else (ADR 0017) - a preference about what the buttons say has no
-business deciding what a paid run produces. The choice travels as `?out=`,
-defaults to the language the page is drawn in, and is not remembered: it is a
-property of this press, so the next one asks again.
+The press carries three choices, and they are all the same kind of thing: a
+property of *this* press, asked next to the money, defaulting to the environment
+and remembered nowhere.
+
+`?out=` is which language the bulletin will be written in. It lives here and not
+in the bar's TR/EN switch, which translates the interface and nothing else
+(ADR 0017) - a preference about what the buttons say has no business deciding
+what a paid run produces.
+
+`?ms=` and `?mr=` are which model summarises and which model ranks (ADR 0020).
+Two and not one because the pipeline has always had two knobs for a reason
+(ADR 0001): the summariser is the ninety-odd calls and the language risk, the
+ranker is one call over the whole day, and the case for moving them is not the
+same case. An unknown name falls back to the configured default rather than
+erroring - `resolve_model` says why.
 
 Nothing reaches it in one click. `GET /runs/confirm` and `GET /runs/action` are
 the two halves of a confirmation that lives in the page rather than in a dialog -
@@ -38,9 +47,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import Run, db_session
+from ainews.pipeline.llm import model_options, resolve_model
 from ainews.pipeline.runner import digest_in_flight, release_digest, try_claim_digest
 from ainews.web import queries
-from ainews.web.i18n import strings
+from ainews.web.i18n import LANGUAGES, strings
 from ainews.web.views import (
     build_advice,
     count_enabled_sources,
@@ -66,26 +76,39 @@ def is_running() -> bool:
     return digest_in_flight()
 
 
-async def _execute(language: str) -> None:
+async def _execute(language: str, models: tuple[str, str]) -> None:
     from ainews.pipeline.runner import run_digest
 
     try:
-        await run_digest(language=language, mode="manual")  # type: ignore[arg-type]
+        await run_digest(
+            language=language,  # type: ignore[arg-type]
+            mode="manual",
+            model_summarize=models[0],
+            model_rank=models[1],
+        )
     except Exception:
         log.exception("manual run failed")
 
 
-async def _guarded(language: str, token: str) -> None:
+async def _guarded(language: str, models: tuple[str, str], token: str) -> None:
     """Hold the claim for exactly as long as the run lasts, however it ends."""
 
     try:
-        await _execute(language)
+        await _execute(language, models)
     finally:
         release_digest(token)
 
 
 def _valid(value: str | None, fallback: str) -> str:
-    return value if value in ("tr", "en") else fallback
+    return value if value in LANGUAGES else fallback
+
+
+def _models(ms: str | None, mr: str | None, settings: Settings) -> tuple[str, str]:
+    """The two chosen models, resolved against the environment's defaults."""
+    return (
+        resolve_model(ms, settings.openai_model_summarize),
+        resolve_model(mr, settings.openai_model),
+    )
 
 
 async def _action_context(
@@ -94,14 +117,26 @@ async def _action_context(
     language: str,
     asking: bool,
     out: str,
+    models: tuple[str, str],
+    settings: Settings,
 ) -> dict[str, object]:
     """Everything `_run_action.html` needs, and it is the same set every time.
 
     The cost shown in the question is the last run's, not an average and not a
     guess: a number a reader can check against the table underneath is worth
-    more than a tighter estimate they cannot.
+    more than a tighter estimate they cannot. The prices beside the model slots
+    are the other half of that: the last run's cost only means something next to
+    what the next one is priced at, and this is the screen where a reader can
+    pick a tier that costs fifty times as much without being told.
+
+    No projection is drawn from the two together, though the arithmetic is
+    tempting. The run row keeps one token total, not a per-node split, so
+    multiplying it by a new pair of prices would be a number with a decimal
+    point and no basis. Two honest facts beat one invented one.
     """
     advice = await build_advice(session, language)  # type: ignore[arg-type]
+    options = model_options(settings.openai_model_summarize, settings.openai_model)
+    by_id = {choice.id: choice for choice in options}
     return {
         "request": request,
         "language": language,
@@ -111,6 +146,11 @@ async def _action_context(
         "out": out,
         "n_sources": await count_enabled_sources(session),
         "last_cost": advice.last.est_cost_usd if advice.last else None,
+        "models": options,
+        "ms": models[0],
+        "mr": models[1],
+        "ms_price": by_id[models[0]],
+        "mr_price": by_id[models[1]],
     }
 
 
@@ -120,8 +160,10 @@ async def _render_action(
     language: str,
     asking: bool,
     out: str,
+    models: tuple[str, str],
+    settings: Settings,
 ) -> HTMLResponse:
-    context = await _action_context(request, session, language, asking, out)
+    context = await _action_context(request, session, language, asking, out, models, settings)
     return get_templates().TemplateResponse(request, "_run_action.html", context)
 
 
@@ -130,11 +172,22 @@ async def run_action(
     request: Request,
     lang: str | None = None,
     out: str | None = None,
+    ms: str | None = None,
+    mr: str | None = None,
     session: AsyncSession = Depends(db_session),
+    settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
     """The resting state: the button that asks. Also where `vazgeç` lands."""
     language = _valid(lang, language_of(request))
-    return await _render_action(request, session, language, asking=False, out=_valid(out, language))
+    return await _render_action(
+        request,
+        session,
+        language,
+        asking=False,
+        out=_valid(out, language),
+        models=_models(ms, mr, settings),
+        settings=settings,
+    )
 
 
 @router.get("/runs/confirm", response_class=HTMLResponse)
@@ -142,17 +195,31 @@ async def run_confirm(
     request: Request,
     lang: str | None = None,
     out: str | None = None,
+    ms: str | None = None,
+    mr: str | None = None,
     session: AsyncSession = Depends(db_session),
+    settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
     """The question. Pressing the button gets here and no further.
 
-    The two output-language slots re-enter this same route with a different
-    `?out=`, which is why choosing one costs no JavaScript and no client state:
-    the fragment is re-rendered with the other slot marked, exactly the way the
-    question itself is swapped in and out.
+    Every slot in the question - the two output languages, the two rows of
+    models - re-enters this same route with one parameter changed and the others
+    carried through, which is why choosing costs no JavaScript and no client
+    state: the fragment is re-rendered with a different slot marked, exactly the
+    way the question itself is swapped in and out. Carrying the others through
+    is the whole trick; a slot that forgot the neighbouring choice would quietly
+    reset a model to the default on the way to picking a language.
     """
     language = _valid(lang, language_of(request))
-    return await _render_action(request, session, language, asking=True, out=_valid(out, language))
+    return await _render_action(
+        request,
+        session,
+        language,
+        asking=True,
+        out=_valid(out, language),
+        models=_models(ms, mr, settings),
+        settings=settings,
+    )
 
 
 @router.get("/runs", response_class=HTMLResponse)
@@ -183,14 +250,18 @@ async def start_run(
     request: Request,
     lang: str | None = None,
     out: str | None = None,
+    ms: str | None = None,
+    mr: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> HTMLResponse:
     language = _valid(lang, language_of(request))
     # What the run writes, which is not what the page says. A press with no
     # `?out=` - the CLI's shape, or a stale fragment - falls back to the page's
     # language, so the old single-value behaviour is still the default rather
-    # than an error.
+    # than an error. The models resolve the same way and for the same reason: a
+    # press that names nothing is the press this route answered before ADR 0020.
     produce = _valid(out, language)
+    models = _models(ms, mr, settings)
     t = strings(language)  # type: ignore[arg-type]
 
     if not settings.llm_configured:
@@ -199,11 +270,11 @@ async def start_run(
     # Claim before creating the task, not inside it: `create_task` only schedules,
     # so a second press arriving before the task's first line would find the claim
     # still free and start a second - paid - digest.
-    token = f"manual:{produce}"
+    token = f"manual:{produce}:{models[0]}:{models[1]}"
     if not await try_claim_digest(token):
         return HTMLResponse(t["busy"])
     # Fire and forget: the caller gets an answer now, the run finishes later.
-    task = asyncio.create_task(_guarded(produce, token))
+    task = asyncio.create_task(_guarded(produce, models, token))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
 

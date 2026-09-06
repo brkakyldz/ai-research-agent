@@ -29,6 +29,9 @@ def _isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> It
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-a-real-key")
     monkeypatch.setenv("TAVILY_API_KEY", "")
     monkeypatch.setenv("SCHEDULER_ENABLED", "false")
+    # Pinned off, not merely defaulted off: a developer who has turned tracing
+    # on for real runs would otherwise have the suite post spans to Phoenix.
+    monkeypatch.setenv("PHOENIX_ENABLED", "false")
     monkeypatch.setenv("ENVIRONMENT", "development")
     get_settings.cache_clear()
     yield

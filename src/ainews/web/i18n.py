@@ -47,6 +47,15 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         # because this is where the language is actually decided: the switch in
         # the bar translates the interface and nothing else (ADR 0017).
         "out_language": "Bülten dili",
+        # The other two choices the press carries (ADR 0020). Named by the job
+        # rather than by the node, because the reader is choosing what writes
+        # the bulletin, not which function runs.
+        "model_summarize": "Özet modeli",
+        "model_rank": "Sıralama modeli",
+        # Prices, not a projection: the tier's own number, in the figure face,
+        # so a ten-fold jump is visible before the press rather than in the
+        # billing dashboard afterwards.
+        "model_price": "1M token: özet ${si:.2f}/${so:.2f} · sıralama ${ri:.2f}/${ro:.2f}",
         "bulletin_language": "Bu bülten {lang} yazıldı.",
         "confirm_yes": "Evet, çalıştır",
         "confirm_no": "Vazgeç",
@@ -194,6 +203,9 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "confirm_what": "{n} sources will be polled and what is new summarised.",
         "confirm_cost": "The last run cost {c}.",
         "out_language": "Bulletin language",
+        "model_summarize": "Summary model",
+        "model_rank": "Ranking model",
+        "model_price": "per 1M tokens: summary ${si:.2f}/${so:.2f} · ranking ${ri:.2f}/${ro:.2f}",
         "bulletin_language": "This bulletin was written in {lang}.",
         "confirm_yes": "Yes, run it",
         "confirm_no": "Cancel",

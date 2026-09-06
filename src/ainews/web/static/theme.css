@@ -1089,10 +1089,10 @@ kbd {
   color: var(--ink-3); cursor: pointer; transition: color var(--dur) var(--ease);
 }
 .vd button:hover, .vd button[aria-pressed="true"] { color: var(--ink-0); }
-.vd button + button::before { content: " b7"; margin: 0 7px; color: var(--line); }
+.vd button + button::before { content: "\00b7"; margin: 0 7px; color: var(--line); }
 /* The check, not the colour, is what marks the chosen word: hover paints the
    same ink, so colour alone would say "chosen" under the pointer. */
-.vd button[aria-pressed="true"]::after { content: " ¹3"; }
+.vd button[aria-pressed="true"]::after { content: " ✓"; }
 /* `.go` used to push itself to the end with `margin-left: auto`; the verdict
    now sits between the chips and it, so the auto margin moves to `.vd` and
    the link keeps its place as the row's last step. */
@@ -1219,14 +1219,25 @@ kbd {
 /* The money is the fact the reader is actually weighing, so it gets its own
    line and the figure face rather than being buried in the prose above it. */
 .act__c { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); margin-top: -4px; }
-/* Bültenin dili: soruyla düğmeler arasında, etiketi solunda.
-   Kabuktaki dil anahtarıyla aynı iki yuvalı biçim, çünkü aynı türden soru -
-   ama bu, para harcayan basışın kendi seçimi (ADR 0017). */
-.act__l { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Basışın taşıdığı üç seçim: bülten dili (ADR 0017), özet ve sıralama modeli
+   (ADR 0020). Üç ayrı satır değil tek bir ızgara - etiketler tek sütunu
+   paylaşınca rayların sol kenarı hizalanıyor. Üç ayrı esnek satırken kenar
+   tırtıklıydı ve üç ilgisiz denetim gibi okunuyordu; oysa bu, üç parçalı tek
+   bir soru.
+   `justify-items: start`: yuvalar doğal genişliğinde kalsın, iki yuvalı dil
+   anahtarı dört yuvalı model rayı kadar gerilmesin. */
+.act__ch {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  justify-items: start;
+  align-items: center;
+  gap: 8px 12px;
+}
 .act__lb { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 /* Yuvalar bağlantı değil düğme: sayfayı değiştirmiyor, parçayı tazeliyor.
    Tarayıcının düğme kabuğu tamamen kalkıyor, geriye .seg'in kendi rayı kalıyor. */
-.seg--out button {
+.seg--out button,
+.seg--model button {
   background: none;
   border: 0;
   font: inherit;
@@ -1234,7 +1245,21 @@ kbd {
   color: inherit;
   cursor: pointer;
 }
-.seg--out button:hover { color: var(--ink-0); }
+.seg--out button:hover,
+.seg--model button:hover { color: var(--ink-0); }
+
+/* Model yuvaları: kaç tier varsa o kadar sütun, en ucuzu solda (ADR 0020).
+   Etiketler `luna`, `terra` gibi makine adları, o yüzden rakam yüzünde ve bir
+   adım küçük - bunlar yazılmış bir söz değil, seçilen bir kimlik. 12px, ADR
+   0016'nın kabuk için koyduğu taban. */
+/* Sütun sayısı sayılmıyor, akıtılıyor: menü `PRICES`'tan geliyor ve oraya bir
+   tier eklendiğinde CSS'in de güncellenmesi gereken bir sayı kalmamalı. */
+.seg--model { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.seg--model button { font-family: var(--mono); font-size: 12px; letter-spacing: -0.01em; }
+/* Fiyat satırı son çalışmanın maliyetiyle aynı yüzde ve onun hemen altında:
+   ikisi tek bir yargının iki yarısı. Üstündeki yuvalardan biraz ayrılıyor,
+   çünkü seçimi değil seçimin sonucunu okuyor. */
+.act__m { margin-top: -2px; }
 
 .act__r { display: flex; gap: 9px; }
 .act__r .btn { padding: 9px 16px; font-size: 13px; }
@@ -1441,7 +1466,22 @@ td.strong { color: var(--ink-0); }
   .brief__m { margin-left: 0; }
   .item__m { flex-wrap: wrap; row-gap: 4px; }
   .score { margin-left: 0; width: 100%; }
+  /* The foot line breaks in two here rather than wherever the topics happen
+     to end. On desktop the row is topics at the left, the reader's two words
+     and the source link pushed to the right by an auto margin; at 375px the
+     topics already fill the row, so the verdict wrapped with the auto margin
+     still on it - a second line that began with a 112px hole and hung both
+     controls off the right edge. Giving the topics the whole first line keeps
+     the desktop grouping and stacks it: what the story is about, then what the
+     reader does about it. */
+  .item__f .chips { flex-basis: 100%; }
+  .vd { margin-left: 0; }
   .go { margin-left: 0; }
   .controls .field { min-width: 0; width: 100%; }
+  /* Dört yuvalı model rayı 375px'de etiketiyle yan yana sığmıyor: ızgara tek
+     sütuna iniyor, etiket rayın üstüne geçiyor. Ray tam genişlik alıyor, çünkü
+     tek sütunda doğal genişlik yeniden tırtıklı bir kenar demek. */
+  .act__ch { grid-template-columns: 1fr; justify-items: stretch; gap: 4px 0; }
+  .act__lb { margin-top: 6px; }
   .seg > * { padding: 5px 7px; }
 }

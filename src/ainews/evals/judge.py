@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import Article, EvalResult, Source, Summary, Verdict
-from ainews.pipeline.llm import estimate_cost, usage_from_message
+from ainews.pipeline.llm import estimate_cost, resolve_model, usage_from_message
 from ainews.pipeline.llm import judge as judge_model
 from ainews.pipeline.nodes.summarize import MAX_BODY_CHARS
 from ainews.pipeline.prompts import load_prompt
@@ -192,11 +192,13 @@ def estimate_judge_cost(candidates: list[Candidate], model: str) -> float:
     return estimate_cost(model, tokens_in, OUTPUT_TOKENS_GUESS * len(candidates))
 
 
-async def judge_one(candidate: Candidate, settings: Settings) -> Outcome:
+async def judge_one(candidate: Candidate, settings: Settings, model: str | None = None) -> Outcome:
     """Judge one summary. Never raises: a failure is an outcome with `error`."""
     try:
-        model = judge_model(settings).with_structured_output(GroundingVerdict, include_raw=True)
-        response: Any = await model.ainvoke(build_prompt(candidate))
+        client = judge_model(settings, model).with_structured_output(
+            GroundingVerdict, include_raw=True
+        )
+        response: Any = await client.ainvoke(build_prompt(candidate))
     except Exception as exc:
         log.warning("judge failed for summary %d: %s", candidate.summary_id, exc)
         return Outcome(candidate, None, None, error=f"{type(exc).__name__}: {exc}"[:300])
@@ -217,17 +219,25 @@ async def judge_candidates(
     *,
     max_cost: float,
     settings: Settings | None = None,
+    model: str | None = None,
 ) -> list[Outcome]:
-    """Judge each candidate, write one `EvalResult` per outcome, commit once."""
+    """Judge each candidate, write one `EvalResult` per outcome, commit once.
+
+    The model is resolved here rather than read from settings, so the name the
+    cost guard prices, the name the calls go to and the name written on every
+    `EvalResult` row are one value (ADR 0020). Judging the same run twice on two
+    tiers is a legitimate thing to want; a record that could not tell the two
+    apart afterwards would not be one.
+    """
     settings = settings or get_settings()
-    model = settings.openai_model_judge
+    model = resolve_model(model, settings.openai_model_judge)
     estimate = estimate_judge_cost(candidates, model)
     if estimate > max_cost:
         raise CostGuard(estimate, max_cost, len(candidates))
 
     outcomes: list[Outcome] = []
     for candidate in candidates:
-        outcome = await judge_one(candidate, settings)
+        outcome = await judge_one(candidate, settings, model)
         outcomes.append(outcome)
         session.add(
             EvalResult(
@@ -254,14 +264,16 @@ async def judge_run(
     seed: int = 0,
     max_cost: float = DEFAULT_MAX_COST,
     settings: Settings | None = None,
+    model: str | None = None,
 ) -> JudgeReport:
     settings = settings or get_settings()
+    model = resolve_model(model, settings.openai_model_judge)
     chosen = choose_sample(await load_candidates(session, run_id), sample, seed)
-    outcomes = await judge_candidates(session, chosen, max_cost=max_cost, settings=settings)
-    cost = sum(
-        estimate_cost(settings.openai_model_judge, o.tokens_in, o.tokens_out) for o in outcomes
+    outcomes = await judge_candidates(
+        session, chosen, max_cost=max_cost, settings=settings, model=model
     )
-    return JudgeReport(run_id, settings.openai_model_judge, outcomes, cost)
+    cost = sum(estimate_cost(model, o.tokens_in, o.tokens_out) for o in outcomes)
+    return JudgeReport(run_id, model, outcomes, cost)
 
 
 # -- calibration --------------------------------------------------------------
@@ -349,9 +361,12 @@ async def judge_labelled(
     *,
     max_cost: float = DEFAULT_MAX_COST,
     settings: Settings | None = None,
+    model: str | None = None,
 ) -> tuple[Calibration, list[Outcome]]:
     settings = settings or get_settings()
     labelled = await load_labelled(session)
-    outcomes = await judge_candidates(session, labelled, max_cost=max_cost, settings=settings)
+    outcomes = await judge_candidates(
+        session, labelled, max_cost=max_cost, settings=settings, model=model
+    )
     pairs = [(o.candidate.human_verdict or "ok", o.passed) for o in outcomes]
     return calibrate(pairs), outcomes

@@ -299,7 +299,7 @@ def test_run_now_starts_one_run_and_refuses_a_second(
 
     started = 0
 
-    async def _never_finishes(language: str) -> None:
+    async def _never_finishes(language: str, models: tuple[str, str]) -> None:
         """Stands in for a two-minute digest, so the claim is still held.
 
         It deliberately never returns. Sleeping for a fixed time instead would
@@ -368,7 +368,12 @@ async def test_two_simultaneous_presses_start_one_run(
 
     started: list[str] = []
 
-    async def _fake_digest(language: str | None = None, mode: str | None = None) -> str:
+    async def _fake_digest(
+        language: str | None = None,
+        mode: str | None = None,
+        model_summarize: str | None = None,
+        model_rank: str | None = None,
+    ) -> str:
         started.append(language or "")
         await asyncio.sleep(0.2)
         return "fake-run-id"
@@ -529,12 +534,14 @@ def test_the_question_carries_the_output_language_and_starts_on_the_pages(
     assert 'class="seg seg--out"' in asked
     assert 'aria-current="true"' in asked
     assert "out=tr" in asked and "out=en" in asked
-    assert 'hx-post="/runs/start?lang=tr&amp;out=tr"' in asked, "it starts on the page's language"
+    assert (
+        'hx-post="/runs/start?lang=tr&amp;out=tr&amp;ms=gpt-5.6-luna&amp;mr=gpt-5.6-luna"' in asked
+    ), "it starts on the page's language and the configured models"
 
     # Choosing the other slot is the same swap the question itself is: a GET of
     # this fragment with the other `out`, no client state anywhere.
     other = client.get("/runs/confirm?lang=tr&out=en").text
-    assert 'hx-post="/runs/start?lang=tr&amp;out=en"' in other
+    assert "&amp;out=en&amp;" in other
     assert "Evet, çalıştır" in other, "the shell is still Turkish"
 
 
@@ -547,7 +554,7 @@ def test_the_press_produces_the_language_it_was_asked_for(
     settings.openai_api_key = "sk-test"
     produced: list[str] = []
 
-    async def _record(language: str) -> None:
+    async def _record(language: str, models: tuple[str, str]) -> None:
         produced.append(language)
 
     monkeypatch.setattr(runs_route, "_execute", _record)

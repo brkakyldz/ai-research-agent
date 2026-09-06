@@ -69,7 +69,9 @@ def test_the_digest_offers_a_verdict_on_every_story(
     body = client.get("/").text
     assert body.count('class="vd"') == 2
     assert body.count('hx-post="/verdict?lang=tr"') == 4, "two words per story"
-    assert "aria-pressed" not in body, "nothing is chosen until the reader chooses"
+    assert 'aria-pressed="true"' not in body, "nothing is chosen until the reader chooses"
+    # Written in both states, so the word reads as a toggle before it is pressed.
+    assert body.count('aria-pressed="false"') == 4
     assert "Doğru" in body and "Yanlış" in body
 
 
@@ -105,6 +107,28 @@ async def test_a_note_is_kept_only_with_wrong(
     client.post("/verdict", data={"summary_id": summaries[0], "verdict": "ok", "note": "stale"})
     rows = await _rows(session)
     assert (rows[0].verdict, rows[0].note) == ("ok", None)
+
+
+async def test_pressing_wrong_again_does_not_erase_the_reason(
+    client: TestClient, summaries: list[int], session: AsyncSession
+) -> None:
+    """The two words carry no `note` field; only the note row does.
+
+    A reader who marked a story wrong, wrote why, and then pressed the word a
+    second time was silently losing the sentence E5 rewrites the judge prompt
+    from. An empty note row still clears it - that is the reader asking.
+    """
+    client.post(
+        "/verdict", data={"summary_id": summaries[0], "verdict": "wrong", "note": "uydurma"}
+    )
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "wrong"})
+    rows = await _rows(session)
+    assert (rows[0].verdict, rows[0].note) == ("wrong", "uydurma")
+
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "wrong", "note": "  "})
+    session.expire_all()  # the row above is in the identity map; re-read it
+    rows = await _rows(session)
+    assert rows[0].note is None
 
 
 def test_the_page_renders_the_saved_state_after_a_reload(

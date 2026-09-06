@@ -23,6 +23,7 @@ from ainews.db import Run
 from ainews.db.models import utcnow
 from ainews.db.session import session_scope
 from ainews.pipeline.graph import build_graph, checkpoint_path
+from ainews.pipeline.llm import resolve_model
 from ainews.pipeline.nodes.collect import collect_articles
 from ainews.pipeline.state import PipelineState, RunMode
 
@@ -102,18 +103,38 @@ async def run_digest(
     language: Language | None = None,
     mode: RunMode = "digest",
     settings: Settings | None = None,
+    model_summarize: str | None = None,
+    model_rank: str | None = None,
 ) -> str:
-    """The full pipeline. Returns the run id, which is also the checkpoint thread."""
+    """The full pipeline. Returns the run id, which is also the checkpoint thread.
+
+    The two model arguments have the same standing as `language` (ADR 0020):
+    the caller decides, the environment is only the default, and the choice is
+    resolved once here so every node downstream reads a name rather than a
+    setting. Resolution happens before the run row opens, so the line the log
+    prints is the line the bill will match.
+    """
     settings = settings or get_settings()
     language = language or settings.digest_language
+    model_summarize = resolve_model(model_summarize, settings.openai_model_summarize)
+    model_rank = resolve_model(model_rank, settings.openai_model)
     kind = "digest" if mode == "digest" else "manual"
     run_id = await _open_run(kind, language)
-    log.info("run %s starting (%s, language=%s)", run_id, kind, language)
+    log.info(
+        "run %s starting (%s, language=%s, summarize=%s, rank=%s)",
+        run_id,
+        kind,
+        language,
+        model_summarize,
+        model_rank,
+    )
 
     initial: PipelineState = {
         "run_id": run_id,
         "language": language,
         "mode": mode,
+        "model_summarize": model_summarize,
+        "model_rank": model_rank,
         "candidate_ids": [],
         "summaries": [],
         "ranked": [],

@@ -11,6 +11,12 @@ services:
       # Inside the container the database always lives on the mounted volume,
       # whatever the host environment file says.
       DATABASE_URL: sqlite+aiosqlite:///./data/app.db
+      # Tracing is off unless the host environment says otherwise, and the
+      # endpoint is the service name rather than localhost - the app's view of
+      # Phoenix is not the browser's. No `depends_on`: phoenix lives in a
+      # profile, and a dependency on a service that is not started is an error.
+      PHOENIX_ENABLED: ${PHOENIX_ENABLED:-false}
+      PHOENIX_ENDPOINT: http://phoenix:6006/v1/traces
     ports:
       - "8000:8000"
     volumes:
@@ -31,5 +37,21 @@ services:
       retries: 3
       start_period: 10s
 
+  # Development instrument, not part of the product (ADR 0018). It starts only
+  # under `--profile dev`, so a plain `docker compose up` is still one container.
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: ainews-phoenix
+    profiles: ["dev"]
+    restart: unless-stopped
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    ports:
+      # 6006 serves both the UI and the OTLP/HTTP endpoint the app posts to.
+      - "6006:6006"
+    volumes:
+      - phoenix-data:/mnt/data
+
 volumes:
   ainews-data:
+  phoenix-data:

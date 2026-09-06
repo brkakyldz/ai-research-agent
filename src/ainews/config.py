@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
 
     # -- LLM ------------------------------------------------------------------
+    # These three are defaults, not settings (ADR 0020). Which model runs is an
+    # argument to the work - chosen in the confirmation on /runs, or with the
+    # CLI's `--model` flags - and these say what a press or a command that names
+    # nothing falls back to. `pipeline.pricing.PRICES` is the menu they are
+    # chosen from and the table they are costed at.
     openai_model: str = "gpt-5.6-luna"
     # Its own knob: if Turkish quality disappoints, only this node moves up to
     # terra and ranking stays on luna (ADR 0001).
@@ -68,6 +73,13 @@ class Settings(BaseSettings):
 
     # -- Storage --------------------------------------------------------------
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
+
+    # -- Tracing ----------------------------------------------------------------
+    # Off unless asked for. The endpoint's default is the host's view of the
+    # Phoenix container; compose overrides it with the service name, the same
+    # way it overrides DATABASE_URL.
+    phoenix_enabled: bool = False
+    phoenix_endpoint: str = "http://localhost:6006/v1/traces"
 
     # -- Web ------------------------------------------------------------------
     host: str = "0.0.0.0"  # Local tool: bound inside the container, port published by compose.
