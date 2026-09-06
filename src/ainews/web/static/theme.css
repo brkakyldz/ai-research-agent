@@ -122,6 +122,16 @@
   --r: 14px;
   --r-sm: 10px;
   --rail: 264px;
+  /* The rail with its words put away. Wide enough for a 17px icon centred in a
+     40px hit area with the brand mark and the collapse button still side by
+     side above it, and no wider: a 76px strip of icons is a rail that got out
+     of the way, and at 96px it is a rail that is merely narrower. */
+  --rail-off: 76px;
+  /* The bar's height, and it is a token because four rules have to agree about
+     it: the bar itself, where the rail starts, where the rail stops, and where
+     the side column pins. It used to be none of them - the bar was as tall as
+     whatever was inside it and `--side-top` was that height guessed at. */
+  --bar-h: 62px;
   /* The page's outer width, and the two parts of it that are the side column.
      Every page is `--measure` wide, whether or not it draws a side column, so
      the content's right edge never moves between pages. */
@@ -129,9 +139,9 @@
   --side-w: 324px;
   --split-gap: 32px;
   /* Where the side column starts and stops: the sticky bar's height plus the
-     main's top padding. It is a token because two rules need it to agree -
-     the column's `top` and the height it is allowed to grow to. */
-  --side-top: 78px;
+     main's top padding. It is derived from `--bar-h` rather than measured off
+     a screenshot, so the two cannot drift. */
+  --side-top: calc(var(--bar-h) + 22px);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur: 170ms;
 }
@@ -280,8 +290,24 @@ svg { display: block; }
 
 /* ---------- shell ---------- */
 
-.app { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 100vh; }
+/* Two rows, not one: the bar spans both columns and the rail hangs under its
+   left cell. Before 2026-09-07 the bar was the first child of the content
+   column, which made the window's top edge two bands that only looked like one
+   - the rail's own header ended at 264px, the bar's hairline began there, and
+   the reader's controls belonged to the content rather than to the shell
+   (ADR 0021). One grid, and the bar is a row of it. */
+.app {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  /* `minmax`, not a flat track: below 1024px the bar becomes a flex row that is
+     allowed to wrap, and a fixed track would let it overflow onto the reading
+     rather than push it down. */
+  grid-template-rows: minmax(var(--bar-h), auto) 1fr;
+  min-height: 100vh;
+}
 .col { min-width: 0; }   /* without this a wide table stretches the grid column */
+
+.app { transition: grid-template-columns var(--dur) var(--ease); }
 
 /* ---------- left rail: navigation, and nothing else ---------- */
 
@@ -289,17 +315,21 @@ svg { display: block; }
   background: var(--rail-bg);
   display: flex;
   flex-direction: column;
-  padding: 16px 12px 14px;
+  padding: 14px 12px;
   gap: 14px;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: var(--bar-h);
+  height: calc(100vh - var(--bar-h));
+  min-width: 0;
+  z-index: 3;
 }
+/* The brand moved into the bar on 2026-09-07 and kept its own rule: it is
+   still the rail's column, it is just drawn in the row above the links. */
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 8px 4px;
+  min-width: 0;
 }
 .brand__mark {
   width: 30px;
@@ -414,25 +444,143 @@ svg { display: block; }
    0011 gives the uppercase to machine *output* and a sentence in it shouts. */
 .rail__next .raw { font-size: 12px; color: var(--ink-2); }
 
+/* ---------- the rail with its words put away ---------- */
+
+/* Guarded by a minimum width, not restated below one: under 860px the rail is
+   already a bottom bar of five icons, which is the collapsed state arrived at
+   by a different road. Without the guard every rule here would have to be
+   undone in that media query, and an undo is where the two states drift apart.
+
+   What goes is the words, the group labels and the one sentence. What stays is
+   every link, every count, and the theme - a rail you can put away must not be
+   a rail that takes a preference away with it. */
+@media (min-width: 861px) {
+  :root[data-rail="off"] { --rail: var(--rail-off); }
+
+  /* The brand keeps its mark and loses its name: the mark is the way home and
+     the name is what the reader asked to stop paying for. Both objects centre
+     in the strip rather than sitting left, because there is no column of text
+     left for them to line up with. */
+  :root[data-rail="off"] .bar__brand { padding: 0 10px; gap: 4px; justify-content: center; }
+  :root[data-rail="off"] .brand__w { display: none; }
+  :root[data-rail="off"] .rail-tog { margin-left: 0; }
+  :root[data-rail="off"] .rail-tog svg { transform: rotate(180deg); }
+
+  /* The label leaves the page and stays in the accessibility tree: an icon rail
+     that is a row of unnamed glyphs to a screen reader is not a narrower rail,
+     it is a broken one. `title` on every link does the same job for a pointer. */
+  :root[data-rail="off"] .nav__l {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  :root[data-rail="off"] .nav a { justify-content: center; gap: 0; padding: 8px 0; position: relative; }
+
+  /* Three group labels become the two rules they were drawing anyway. The text
+     is indented off the box rather than removed, for the reason the link labels
+     are: the groups are how the five links are told apart out loud. */
+  :root[data-rail="off"] .nav__g {
+    height: 0;
+    padding: 0;
+    margin: 9px 14px;
+    border-top: 1px solid var(--line-soft);
+    overflow: hidden;
+    text-indent: -999em;
+  }
+  :root[data-rail="off"] .nav__g:first-child { margin-top: 0; border-top: 0; }
+
+  /* The count rides the icon, the way it does on a phone - there is no line
+     left for it to sit on. */
+  :root[data-rail="off"] .pill {
+    position: absolute;
+    top: 3px;
+    left: 50%;
+    margin-left: 5px;
+    font-size: 9px;
+    padding: 1px 5px;
+  }
+
+  /* The foot keeps the run link and the theme; the sentence under them is the
+     one thing here that cannot be said in 52px. The switch turns on its side
+     rather than leaving with it. */
+  :root[data-rail="off"] .rail { padding: 14px 8px; }
+  :root[data-rail="off"] .rail__foot { padding: 12px 0 2px; }
+  :root[data-rail="off"] .rail__next { display: none; }
+  :root[data-rail="off"] .rail__foot .seg--theme { grid-template-columns: 1fr; }
+  :root[data-rail="off"] .rail__foot .seg > * { padding: 5px 6px; font-size: 11.5px; }
+}
+
 /* ---------- top bar: the reader's controls, and nothing else ---------- */
 
-/* Three groups, laid out as three columns rather than as one flex row with an
-   `auto` margin in the middle of it. The middle column is the search box and it
-   is centred on the window, not on whatever is left over after the title - so
-   the box does not move sideways when the page name changes length or the run
-   status appears. The outer columns are `1fr` and equal, which is what holds
-   the middle one still. */
+/* Four cells, laid out as four columns rather than as one flex row with an
+   `auto` margin in the middle of it. The first is the brand and it is exactly
+   the rail's width, so the bar and the rail share one column and the shell has
+   one vertical edge. The third is the search box and it is centred on the
+   window, not on whatever is left over after the title - so the box does not
+   move sideways when the page name changes length or the run status appears.
+   The two `1fr` columns either side of it are equal, which is what holds it
+   still. */
 .top-bar {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 380px) minmax(0, 1fr);
+  grid-template-columns: var(--rail) minmax(0, 1fr) minmax(0, 520px) minmax(0, 1fr);
   align-items: center;
   gap: 16px;
-  padding: 12px 22px;
+  /* No left padding: the first column is the rail's, and it carries its own. */
+  padding: 0 22px 0 0;
+  height: var(--bar-h);
   border-bottom: 1px solid var(--line-soft);
   position: sticky;
   top: 0;
   background: var(--page);
   z-index: 4;
+  transition: grid-template-columns var(--dur) var(--ease);
+}
+
+/* The bar's rail cell. It takes the rail's ground rather than a border, for the
+   reason the rail does: a 1px line down the full height of the window is the
+   loudest line on a page whose whole argument is that lines are expensive. Two
+   surfaces meeting is enough to say where one column stops. */
+.bar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  min-width: 0;
+  padding: 0 12px 0 20px;
+  background: var(--rail-bg);
+}
+
+/* The width of the reading is the rail's to give, and this is where the reader
+   takes it back. It is drawn as a quiet icon and not as a labelled control: a
+   chevron at the edge of a rail is the one icon in this shell that needs no
+   word, because the thing it acts on is directly under it and the result is
+   visible the instant it is pressed. It points at the edge it will move. */
+.rail-tog {
+  margin-left: auto;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.rail-tog:hover { background: var(--raised-2); color: var(--ink-0); }
+.rail-tog svg {
+  width: 17px;
+  height: 17px;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  fill: none;
+  transition: transform var(--dur) var(--ease);
 }
 /* The title column can be narrower than its contents on a 1320px window, and
    when it is, the stamp is the half that goes - it is the least of the three
@@ -444,7 +592,26 @@ svg { display: block; }
 /* The page name, and it was the same size as a nav link. It is the one word
    that says which of five pages this is, so it is set as a heading. */
 .bar__id h1 { font-size: 17px; font-weight: 600; white-space: nowrap; flex: none; }
-.bar__id .mono { font-size: 12px; color: var(--ink-3); white-space: nowrap; min-width: 0; overflow: hidden; }
+/* The bulletin's date, written out beside a calendar. It was `06 Eyl · 16:06`
+   in the mono face - the face ADR 0011 reserves for machine output - which read
+   as a log line stuck to the page name: no year, a month clipped to three
+   letters, and the quietest text in the bar. This is the one date on the page a
+   person would say out loud, so it is set in the face people are written in.
+   It still shrinks before anything else in this cell does: it is the only thing
+   in the bar that is not a control. */
+.bar__date {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  /* Its own baseline is the icon's, and the row's is the heading's. */
+  align-self: center;
+}
+.bar__date svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.6; fill: none; flex: none; }
 /* Bültenin dili, yalnızca sayfanın dilinden farklıysa çiziliyor. Damga makine
    çıktısı, bu bir etiket: gövde yüzü, 600 (ADR 0011). Rozet gibi duruyor çünkü
    bir ölçüm değil, bir uyarı - okuduğun metin arayüzün dilinde değil. Dar
@@ -505,7 +672,10 @@ svg { display: block; }
   border: 1px solid var(--line-soft);
   background: var(--panel-2);
   border-radius: 9px;
-  padding: 6px 8px 6px 11px;
+  /* One step taller than it was. The box is the middle of a bar that now spans
+     the window, and at 32px it read as a control that had been fitted into a
+     gap rather than as the lane the bar is built around. */
+  padding: 8px 8px 8px 12px;
   width: 100%;
   color: var(--ink-2);
   transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease),
@@ -526,6 +696,10 @@ svg { display: block; }
   width: 100%;
 }
 .field::placeholder, .search input::placeholder { color: var(--ink-2); }
+/* Both shortcuts, because both are real: the script at the foot of `base.html`
+   listens for `/` and for the platform's palette key. One hint documented half
+   of what the box answers to. */
+.keys { display: flex; align-items: center; gap: 4px; flex: none; }
 kbd {
   font-family: var(--mono);
   font-size: 11px;
@@ -540,7 +714,6 @@ kbd {
    a wide window, in the bar below 860px where the rail has become a five-slot
    navigation bar and dropped its foot. Two renders of one control beat a
    preference that disappears on a phone. */
-.seg--narrow { display: none; }
 .seg {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -565,6 +738,13 @@ kbd {
   box-shadow: 0 1px 2px var(--seg-on-shadow);
 }
 .seg--theme { grid-template-columns: repeat(3, 1fr); }
+/* The bar's copy of the theme switch, hidden above 860px where the rail's foot
+   is drawing it. This declaration has to come *after* `.seg { display: grid }`,
+   not before: the two selectors weigh the same, so source order is the whole
+   rule, and while it sat above `.seg` the switch was drawn twice on every wide
+   window - once in the rail and once in the bar - which is exactly the thing
+   "written twice, drawn once" was meant to prevent. */
+.seg--narrow { display: none; }
 /* In the rail the track sits on a ground one step darker than the page, so it
    needs an edge of its own to read as a control rather than as a shadow. */
 .rail__foot .seg { box-shadow: inset 0 0 0 1px var(--line-soft); }
@@ -1377,17 +1557,24 @@ td.strong { color: var(--ink-0); }
 @media (max-width: 1180px) {
   :root { --rail: 220px; }
   .brand__s { display: none; }
-  .bar__id .mono { display: none; }
+  .top-bar { grid-template-columns: var(--rail) minmax(0, 1fr) minmax(0, 400px) minmax(0, 1fr); }
   .main--split { gap: 28px; }
 }
 
-/* 2. The bar stops being three columns. The search box cannot be centred on a
+/* 2. The bar stops being four columns. The search box cannot be centred on a
       window this narrow without squeezing it to nothing, so it gives up the
       middle and takes the width that is left between the title and the
-      buttons - which is the same layout, expressed as a flex row. */
+      buttons - which is the same layout, expressed as a flex row. The brand
+      cell keeps its width because that is not a layout choice: it is the rail
+      underneath it, and the two have to end at the same place.
+
+      The date is the first thing out. It is the only thing in the bar that is
+      not a control, and the alternative is a search box squeezed to a slot. */
 @media (max-width: 1024px) {
-  .top-bar { display: flex; flex-wrap: wrap; row-gap: 10px; align-items: center; }
+  .top-bar { display: flex; flex-wrap: wrap; row-gap: 10px; align-items: center; height: auto; padding-bottom: 8px; }
+  .bar__brand { width: var(--rail); flex: none; height: var(--bar-h); }
   .bar__id { flex: none; }
+  .bar__date { display: none; }
   .search { flex: 1; min-width: 160px; }
   .bar-right { flex: none; }
 }
@@ -1411,7 +1598,13 @@ td.strong { color: var(--ink-0); }
     border-top: 1px solid var(--line);
     z-index: 20;
   }
-  .brand, .rail__foot, .nav__g { display: none; }
+  /* The brand stays, in the bar, as its mark alone: the bar is the only piece
+     of shell left at the top of the window and an application with no name in
+     it is a page that could be anything. The collapse button goes - there is
+     no left rail here for it to act on. */
+  .bar__brand { width: auto; flex: none; padding: 0 0 0 14px; background: none; }
+  .brand__w, .rail-tog { display: none; }
+  .rail__foot, .nav__g { display: none; }
   .seg--narrow { display: grid; }
   .nav--narrow { display: flex !important; }
   .nav--go { display: none; }
@@ -1443,6 +1636,8 @@ td.strong { color: var(--ink-0); }
 /* 4. One column, and the meta rows stop competing for it. */
 @media (max-width: 560px) {
   .top-bar { padding: 10px 14px; gap: 8px; }
+  /* The bar pads itself here, so the brand cell stops doing it twice. */
+  .bar__brand { padding-left: 0; }
   /* Its own row, and allowed to shrink into it. The `flex-wrap` here was
      written at some point and had never once fired: `.bar-right` takes
      `flex: none` at 1024px, which is `flex-shrink: 0`, so on a 375px phone the

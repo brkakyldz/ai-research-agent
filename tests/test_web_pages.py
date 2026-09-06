@@ -908,3 +908,81 @@ async def test_a_long_topic_list_folds_after_six(
     head, folded = body.split('<details class="more"', 1)
     assert head.count("&amp;tag=") == 6, "six topics before the fold"
     assert "topic8" in folded, "and the rest are still reachable"
+
+
+# -- the shell's top bar -------------------------------------------------------
+
+
+def test_the_bar_spans_the_shell_and_carries_the_brand(client: TestClient, digest: Run) -> None:
+    """One bar across the window, with the rail hanging under its left cell.
+
+    Until 2026-09-07 the bar was the first child of the content column, so the
+    window's top edge was two bands: the brand in the rail's own box, and the
+    reader's controls starting 264px in. The order in the markup is what says
+    which of the two shells is being drawn - the bar before the rail, both
+    inside `.app` - so this asserts the order rather than a class name.
+    """
+    body = client.get("/").text
+    app = body.split('<div class="app">', 1)[1]
+    bar = app.index('<header class="top-bar"')
+    rail = app.index('<aside class="rail"')
+    assert bar < rail, "the bar is a row of the shell, above the rail"
+
+    head, rest = app.split('<aside class="rail"', 1)
+    assert 'class="bar__brand"' in head, "the brand is the bar's first cell"
+    assert 'class="brand"' not in rest.split("</aside>", 1)[0], "and not the rail's head"
+
+
+def test_the_rail_can_be_put_away_and_says_so(client: TestClient, digest: Run) -> None:
+    """The collapse is a button, wired to the rail it acts on.
+
+    `aria-controls` and `aria-expanded` are the whole of what a screen reader
+    gets here: the chevron says nothing out loud, and the rail it collapses is a
+    different element from the button that does it.
+    """
+    body = client.get("/").text
+    assert 'id="rail-tog"' in body
+    assert 'aria-controls="rail"' in body
+    assert '<aside class="rail" id="rail">' in body
+    assert 'aria-expanded="true"' in body, "the rail is open until the reader says otherwise"
+    assert 'aria-label="Menüyü daralt veya genişlet"' in body
+
+
+def test_every_rail_link_keeps_a_name_a_pointer_can_find(client: TestClient, digest: Run) -> None:
+    """Collapsed, the rail is five icons. An icon has to be learned, so each one
+    keeps its label in the accessibility tree and a `title` for the hover.
+
+    The theme switch in the foot is not in this: it keeps its three words drawn
+    at every width, which is what a control with no icon has to do.
+    """
+    rail = client.get("/").text.split('<aside class="rail"', 1)[1].split("</aside>", 1)[0]
+    links = [
+        line
+        for line in rail.splitlines()
+        if line.lstrip().startswith("<a ") and "?theme=" not in line
+    ]
+    # Five destinations, and the run log is written twice - the foot's copy and
+    # the one the phone's bottom bar draws.
+    assert len(links) == 6
+    for link in links:
+        assert "title=" in link, f"no hover name on {link.strip()[:60]}"
+
+
+def test_the_theme_switch_is_written_twice_and_drawn_once(client: TestClient) -> None:
+    """A regression on source order, not on markup.
+
+    `.seg--narrow { display: none }` sat ABOVE `.seg { display: grid }`, and the
+    two selectors weigh the same - so the later one won and the bar's copy of
+    the theme switch was drawn on every wide window alongside the rail's. The
+    markup was right the whole time; the stylesheet was reading bottom-up.
+    """
+    css = client.get("/static/theme.css").text
+    assert css.index(".seg {") < css.index(".seg--narrow { display: none; }")
+
+
+def test_the_bar_spells_the_bulletins_date_out(client: TestClient, digest: Run) -> None:
+    """`06 Eyl · 16:06` in the machine face was a log line stuck to the page
+    name. It is the one date on the page a person would say out loud."""
+    body = client.get("/").text
+    assert 'class="bar__date"' in body
+    assert str(datetime.now(UTC).year) in body.split('class="bar__date"', 1)[1][:200]

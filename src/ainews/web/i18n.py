@@ -140,6 +140,11 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "more_topics": "Daha fazla",
         "topics": "Konular",
         "skip_to_content": "İçeriğe geç",
+        # One label for a control with two states. "Daralt/genişlet" would have
+        # to be swapped in JavaScript on every press, and a button whose name
+        # the reader hears only when it is already halfway moved is worse than
+        # one that is named after the thing it acts on.
+        "rail_toggle": "Menüyü daralt veya genişlet",
         "refresh_hint": "Kaynakları tara ve yeni haberleri özetle",
         "digest_heading": "Bugünün bülteni",
         "nav_digest": "Bugün",
@@ -149,7 +154,7 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "language": "Dil",
         "lang_tr": "Türkçe",
         "lang_en": "English",
-        "search_placeholder": "Ara",
+        "search_placeholder": "Haber, konu veya kaynak ara",
         "search": "Ara",
         "all_tags": "Hepsi",
         "show_others": "Diğer {n} haberi göster",
@@ -284,6 +289,7 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "more_topics": "More",
         "topics": "Topics",
         "skip_to_content": "Skip to content",
+        "rail_toggle": "Collapse or expand the menu",
         "refresh_hint": "Poll the feeds and summarise what is new",
         "digest_heading": "Today's digest",
         "nav_digest": "Today",
@@ -293,7 +299,7 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "language": "Language",
         "lang_tr": "Türkçe",
         "lang_en": "English",
-        "search_placeholder": "Search",
+        "search_placeholder": "Search news, topics or sources",
         "search": "Search",
         "all_tags": "All",
         "show_others": "Show the other {n}",

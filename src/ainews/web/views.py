@@ -86,6 +86,60 @@ def format_stamp(value: datetime | None, language: Language = "en") -> str:
     return f"{local:%d} {month} · {local:%H:%M}"
 
 
+# The months again, written out. The bar draws the bulletin's date the way a
+# person would say it - "6 Eylül 2026" - and every other stamp in the app stays
+# short, because every other stamp is one row of a table or one line of a log
+# where the abbreviation is what keeps the column narrow.
+MONTHS_LONG: dict[Language, tuple[str, ...]] = {
+    "tr": (
+        "Ocak",
+        "Şubat",
+        "Mart",
+        "Nisan",
+        "Mayıs",
+        "Haziran",
+        "Temmuz",
+        "Ağustos",
+        "Eylül",
+        "Ekim",
+        "Kasım",
+        "Aralık",
+    ),
+    "en": (
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ),
+}
+
+
+def format_stamp_long(value: datetime | None, language: Language = "en") -> str:
+    """The bulletin's date, spelled out: "6 Eylül 2026 · 16:06".
+
+    No leading zero on the day, because nothing is being lined up in a column
+    here - this is the one date in the interface that is read as a sentence
+    rather than scanned down a table. Each language puts the parts in its own
+    order, which is the whole reason this is not a format string with a
+    placeholder in it.
+    """
+    local = to_local(value)
+    if local is None:
+        return "—"
+    month = MONTHS_LONG.get(language, MONTHS_LONG["en"])[local.month - 1]
+    if language == "en":
+        return f"{month} {local.day}, {local.year} · {local:%H:%M}"
+    return f"{local.day} {month} {local.year} · {local:%H:%M}"
+
+
 @pass_context
 def stamp_filter(context, value: datetime | None) -> str:
     """`|stamp` in a template, reading the page's language off the render context."""
@@ -224,7 +278,7 @@ async def build_header(
     return Header(
         # No run, no stamp: the bar used to show the current time, which is a
         # number nobody measured dressed as one somebody did.
-        stamp=format_stamp(run.started_at, language) if run else None,
+        stamp=format_stamp_long(run.started_at, language) if run else None,
         n_stories=n_stories,
         n_sources=n_sources,
         bulletin_language=(run.language if run is not None and run.language != language else None),
