@@ -18,6 +18,7 @@ can explain.
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 from dataclasses import dataclass, field
@@ -36,19 +37,51 @@ log = logging.getLogger(__name__)
 # Outlets append their own name to the headline; two feeds carrying one story
 # would otherwise differ by exactly that suffix.
 # The en and em dashes are deliberate: real headlines separate with them.
-_SOURCE_SUFFIX = re.compile(r"\s*[|–—-]\s*[\w .'&]{2,30}$")
+# Whitespace is required on *both* sides of the separator. With `\s*` the
+# hyphen inside a product name counted as one: "OpenAI begins rolling out
+# GPT-6 Astra" normalised to `openai begins rolling out gpt` and "llm-gemini
+# 0.34" to `llm`, which then merged with an unrelated benchmark post
+# (2026-09-04 run; reports/research/2026-09-05_quality-evaluation.md).
+_SOURCE_SUFFIX = re.compile(r"\s+[|–—-]\s+[\w .'&]{2,30}$")
 # Section prefixes from aggregators, which say nothing about the story.
 _PREFIX = re.compile(r"^\s*(show hn|ask hn|tell hn|launch hn|video|watch|opinion)\s*:\s*", re.I)
 _NON_WORD = re.compile(r"[^\w\s]", re.UNICODE)
 _SPACE = re.compile(r"\s+")
 
 
+# Below this many tokens a title is a name, not a sentence - "Fable 5.1",
+# "GPT-6 Astra" - and `token_set_ratio` scores any long headline containing
+# those words at 100. Such a title matches only its exact twin.
+MIN_TITLE_TOKENS = 4
+
+
 def normalize_title(title: str) -> str:
     """Reduce a headline to the words that carry the story."""
-    text = _PREFIX.sub("", title or "").strip()
+    # Feeds ship entities verbatim ("&#8216;messy&#8217;"); unescaped first so
+    # the quote is punctuation to strip rather than the tokens "8216" and "8217".
+    text = _PREFIX.sub("", html.unescape(title or "")).strip()
     text = _SOURCE_SUFFIX.sub("", text)
     text = _NON_WORD.sub(" ", text.lower())
     return _SPACE.sub(" ", text).strip()
+
+
+def is_short_title(normalized: str) -> bool:
+    return len(normalized.split()) < MIN_TITLE_TOKENS
+
+
+def titles_match(a: str, b: str, threshold: int) -> bool:
+    """The pairwise decision, on two *normalised* titles.
+
+    The loop below asks the same question through `process.extractOne` for
+    speed; this function is the reference the golden-pair test holds it to.
+    A short title on either side is only ever its own duplicate: the fuzzy
+    score is a subset test in disguise there.
+    """
+    if not a or not b:
+        return False
+    if is_short_title(a) or is_short_title(b):
+        return a == b
+    return fuzz.token_set_ratio(a, b) >= threshold
 
 
 @dataclass(slots=True)
@@ -112,14 +145,36 @@ async def dedupe_candidates(
 
     candidate_ids = {a.id for a in candidates}
     reference = await _reference_titles(session, settings, exclude=candidate_ids)
-    ref_ids = [rid for rid, _ in reference]
-    ref_titles = [title for _, title in reference]
+    # Two pools, because the two kinds of title are matched differently: a
+    # sentence-length headline goes through the fuzzy scorer, a name-length one
+    # ("Fable 5.1") is looked up exactly. Keeping the short ones out of the fuzzy
+    # pool is what stops a long candidate matching a short reference at 100.
+    ref_ids: list[int] = []
+    ref_titles: list[str] = []
+    short_refs: dict[str, int] = {}
+    for rid, title in reference:
+        if is_short_title(title):
+            short_refs.setdefault(title, rid)
+        else:
+            ref_ids.append(rid)
+            ref_titles.append(title)
 
     survivors: list[int] = []
     for article in candidates:
         title = normalize_title(article.title)
         if not title:
             survivors.append(article.id)
+            continue
+
+        if is_short_title(title):
+            twin = short_refs.get(title)
+            if twin is not None:
+                article.dup_of = twin
+                stats.n_duplicates += 1
+                stats.pairs.append((article.id, twin, 100.0))
+                continue
+            survivors.append(article.id)
+            short_refs[title] = article.id
             continue
 
         match = process.extractOne(

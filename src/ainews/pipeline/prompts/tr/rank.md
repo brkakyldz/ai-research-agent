@@ -9,7 +9,9 @@ Sonra `editor_note` yaz.
 Ölçütler:
 - Bu hafta birinin yapabileceklerini değiştiriyor mu? Bu her şeyin önünde gelir.
 - Birincil kaynak (işi yapan laboratuvar) hakkındaki yorumdan üstündür.
-- Aynı olayın üç açısı yerine tek güçlü haberi tercih et.
+- Aynı olayın üç açısı yerine tek güçlü haberi tercih et. Birkaç haber aynı
+  olayı anlatıyorsa temsilci birincil kaynağın haberidir; yorum seçilmez,
+  elenir.
 - Önem puanları haberler tek tek, birbirini görmeden verildi. Günün bağlamı
   onları yanlış çıkarıyorsa düzelt.
 

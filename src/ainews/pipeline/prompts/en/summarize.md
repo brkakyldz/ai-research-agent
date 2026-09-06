@@ -10,6 +10,8 @@ Rules:
 - No hedging, no "the article discusses", no restating the headline.
 - If the body is thin or missing, say only what the title and the fragment
   support. Never invent a number, a date, a name or a quote.
+- Use a figure only if it appears in the text; if the text gives none, give
+  none. A rounded or converted figure is a figure the text did not give.
 - `why_it_matters` is **one sentence, at most 20 words**, about the consequence
   for someone building with AI. If there is no real consequence, say so plainly.
   Do not restate a sentence from the summary.

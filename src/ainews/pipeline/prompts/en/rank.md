@@ -9,7 +9,9 @@ most important first. Then write `editor_note`.
 Judge on:
 - Does it change what someone can build this week? That outranks everything.
 - A primary source (the lab that did the thing) outranks commentary about it.
-- Prefer one strong story over three angles on the same event.
+- Prefer one strong story over three angles on the same event. When several
+  items cover one event, the representative is the primary source's item;
+  the commentary is dropped, not chosen.
 - The importance scores were assigned one article at a time, without sight of
   the others. Correct them where the day's context makes them wrong.
 

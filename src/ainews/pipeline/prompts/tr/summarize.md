@@ -10,6 +10,8 @@ Kurallar:
 - Yuvarlak laf yok, "haberde ele alınıyor" yok, başlığı tekrar etme.
 - Gövde ince ya da eksikse yalnızca başlığın ve eldeki parçanın desteklediğini
   yaz. Sayı, tarih, isim ya da alıntı **uydurma**.
+- Bir rakamı yalnızca metinde geçiyorsa kullan; metin rakam vermiyorsa sen de
+  verme. Yuvarlanmış ya da çevrilmiş bir rakam, metnin vermediği bir rakamdır.
 - `why_it_matters` **tek cümle, en fazla 20 kelime**: yapay zekâ ile geliştirme
   yapan biri için sonucu ne. Gerçek bir sonucu yoksa bunu açıkça söyle.
   Özetteki bir cümleyi tekrarlama.

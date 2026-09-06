@@ -294,6 +294,66 @@ async def test_a_run_with_nothing_to_summarise_still_closes(
     assert run.finished_at is not None
 
 
+async def test_rank_tokens_are_priced_at_the_rank_model(
+    session: AsyncSession, settings: Settings
+) -> None:
+    """The two model knobs can differ (ADR 0001); the run's cost has to know
+    which tokens went where. Until 2026-09-06 everything was priced as the
+    summariser, which was right only by coincidence."""
+    from ainews.pipeline.nodes.persist import TOKEN_CARRIER_ID, persist_run
+
+    src = Source(name="Lab", url="https://lab.dev/feed")
+    session.add(src)
+    await session.flush()
+    art = Article(
+        source_id=src.id, title="t", url="https://lab.dev/1", url_canonical="https://lab.dev/1"
+    )
+    run = Run(kind="manual", language="en")
+    session.add_all([art, run])
+    await session.commit()
+
+    split = settings.model_copy(
+        update={"openai_model": "gpt-5.6-terra", "openai_model_summarize": "gpt-5.6-luna"}
+    )
+    state = {
+        "run_id": run.id,
+        "language": "en",
+        "summaries": [
+            {
+                "article_id": art.id,
+                "title_local": "t",
+                "summary": "s",
+                "why_it_matters": "w",
+                "tags": [],
+                "importance": 3,
+                "tokens_in": 1000,
+                "tokens_out": 100,
+            },
+            {
+                "article_id": TOKEN_CARRIER_ID,
+                "title_local": "",
+                "summary": "",
+                "why_it_matters": "",
+                "tags": [],
+                "importance": 3,
+                "tokens_in": 5000,
+                "tokens_out": 300,
+            },
+        ],
+        "ranked": [{"article_id": art.id, "rank": 1}],
+        "errors": [],
+    }
+    await persist_run(session, state, split)  # type: ignore[arg-type]
+
+    await session.refresh(run)
+    expected = estimate_cost("gpt-5.6-luna", 1000, 100) + estimate_cost("gpt-5.6-terra", 5000, 300)
+    assert run.est_cost_usd == pytest.approx(expected)
+    assert run.est_cost_usd > estimate_cost("gpt-5.6-luna", 6000, 400), (
+        "priced everything as luna: the old, wrong number"
+    )
+    assert (run.tokens_in, run.tokens_out) == (6000, 400)
+
+
 # -- ranking fallbacks --------------------------------------------------------
 
 

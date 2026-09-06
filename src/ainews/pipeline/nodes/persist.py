@@ -66,8 +66,17 @@ async def persist_run(
             )
         )
 
-    tokens_in = sum(s["tokens_in"] for s in (state.get("summaries") or []))
-    tokens_out = sum(s["tokens_out"] for s in (state.get("summaries") or []))
+    # The rank call rides on the carrier payload and is priced at *its* model.
+    # Until 2026-09-06 every token was costed at `openai_model_summarize`, which
+    # is only right while the two knobs point at the same model - the day the
+    # summariser moves up to terra (ADR 0001) the run row would have lied.
+    carrier = [s for s in (state.get("summaries") or []) if s["article_id"] == TOKEN_CARRIER_ID]
+    rank_in = sum(s["tokens_in"] for s in carrier)
+    rank_out = sum(s["tokens_out"] for s in carrier)
+    summarize_in = sum(s["tokens_in"] for s in payloads)
+    summarize_out = sum(s["tokens_out"] for s in payloads)
+    tokens_in = summarize_in + rank_in
+    tokens_out = summarize_out + rank_out
     errors = state.get("errors") or []
 
     run.finished_at = utcnow()
@@ -76,7 +85,9 @@ async def persist_run(
     run.n_summarized = len(by_article)
     run.tokens_in = tokens_in
     run.tokens_out = tokens_out
-    run.est_cost_usd = estimate_cost(settings.openai_model_summarize, tokens_in, tokens_out)
+    run.est_cost_usd = estimate_cost(
+        settings.openai_model_summarize, summarize_in, summarize_out
+    ) + estimate_cost(settings.openai_model, rank_in, rank_out)
     run.editor_note = state.get("editor_note") or None
     run.error = "\n".join(errors[:MAX_STORED_ERRORS]) or None
     # "partial" is a real outcome, not a failure: a feed 404ed or three articles
