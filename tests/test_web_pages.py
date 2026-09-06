@@ -986,3 +986,24 @@ def test_the_bar_spells_the_bulletins_date_out(client: TestClient, digest: Run) 
     body = client.get("/").text
     assert 'class="bar__date"' in body
     assert str(datetime.now(UTC).year) in body.split('class="bar__date"', 1)[1][:200]
+
+
+def test_the_why_plate_is_never_the_surface_it_is_inset_into(client: TestClient) -> None:
+    """A plate the same colour as the card it sits in is not a plate.
+
+    `--plate` was `#FFFFFF` in light, which was a step up from the page while the
+    story sat directly on it. The story got a card back on 2026-09-07 and the
+    card is white: the same token became invisible in the one theme where the
+    block it draws - the conclusion of every story - has no other mark on it.
+    Both themes, both values, checked against the surface underneath.
+    """
+    css = client.get("/static/theme.css").text
+
+    def token(name: str) -> tuple[str, str]:
+        raw = css.split(f"--{name}:", 1)[1].split(";", 1)[0]
+        light, dark = raw.split("light-dark(", 1)[1].rsplit(")", 1)[0].split(",")
+        return light.strip().lower(), dark.strip().lower()
+
+    plate, panel = token("plate"), token("panel")
+    assert plate[0] != panel[0], "the plate vanishes into the card in the light theme"
+    assert plate[1] != panel[1], "the plate vanishes into the card in the dark theme"

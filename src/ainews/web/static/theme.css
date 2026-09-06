@@ -32,8 +32,14 @@
      dark is a 5-6 L step above the page and in light is under two - F4F5F7 on
      EFF0F2, a plate you have to look for. The plate was chosen for being read
      as a different kind of thing at a glance (A1), so it takes the same step in
-     both themes: light's second layer over the page is white. */
-  --plate:   light-dark(#FFFFFF, #1A1E24);
+     both themes.
+
+     Light's value was #FFFFFF while the story sat directly on the page: white
+     over EFF0F2 was the step. The story got a card back on 2026-09-07 (ADR
+     0021) and the card is white, so the plate had to move to the other side of
+     it - a step DOWN from the surface it is inset into, which is what "inset"
+     meant in both themes all along. Dark was already doing that. */
+  --plate:   light-dark(#F1F3F6, #1A1E24);
 
   --line:      light-dark(rgba(16,18,22,.08),  rgba(255,255,255,.07));
   --line-soft: light-dark(rgba(16,18,22,.055), rgba(255,255,255,.04));
@@ -88,6 +94,12 @@
   --pri-ink:      light-dark(#FFFFFF, #FFFFFF);
 
   --pill-bg:      light-dark(#E7E9ED, #1A1E24);
+  /* The topic filter's chips. One step off the page at rest and one more under
+     the pointer: enough to say "these are controls" without any of them
+     reaching the weight of the headline six lines below. The one you are
+     standing in takes the primary fill, which is a job the accent already has
+     (DESIGN.md) and not a fourth one. */
+  --chip-hover:   light-dark(#D8DCE3, #232932);
   --pill-acc-bg:  light-dark(#1A5FD6, rgba(90,155,255,.16));
   --pill-acc-ink: light-dark(#FFFFFF, #5A9BFF);
 
@@ -1097,18 +1109,32 @@ kbd {
 
 /* ---------- the story list ---------- */
 
-.feed { list-style: none; margin: 0; padding: 0; }
-/* Space, then a hairline - in that order of importance. The rule is the
-   fallback for a reader running down the page fast; the 26px of air above and
-   below each story is what actually separates them. A hover fill was removed
-   with the panel: a row that lights up under the pointer is a table idiom, and
-   nothing here is a row you click. */
+.feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+/* One card per story, and this is the third answer to where a story stops.
+
+   It was a panel around the whole list until 2026-09-06, then nothing at all:
+   26px of air and a hairline between rows, on the argument that three frames
+   deep - page, panel, row - is what made a page of prose read as a dashboard
+   (ADR 0013). That was right about the frame it removed and wrong about the one
+   it left: the panel had been drawn around fifteen stories, which is a box that
+   says nothing, and taking it off put the boundary back on a hairline that says
+   the least a boundary can. A story here is five blocks - who, what, the
+   summary, why it matters, and the reader's own verdict - and the last of them
+   is a plate, so the hairline was separating two stories with a weaker line
+   than the one inside each of them.
+
+   The card is one frame per thing, which is the count the earlier rule was
+   arguing for and did not get. It is the `.panel` recipe exactly - light lifts
+   with a shadow, dark draws a hairline - so nothing about a surface is decided
+   twice (ADR 0021). Still no hover fill: a row that lights up under the pointer
+   is a table idiom, and nothing here is a row you click. */
 .item {
-  padding: 26px 0;
-  border-bottom: 1px solid var(--line-soft);
+  padding: 20px 22px 18px;
+  border-radius: var(--r);
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  box-shadow: var(--shadow);
 }
-.item:first-child { padding-top: 6px; }
-.item:last-child { border-bottom: 0; }
 
 /* There is no lead treatment. The day's first story used to be dressed as one -
    a plate, a border and a 30px headline - and that dressing said "first in the
@@ -1327,26 +1353,42 @@ kbd {
    step of air that says so. With the feed's panel gone (ADR 0013) nothing was
    left between the last pill and the first source line but the pill's own 5px
    of padding, and the two read as one block. */
-.filter { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
-.tags { display: flex; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.filter { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+.tags { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 /* A topic is a word, and a word set in a monospaced face at 11px is read one
    letter at a time. Body face, one step up, and the pill grown to match: this
-   row is a control, and it was the smallest thing on the page. */
+   row is a control, and it was the smallest thing on the page.
+
+   The fill came back on 2026-09-07. Every chip but the current one was drawn on
+   nothing, which was right while the feed was a run of prose on the page: an
+   unfilled pill among unfilled pills is a word with a hit area, and seven
+   filled ones would have been seven objects competing with the headline. With
+   the stories in cards (ADR 0021) the row above them was the only thing left
+   floating, and a control that is the one unbounded object on a page of bounded
+   ones does not read as quieter - it reads as unfinished. The fill is a
+   surface, not ink: one step off the page, no weight, and the words stay
+   `--ink-2`. Capsules rather than the old 8px radius, so a row of them is told
+   apart from the cards under it at a glance. */
 .tags a {
   font-size: 12.5px;
   font-weight: 500;
-  padding: 5px 11px;
-  border-radius: 8px;
-  background: transparent;
+  padding: 6px 13px;
+  border-radius: 999px;
+  background: var(--pill-bg);
   color: var(--ink-2);
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 /* The count is not dimmed. It was `opacity: .65`, which composited an 11px
    digit down to 2.7:1 on the pill in the light theme - small text, no
    large-text discount, and a number nobody can read is not a quieter number. */
-.tags a b { font-weight: 400; }
-.tags a:hover { background: var(--pill-bg); color: var(--ink-0); }
-.tags a[aria-current] { background: var(--pill-acc-bg); color: var(--pill-acc-ink); }
+.tags a b { font-weight: 400; margin-left: 3px; }
+.tags a:hover { background: var(--chip-hover); color: var(--ink-0); }
+/* The filter you are standing in, and it is the only accent in the row. It
+   takes the primary fill in both themes rather than `--pill-acc-bg`, which is
+   the rail count's soft wash: at a step off the page like everything else in
+   the row it stopped being the answer to "which of these is on". */
+.tags a[aria-current] { background: var(--pri-bg); color: var(--pri-ink); }
+.tags a[aria-current]:hover { background: var(--pri-bg-hover); color: var(--pri-ink); }
 
 /* The disclosure is the last pill of the row, not a control beside it. As a
    sibling of the row it took a flex line of its own the moment the pills
@@ -1356,19 +1398,22 @@ kbd {
    to lay out. */
 .more { flex: none; }
 .more[open] { flex: 1 1 100%; }
+/* The same chip as the topics beside it - it is one more item in the row until
+   it is opened, so it is drawn as one. */
 .more summary {
   list-style: none;
   cursor: pointer;
   width: fit-content;
   font-size: 12.5px;
   font-weight: 500;
-  padding: 5px 11px;
-  border-radius: 8px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  background: var(--pill-bg);
   color: var(--ink-2);
   white-space: nowrap;
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.more summary:hover { background: var(--pill-bg); color: var(--ink-0); }
+.more summary:hover { background: var(--chip-hover); color: var(--ink-0); }
 .more summary::-webkit-details-marker { display: none; }
 .more summary::after { content: " +"; }
 .more[open] summary::after { content: " −"; }
