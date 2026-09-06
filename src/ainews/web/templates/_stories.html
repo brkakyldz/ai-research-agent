@@ -1,21 +1,76 @@
 {# The story list. Shared by the digest page, the archive and search results,
-   because they are the same list read at three different times. #}
-<ol class="list">
+   because they are the same list read at three different times.
+
+   One story is read top to bottom in this order: who said it and when, what
+   happened, what it says, why it matters, what it is about, and where to go
+   next. That order is the page's whole argument - it is what separates this
+   from a feed reader - so it is the same on every item and it never reorders.
+
+   Below a score of 3 the item collapses to its headline. The reader is
+   scanning by then, and a summary they will not read is a summary in the way
+   of the next headline they will.
+
+   Every row is built the same way, first one included. The day's first story
+   used to carry a `data-lead` attribute and a plate to go with it; a list that
+   sizes its headlines by score cannot also size one of them by position without
+   the reader having to guess which of the two he is looking at (ADR 0014). #}
+<ol class="feed">
   {% for story in stories %}
   <li class="item p{{ story.importance }}">
-    <p class="item__meta mono">
+    <p class="item__m">
       {# lang="en" is load-bearing, not decoration. The page is lang="tr", and
-         CSS `text-transform: uppercase` follows the element's language: Turkish
-         maps i to İ, so "OpenAI" renders as "OPENAİ" and "TechCrunch AI" as
+         a Turkish locale maps i to İ: any uppercasing - here, or in a future
+         style - renders "OpenAI" as "OPENAİ" and "TechCrunch AI" as
          "TECHCRUNCH Aİ". A source name is a brand, not Turkish prose. #}
-      <span class="src" lang="en">{{ story.source|lower }}</span>
-      {% if story.age %}<span>{{ story.age }}</span>{% endif %}
+      <span class="src" lang="en">
+        <span class="favi" aria-hidden="true">{{ story.source[0] }}</span>{{ story.source }}
+      </span>
+      {% if story.age %}<span class="when">{{ story.age }}</span>{% endif %}
+      {# Three bars, not five, and the band decides how many are lit rather
+         than the raw 1-5 score. The five were a shape with no legend: the
+         reader could see that some were filled and had been told nothing about
+         what filled them. The word beside them is the legend and it is the same
+         word on every item; the bars are now the same three steps that word
+         has, so the two say one thing instead of nearly the same thing twice.
+
+         `lit` is worked out here rather than in CSS because it is data - how
+         much of the scale this story reaches - and CSS holds how it looks. #}
+      {% set band = story.importance|band %}
+      {% set lit = {'high': 3, 'mid': 2, 'low': 1}[band] %}
+      <span class="score score--{{ band }}">
+        <span class="score__l">{{ t['impact_' + band] }}</span>
+        <span class="bars" aria-hidden="true">{% for n in range(1, 4) %}<i class="{{ 'f' if n <= lit }}"></i>{% endfor %}</span>
+      </span>
     </p>
-    <h2 class="item__title"><a href="{{ story.url }}" target="_blank" rel="noreferrer noopener">{{ story.title_local }}</a></h2>
-    <p class="item__sum">
-      {{ story.summary }}
-      {# "Why it matters" is bold inside the sentence, not a labelled block. #}
-      {% if story.why_it_matters %}<b>{{ story.why_it_matters }}</b>{% endif %}
+
+    <h2 class="item__t"><a href="{{ story.url }}" target="_blank" rel="noreferrer noopener">{{ story.title_local }}</a></h2>
+
+    <p class="item__s">{{ story.summary }}</p>
+
+    {% if story.why_it_matters %}
+    <div class="why">
+      <p class="why__l">{{ t.why_label }}</p>
+      <p class="why__t">{{ story.why_it_matters }}</p>
+    </div>
+    {% endif %}
+
+    <p class="item__f">
+      {% if story.tags %}
+      {# Three, not all of them: the tag row is orientation, and a story
+         carrying eight of them is telling the reader nothing by the fourth.
+         They are set as quiet text rather than as filled pills - the pills at
+         the top of the page are the filter, and forty-five identical pills
+         under the stories made the reader check every one of them to find out
+         which were controls. Same face and size as before, no fill. #}
+      <span class="chips">
+        {% for name in story.tags[:3] %}
+        <a class="chip" href="/?lang={{ language }}&amp;all=1&amp;tag={{ name }}">{{ name }}</a>
+        {% endfor %}
+      </span>
+      {% endif %}
+      <a class="go" href="{{ story.url }}" target="_blank" rel="noreferrer noopener">
+        {{ t.open_source }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      </a>
     </p>
   </li>
   {% endfor %}

@@ -4,8 +4,7 @@ Below are the stories summarised today, each with a number, its source, the
 source's editorial weight and the importance score the summariser gave it.
 
 Pick the **{top_n}** that belong in the digest and put them in reading order,
-most important first. Then write `editor_note`: one or two sentences naming the
-through-line of the day. No greeting, no "today we cover", no list.
+most important first. Then write `editor_note`.
 
 Judge on:
 - Does it change what someone can build this week? That outranks everything.
@@ -13,6 +12,19 @@ Judge on:
 - Prefer one strong story over three angles on the same event.
 - The importance scores were assigned one article at a time, without sight of
   the others. Correct them where the day's context makes them wrong.
+
+`editor_note` is three paragraphs, separated by a blank line, **25 to 40 words
+each** - count them. In order:
+
+1. What led today, and why it is first.
+2. The other thread running through the day: the second story, or what the
+   rest of the list has in common. If the day has only one thread, say what
+   the rest of the list is instead of inventing a second one.
+3. What it means for someone building this week - what changed in what they
+   can do, or what to watch next.
+
+No greeting, no "today we cover", no headings, no bullet points, no numbering.
+Three plain paragraphs of prose.
 
 Return only the numbers, in `order`.
 

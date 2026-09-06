@@ -1,11 +1,13 @@
 """The sources page: what is being polled, what it last said, and two controls.
 
 Enabling and disabling is a form post rather than an HTMX swap, because the row
-it changes is one of eighteen in a table that has to be re-sorted anyway - a full
+it changes is one of sixteen in a table that has to be re-sorted anyway - a full
 render is both simpler and correct.
 
 Adding a feed probes it first. A URL that does not parse as a feed is rejected at
 the moment it is typed, which is the only moment anyone is in a position to fix it.
+A blocked host is rejected before the probe, because no answer it gives would
+change the decision.
 """
 
 from __future__ import annotations
@@ -18,14 +20,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.db import Source, db_session
+from ainews.sources.seed import is_blocked
 from ainews.web import queries
 from ainews.web.i18n import strings
 from ainews.web.views import (
-    base_context,
-    build_header,
     get_templates,
     language_of,
-    remember_language,
+    remember_preferences,
+    shell_context,
 )
 
 log = logging.getLogger(__name__)
@@ -40,17 +42,16 @@ async def sources_page(
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     language = language_of(request)
-    context = base_context(request, language, page="sources")
+    context = await shell_context(request, session, language, page="sources")
     context.update(
         {
             "sources": await queries.source_rows(session),
             "message": message,
             "message_bad": bad,
-            "header": await build_header(session, language),
         }
     )
     response = get_templates().TemplateResponse(request, "sources.html", context)
-    remember_language(response, language)
+    remember_preferences(request, response, language)
     return response
 
 
@@ -81,6 +82,11 @@ async def add_source(
 
     t = strings(lang if lang in ("tr", "en") else "tr")  # type: ignore[arg-type]
     url = url.strip()
+
+    if is_blocked(url):
+        return RedirectResponse(
+            f"/sources?lang={lang}&bad=true&message={t['feed_blocked']}", status_code=303
+        )
 
     existing = (await session.execute(select(Source).where(Source.url == url))).scalar_one_or_none()
     if existing is not None:

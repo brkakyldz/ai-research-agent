@@ -6,7 +6,7 @@ a `#section` fragment. Reducing all of those to one string lets the database's
 unique index do the work, before any fuzzy matching or any LLM call.
 
 Only *tracking* parameters are stripped. A query string can be load-bearing
-(`?id=44001` on Hacker News, `?v=` on YouTube), so the rule is a denylist of
+(`?p=44001` on WordPress, `?v=` on YouTube), so the rule is a denylist of
 known-decorative keys, never an allowlist of keys we happen to recognise.
 """
 

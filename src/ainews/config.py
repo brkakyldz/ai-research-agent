@@ -53,11 +53,13 @@ class Settings(BaseSettings):
     # news; with one, the backlog is skipped and only current items land.
     collect_max_age_days: int = Field(default=7, ge=1, le=365)
 
-    # -- Scheduling -----------------------------------------------------------
+    # -- Collection, and the advice to run --------------------------------------
+    # Only the collect poll is on a clock. The digest is started by hand (ADR
+    # 0015), so what used to be a cron expression is now an interval the /runs
+    # page counts down from the last successful digest - advice, not a trigger.
     scheduler_enabled: bool = True
     collect_interval_hours: int = Field(default=3, ge=1, le=24)
-    digest_cron_hour: int = Field(default=7, ge=0, le=23)
-    digest_cron_minute: int = Field(default=0, ge=0, le=59)
+    digest_suggest_after_hours: int = Field(default=24, ge=1, le=168)
     timezone: str = "Europe/Istanbul"
 
     # -- Storage --------------------------------------------------------------

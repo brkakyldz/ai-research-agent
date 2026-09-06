@@ -1,10 +1,10 @@
 """Entry points for a run.
 
-Three of them, and they are the only three ways work starts: the three-hourly
-collect, the daily digest, and the "Run now" button - which is the digest with a
-different `kind` on the run row, because the delta logic lives in candidate
-selection rather than here (an article already summarised is never a candidate
-again, so pressing the button twice costs nothing twice).
+Two of them, and they are the only two ways work starts: the three-hourly
+collect, and the digest - which a person starts from `/runs` (ADR 0015) or the
+CLI, with `manual` or `digest` written on the run row. The delta logic lives in
+candidate selection rather than here, so an article already summarised is never
+a candidate again and pressing the button twice costs nothing twice.
 
 Each opens a run row before the work and closes it afterwards, including on
 failure. A run that crashed and left `status='running'` forever would be the one
@@ -34,9 +34,9 @@ log = logging.getLogger(__name__)
 RECURSION_LIMIT = 200
 
 # One digest at a time, whatever started it. SQLite has a single writer (ADR 0003)
-# and the scheduler shares this process (ADR 0004), so a module-level claim is the
+# and everything shares this process (ADR 0004), so a module-level claim is the
 # whole concurrency story - but only if every path takes it. It lives here rather
-# than in the web layer because the 07:00 cron never goes through a route, and two
+# than in the web layer because the CLI never goes through a route, and two
 # digests over the same candidates means paying the model twice for one day.
 _digest_lock = asyncio.Lock()
 _digest_running: set[str] = set()

@@ -1,17 +1,16 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <section class="runs" style="margin-top:44px;border-top:0;padding-top:0">
-    <h2>{{ t.sources_heading }}</h2>
-
-    <form action="/sources/add" method="post" class="controls" style="padding:0 0 20px">
-      <input type="hidden" name="lang" value="{{ language }}">
-      <input class="field" type="url" name="url" required
-             placeholder="{{ t.add_feed }}" aria-label="{{ t.add_feed }}" style="min-width:22rem">
-      <button class="lnk" type="submit" style="font-size:13px">{{ t.add }}</button>
-      {% if message %}<span class="mono {{ 'bad' if message_bad else '' }}"
-            style="text-transform:none;letter-spacing:0">{{ message }}</span>{% endif %}
-    </form>
+  <section class="panel">
+    <div class="ph">
+      <form action="/sources/add" method="post" class="controls">
+        <input type="hidden" name="lang" value="{{ language }}">
+        <input class="field" type="url" name="url" required
+               placeholder="{{ t.add_feed }}" aria-label="{{ t.add_feed }}">
+        <button class="btn" type="submit">{{ t.add }}</button>
+        {% if message %}<span class="raw {{ 'bad' if message_bad else '' }}">{{ message }}</span>{% endif %}
+      </form>
+    </div>
 
     <div class="scroll">
     <table>
@@ -24,7 +23,9 @@
       <tbody>
         {% for row in sources %}
         <tr>
-          <td lang="en" style="color:{{ 'var(--ink-1)' if row.source.enabled else 'var(--ink-3)' }}">{{ row.source.name }}</td>
+          {# A disabled feed stays in the list at a lower ink step rather than
+             disappearing: it is still a decision the reader made. #}
+          <td lang="en" {% if row.source.enabled %}class="strong"{% endif %}>{{ row.source.name }}</td>
           <td>{{ '%.1f'|format(row.source.weight) }}</td>
           <td>{{ row.n_articles }}</td>
           <td {% if row.source.consecutive_failures %}class="bad"{% endif %}>{{ row.source.last_status or '—' }}</td>
@@ -32,9 +33,7 @@
             <form action="/sources/toggle" method="post">
               <input type="hidden" name="lang" value="{{ language }}">
               <input type="hidden" name="source_id" value="{{ row.source.id }}">
-              <button class="lnk" type="submit" style="font-size:12px">
-                {{ t.disable if row.source.enabled else t.enable }}
-              </button>
+              <button class="lnk" type="submit">{{ t.disable if row.source.enabled else t.enable }}</button>
             </form>
           </td>
         </tr>

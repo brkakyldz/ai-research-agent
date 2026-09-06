@@ -1,20 +1,147 @@
 {% extends "base.html" %}
 
 {% block content %}
-  <section class="runs" style="margin-top:44px;border-top:0;padding-top:0">
-    <h2>{{ t.runs_heading }}</h2>
+  {# What used to be a 07:00 cron is this section (ADR 0015). The digest is the
+     one thing here that spends money, so it is started by a person - and a tool
+     that asks to be started owes the reader the four facts the decision needs:
+     what state it is in, why, when it last ran, and how long until running
+     again is worth it.
+
+     It carries no button of its own. The one in the rail is two hundred pixels
+     to the left of this sentence and on every page, so a second copy here would
+     be two controls doing one thing on one screen - the reader wondering
+     whether they differ. This block is the reasoning behind that button, which
+     is the half the button cannot carry.
+
+     It advises and it does not refuse. The rail's button is disabled only when
+     a press could not work at all - a run already in flight, or no key - never
+     because the tool disagrees about the timing. `data-state` changes what this
+     section says, never what the reader is allowed to do; it is on the element
+     so the state is visible in the DOM to a test and to whoever reads it
+     later. #}
+  <section class="advice" data-state="{{ advice.state }}">
+    <div class="advice__say">
+      <p class="advice__state{% if advice.state == 'blocked' %} bad{% endif %}">
+        {%- if advice.state == 'running' %}{{ t.state_running }}
+        {%- elif advice.state == 'blocked' %}{{ t.state_blocked }}
+        {%- elif advice.state == 'never' %}{{ t.state_first }}
+        {%- elif advice.state == 'waiting' %}{{ t.state_waiting }}
+        {%- else %}{{ t.state_due }}{% endif %}
+      </p>
+      <p class="advice__why">
+        {%- if advice.state == 'running' %}{{ t.why_running }}
+        {%- elif advice.state == 'blocked' %}{{ t.why_blocked }}
+        {%- elif advice.state == 'never' %}{{ t.why_first }}
+        {%- elif advice.state == 'waiting' %}{{ t.why_waiting }}
+        {%- else %}{{ t.why_due.format(since=advice.since, n=advice.interval_hours) }}{% endif %}
+      </p>
+    </div>
+
+    {% include "_run_action.html" %}
+
+    {# Three facts in the shape the spend below already uses: a label, a figure,
+       and the one line of detail that makes the figure mean something. #}
+    <div class="advice__facts">
+      <div>
+        <p class="unit__h">{{ t.last_run }}</p>
+        <p class="advice__n num">{{ advice.last.started_at|stamp if advice.last else "—" }}</p>
+        <p class="advice__s{% if advice.last and advice.last.status == 'error' %} bad{% endif %}">
+          {{ t['status_' + advice.last.status] if advice.last else t.no_runs_yet }}
+        </p>
+      </div>
+      <div>
+        <p class="unit__h">{{ t.fact_collect }}</p>
+        <p class="advice__n num">{{ advice.last_collect_at|stamp }}</p>
+        <p class="advice__s">{{ t.sources_ok.format(n=rail.counts.sources) }}</p>
+      </div>
+      <div>
+        <p class="unit__h">{{ t.fact_due }}</p>
+        {# The server renders the first frame and the script below keeps it
+           ticking, so the number is right with JavaScript off and right a
+           minute later with it on. Both walk the same branches, and both read
+           the words off the same strings - the Python half is `format_gap`. #}
+        <p class="advice__n num" id="countdown"
+           {% if advice.due_epoch_ms %}data-due="{{ advice.due_epoch_ms }}"{% endif %}
+           data-t-left="{{ t.left_in }}" data-t-late="{{ t.late_by }}"
+           data-u-moment="{{ t.u_moment }}" data-u-sep="{{ t.u_sep }}"
+           data-u-min="{{ t.u_min }}" data-u-hour="{{ t.u_hour }}" data-u-day="{{ t.u_day }}">
+          {%- if advice.gap is none -%}{{ t.advice_now }}
+          {%- elif advice.seconds_left > 0 -%}{{ t.left_in.format(t=advice.gap) }}
+          {%- else -%}{{ t.late_by.format(t=advice.gap) }}{%- endif -%}
+        </p>
+        <p class="advice__s">{{ advice.due_at|stamp if advice.due_at else t.advice_never }}</p>
+      </div>
+    </div>
+  </section>
+
+  {# This is where the execution numbers live - cost, duration, token counts by
+     way of them. They were on the top bar of every page until 2026-09-05; they
+     are the machine reporting on itself, and this is the page for that. The
+     spend totals joined them on 2026-09-06, off the digest's side column: the
+     same argument, applied to the one copy of them that had stayed behind. #}
+  <section class="totals">
+    <div>
+      <p class="unit__h">{{ t.cost_today }}</p>
+      <p class="totals__n num">{{ activity.cost_today|money }}</p>
+    </div>
+    <div>
+      <p class="unit__h">{{ t.cost_week }}</p>
+      <p class="totals__n num">{{ activity.cost_week|money }}</p>
+    </div>
+    <div>
+      <p class="unit__h">{{ t.cost_month }}</p>
+      <p class="totals__n num">{{ activity.cost_month|money }}</p>
+    </div>
+  </section>
+
+  <section class="panel">
     <div class="scroll">{% include "_runs_table.html" %}</div>
   </section>
 
   {% if failures %}
-  <section class="runs">
-    <h2>{{ t.status_error }}</h2>
-    {% for r in failures %}
-    <p class="mono" style="margin-bottom:10px">
-      <span class="bad">{{ r.started_at|clock }}</span>
-      <span style="text-transform:none;letter-spacing:0">{{ r.error }}</span>
-    </p>
-    {% endfor %}
+  <section class="panel">
+    <div class="ph"><h2>{{ t.status_error }}</h2></div>
+    <ul class="pb fails">
+      {% for r in failures %}
+      <li class="raw"><span class="bad">{{ r.started_at|clock }}</span> {{ r.error }}</li>
+      {% endfor %}
+    </ul>
   </section>
   {% endif %}
+
+{# The one script on this page, and it redraws one line. The units come off the
+   element as data attributes rather than being spelled here, because the
+   sentence is a translated string and this file must not hold a second copy of
+   it. A minute is the resolution the reader needs; it ticks every second only
+   so the "under a minute" step does not sit there for a full minute after the
+   time has actually passed. The state line above does not re-render when the
+   countdown crosses zero - that would need a second copy of the state rule in
+   JavaScript, and a page held open across the boundary is rarer than the bug
+   that copy would eventually become. #}
+<script>
+(function () {
+  var el = document.getElementById('countdown');
+  if (!el || !el.dataset.due) return;
+  var d = el.dataset;
+  var due = Number(d.due);
+
+  function words(ms) {
+    var minutes = Math.floor(Math.abs(ms) / 60000);
+    if (minutes < 1) return d.uMoment;
+    if (minutes < 60) return minutes + d.uSep + d.uMin;
+    var hours = Math.floor(minutes / 60), rest = minutes % 60;
+    if (hours >= 48) return Math.floor(hours / 24) + d.uSep + d.uDay;
+    if (!rest) return hours + d.uSep + d.uHour;
+    return hours + d.uSep + d.uHour + ' ' + rest + d.uSep + d.uMin;
+  }
+
+  function tick() {
+    var left = due - Date.now();
+    el.textContent = (left > 0 ? d.tLeft : d.tLate).replace('{t}', words(left));
+  }
+
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
 {% endblock %}

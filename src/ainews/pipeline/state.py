@@ -63,8 +63,15 @@ class ArticleSummary(BaseModel):
 class RankedDigest(BaseModel):
     """What the rank node must return for a whole run."""
 
+    # A word count, not a sentence count. "One or two sentences" was the ask
+    # until 2026-09-05 and the model answered with whatever length it liked;
+    # a number of words is a constraint it actually honours.
     editor_note: str = Field(
-        description="One or two sentences naming the through-line of the day. No greeting."
+        description=(
+            "Three paragraphs separated by a blank line, 25-40 words each: what led "
+            "today, the day's other thread, what it means for someone building this "
+            "week. No greeting, no headings, no bullets."
+        )
     )
     order: list[int] = Field(
         description=(

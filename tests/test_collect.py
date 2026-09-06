@@ -12,7 +12,7 @@ from ainews.config import Settings
 from ainews.db import Article, Source
 from ainews.pipeline.nodes.collect import collect_articles
 from ainews.sources.rss import fetch_feed, make_client, parse_feed_bytes
-from ainews.sources.seed import load_seed_feeds, sync_sources
+from ainews.sources.seed import is_blocked, load_seed_feeds, sync_sources
 
 FEED_URL = "https://example.com/feed.xml"
 
@@ -206,6 +206,29 @@ def test_shipped_feed_list_is_well_formed() -> None:
     assert len(urls) == len(set(urls)), "duplicate feed URL in feeds.yaml"
     assert all(str(u).startswith("https://") for u in urls)
     assert not any("arxiv" in str(u).lower() for u in urls), "arXiv was ruled out in PLAN.md"
+    assert not any(is_blocked(str(u)) for u in urls), "the shipped list ships a blocked host"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://hnrss.org/newest?points=100",
+        "https://news.ycombinator.com/rss",
+        "https://www.reddit.com/r/LocalLLaMA/.rss",
+        "https://old.reddit.com/r/MachineLearning/.rss",
+        "http://REDDIT.COM/r/singularity/.rss",
+    ],
+)
+def test_blocked_hosts_are_refused_however_they_are_spelled(url: str) -> None:
+    assert is_blocked(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://simonwillison.net/atom/everything/", "https://notreddit.com/feed", "not a url"],
+)
+def test_blocking_is_host_scoped_and_does_not_overreach(url: str) -> None:
+    assert not is_blocked(url)
 
 
 async def test_seeding_is_additive_and_respects_operator_changes(session: AsyncSession) -> None:

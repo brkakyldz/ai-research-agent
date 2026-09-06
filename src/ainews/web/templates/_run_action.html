@@ -1,0 +1,69 @@
+{# The press, and the question in front of it.
+
+   Two states of one fragment, swapped by two GET routes that render this file.
+   The button no longer starts a run: it asks one. `evet` is the only thing in
+   the app that spends money, and it is now two deliberate clicks away from
+   idle, which is what a control with a price on it should cost.
+
+   The question is not "are you sure", and it does not repeat the state line
+   above it - a reader who got this far has read that. It is the two facts that
+   line cannot carry and nobody recalls on demand: what this press will actually
+   do, and what the last one cost. Before the first run there is no measured
+   cost, so the second line is simply absent rather than estimated. #}
+<div id="run-action" class="act">
+  {% if asking %}
+  <p class="act__q">{{ t.confirm_what.format(n=n_sources) }}</p>
+  {%- if last_cost %}
+  <p class="act__c">{{ t.confirm_cost.format(c=last_cost|money) }}</p>
+  {%- endif %}
+
+  {# The one choice the press carries, and the only place in the app where a
+     language decision costs money. It is deliberately not the bar's TR/EN
+     switch: that one says what the buttons are written in, this one says what
+     the model will write (ADR 0017). Same two-slot shape as the switch, because
+     it is the same kind of question - both states drawn, the current one marked
+     - and each slot re-renders the question with the other `out=`, so choosing
+     is a swap rather than client state. It starts on the page's language,
+     because that is what a reader pressing here almost always wants. #}
+  <div class="act__l">
+    <span class="act__lb">{{ t.out_language }}</span>
+    <div class="seg seg--out" role="group" aria-label="{{ t.out_language }}">
+      {%- for code in ('tr', 'en') %}
+      <button type="button" lang="{{ code }}"
+              {% if out == code %}aria-current="true"{% endif %}
+              hx-get="/runs/confirm?lang={{ language }}&amp;out={{ code }}"
+              hx-target="#run-action" hx-swap="outerHTML">{{ t['lang_' ~ code] }}</button>
+      {%- endfor %}
+    </div>
+  </div>
+
+  <div class="act__r">
+    {# The one press that costs money. It answers into the bar's status readout,
+       then fetches this fragment back to rest - where it renders disabled,
+       because by then the claim is taken. Two requests rather than one reply
+       carrying both, so `/runs/start` stays the short path a second press
+       races against. #}
+    <button class="btn btn--pri"
+            hx-post="/runs/start?lang={{ language }}&amp;out={{ out }}"
+            hx-target="#run-status" hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            hx-on::before-request="document.getElementById('bar').classList.add('is-running')"
+            hx-on::after-request="htmx.ajax('GET', '/runs/action?lang={{ language }}', {target: '#run-action', swap: 'outerHTML'})">
+      {{ t.confirm_yes }}
+    </button>
+    <button class="btn"
+            hx-get="/runs/action?lang={{ language }}"
+            hx-target="#run-action" hx-swap="outerHTML">
+      {{ t.confirm_no }}
+    </button>
+  </div>
+  {% else %}
+  <button class="btn btn--pri act__go"
+          {% if not advice.ready %}disabled{% endif %}
+          hx-get="/runs/confirm?lang={{ language }}"
+          hx-target="#run-action" hx-swap="outerHTML">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 10-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
+    <span>{{ t.run_start }}</span>
+  </button>
+  {% endif %}
+</div>

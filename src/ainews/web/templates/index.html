@@ -1,53 +1,179 @@
 {% extends "base.html" %}
 
+{# Two columns on a wide screen: the day, and what the day was about. The
+   reading column keeps its measure; the side column takes the width that was
+   going to be empty either way. #}
+{% block main_mod %} main--split{% endblock %}
+
 {% block content %}
-  {% if not run %}
-    <p class="empty">{{ t.empty_digest }}</p>
-  {% else %}
+  <div class="stack">
+    {% if not run %}
+      <div class="panel"><p class="empty">{{ t.empty_digest }}</p></div>
+    {% else %}
 
-  {% if editor_note %}
-  <section class="intro">
-    <p class="mono">{{ t.note_label }}</p>
-    <p>{{ editor_note }}</p>
-  </section>
-  {% endif %}
+    <section class="feed-col">
+      {% if tags %}
+      {# Six topics, then the rest behind a disclosure. Every tag the day
+         produced used to be laid out at once - thirteen of them, which is not a
+         filter but a second list to read before the list. #}
+      {# The disclosure is inside the row, as its last pill, and not a control
+         beside it: as a sibling of the pills it landed on a flex line of its
+         own the moment the row wrapped, which put it alone on a third line
+         with the width of the panel to its left. A `<div>` rather than a `<p>`
+         because `<details>` is flow content and cannot live in a paragraph. #}
+      <div class="filter">
+        <div class="tags">
+          <a href="/?lang={{ language }}{% if show_all %}&amp;all=1{% endif %}"
+             {% if not tag %}aria-current="true"{% endif %}>{{ t.all_tags }}</a>
+          {% for name, count in tags[:6] %}
+          <a href="/?lang={{ language }}&amp;tag={{ name }}{% if show_all %}&amp;all=1{% endif %}"
+             {% if tag == name %}aria-current="true"{% endif %}>{{ name }} <b>{{ count }}</b></a>
+          {% endfor %}
+          {% if tags|length > 6 %}
+          <details class="more"{% if tag and tag not in tags[:6]|map(attribute=0)|list %} open{% endif %}>
+            <summary>{{ t.more_topics }}</summary>
+            <div class="tags">
+              {% for name, count in tags[6:] %}
+              <a href="/?lang={{ language }}&amp;tag={{ name }}{% if show_all %}&amp;all=1{% endif %}"
+                 {% if tag == name %}aria-current="true"{% endif %}>{{ name }} <b>{{ count }}</b></a>
+              {% endfor %}
+            </div>
+          </details>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
 
-  {% include "_stories.html" %}
+      {% include "_stories.html" %}
 
-  {% if n_others %}
-  <p class="more">
-    {# The expander is a link, not a toggle: the URL has to survive a reload
-       and be shareable, which a JavaScript-only disclosure would not. #}
-    <a class="lnk" style="font-size:14px" href="/?lang={{ language }}&amp;all=1{% if tag %}&amp;tag={{ tag }}{% endif %}">
-      {{ t.show_others.format(n=n_others) }}
-    </a>
-    <span class="mono">{{ t.all_summarised }}</span>
-  </p>
-  {% endif %}
+      {% if n_others %}
+      <p class="feed__f">
+        {# The expander is a link, not a toggle: the URL has to survive a reload
+           and be shareable, which a JavaScript-only disclosure would not. #}
+        <a class="lnk" href="/?lang={{ language }}&amp;all=1{% if tag %}&amp;tag={{ tag }}{% endif %}">
+          {{ t.show_others.format(n=n_others) }}
+        </a>
+        <span class="hint">{{ t.all_summarised }}</span>
+      </p>
+      {% endif %}
+    </section>
 
-  <div class="controls">
-    <form action="/search" method="get">
-      <input type="hidden" name="lang" value="{{ language }}">
-      <input class="field" type="search" name="q" placeholder="{{ t.search_placeholder }}" aria-label="{{ t.search }}">
-      <button class="lnk" type="submit" style="font-size:13px">{{ t.search }}</button>
-    </form>
+    {% endif %}
   </div>
 
-  {% if tags %}
-  <p class="tags">
-    <a href="/?lang={{ language }}{% if show_all %}&amp;all=1{% endif %}"
-       {% if not tag %}aria-current="true"{% endif %}>{{ t.all_tags }}</a>
-    {% for name, count in tags %}
-    <a href="/?lang={{ language }}&amp;tag={{ name }}{% if show_all %}&amp;all=1{% endif %}"
-       {% if tag == name %}aria-current="true"{% endif %}>{{ name }} {{ count }}</a>
-    {% endfor %}
-  </p>
-  {% endif %}
+  {# The side column is the day read sideways: the note a person would write,
+     what the day was about, how heavy it was, how big it was against the week -
+     and, last and smallest, whether the machine that made it is well.
 
-  <section class="runs">
-    <h2>{{ t.runs_heading }}</h2>
-    <div class="scroll">{% include "_runs_table.html" %}</div>
-  </section>
+     It used to open with the machine and close with the spend. Both are
+     execution metrics, which ADR 0009 already ruled belong on `/runs`; the
+     column had kept a copy of them at the top of the page and given the day's
+     own shape no room at all.
 
-  {% endif %}
+     Every figure here is still read off rows the pipeline wrote - `topic_pulse`
+     off this run's tags and the week behind them, `impact_split` off the list
+     in the column beside it. Nothing is projected, sampled or filled in. #}
+  <aside class="side" aria-label="{{ t.side_label }}">
+
+    {# The brief heads the column rather than the reading one. It answers
+       "what happened today" - and so does the first headline, better, so the
+       headline gets the top of the page and the brief gets the column beside
+       it. The size of the day travels with it: those three counts are the
+       brief's own footnote, not a fourth figure for the cards below. #}
+    {% if editor_note %}
+    <section class="brief brief--side">
+      <div class="brief__b">
+        <p class="brief__l">{{ t.brief_label }}</p>
+        <div class="brief__t">{% for para in editor_note|paragraphs %}<p>{{ para }}</p>{% endfor %}</div>
+      </div>
+      <p class="brief__m brief__c">{{ t.brief_meta.format(n=header.n_stories, s=header.n_sources, g=n_topics) }}</p>
+    </section>
+    {% endif %}
+
+    {% if topics %}
+    {# What the day was about, in the order the day put them. The bar is the
+       topic's share of the run, so the reader can see whether six stories is
+       most of the day or a corner of it. "Rising" is the one comparative claim
+       on the page and it is spelled out in the title attribute rather than left
+       as a glyph to decode. #}
+    <section class="unit">
+      <p class="unit__h">{{ t.side_themes }}</p>
+      <ul class="topics">
+        {% for topic in topics %}
+        <li>
+          <a href="/?lang={{ language }}&amp;tag={{ topic.name }}"
+             {% if tag == topic.name %}aria-current="true"{% endif %}>
+            <span class="topics__n">{{ topic.name }}</span>
+            {% if topic.rising %}
+            <span class="rise" title="{{ t.rising_hint }}">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17l6-6 4 4 6-7"/><path d="M14 8h6v6"/></svg>
+              <span class="vh">{{ t.rising }}</span>
+            </span>
+            {% endif %}
+            {# The share sits on the line, between the word and its count, so
+               the six rows read as one small chart rather than six rules. #}
+            <span class="topics__b" aria-hidden="true"><i style="width: {{ topic.share }}%"></i></span>
+            <span class="topics__c">{{ topic.n }}</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if split %}
+    {# The feed's own shape: how many of the stories in view are worth stopping
+       for. It uses the story list's meter, at the story list's colours, so the
+       three rows here and the bars down the page are one system read twice. #}
+    <section class="unit">
+      <p class="unit__h">{{ t.side_impact }}</p>
+      <ul class="split">
+        {% for band, n in split %}
+        {% set lit = {'high': 3, 'mid': 2, 'low': 1}[band] %}
+        <li class="score--{{ band }}{{ ' is-off' if not n }}">
+          <span class="bars" aria-hidden="true">{% for i in range(1, 4) %}<i class="{{ 'f' if i <= lit }}"></i>{% endfor %}</span>
+          <span class="split__l">{{ t['impact_' + band] }}</span>
+          <span class="split__n">{{ n }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {# A bar per local day, scaled to the tallest. The accent marks today and
+       nothing else here - the same job it does in the rail. #}
+    <section class="unit">
+      <p class="unit__h">{{ t.side_week }}</p>
+      {% set tallest = activity.days|map(attribute='n')|max %}
+      <ul class="chart">
+        {% for day in activity.days %}
+        <li{% if day.today %} class="on"{% endif %} title="{{ t.day_stories.format(d=day.label, n=day.n) }}">
+          <span class="chart__t"><span class="chart__b" style="height: {{ (100 * day.n / tallest)|round|int if tallest else 0 }}%"></span></span>
+          <span class="chart__d">{{ day.label }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    {# Last, smallest, and one line per fact. This is the whole of what the
+       machine gets to say on the reading page; the numbers behind it are a
+       click away and that click is the last thing in the column. #}
+    <section class="unit unit--foot">
+      <p class="unit__h">{{ t.side_status }}</p>
+      <p class="status">
+        {% if activity.last %}
+        <span class="{{ 'bad' if activity.last.status in ('error', 'partial') else 'ok' }}">{{ t['status_' + activity.last.status] }}</span>
+        <span class="status__d mono">{{ activity.last.started_at|stamp }}</span>
+        {% else %}
+        <span>{{ t.no_runs_yet }}</span>
+        {% endif %}
+      </p>
+      <p class="status status--src">
+        <span>{{ t.sources_ok.format(n=activity.n_sources) }}</span>
+        {% if activity.n_failing %}<span class="bad">{{ t.sources_failing.format(n=activity.n_failing) }}</span>{% endif %}
+      </p>
+      <p><a class="lnk" href="/runs?lang={{ language }}">{{ t.open_runs }}</a></p>
+    </section>
+
+  </aside>
 {% endblock %}

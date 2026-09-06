@@ -2,7 +2,7 @@
 
 The dashboard is the interface, but a pipeline you cannot run from a terminal is
 a pipeline you cannot debug. Everything here calls the same functions the
-scheduler and the "Run now" button call - there is no second implementation.
+collect job and the dashboard's run button call - there is no second implementation.
 """
 
 from __future__ import annotations
@@ -62,6 +62,24 @@ async def _sources() -> int:
     return 0
 
 
+def _serve() -> int:
+    """Run the dashboard.
+
+    Host and port come from `Settings`, which reads `HOST` and `PORT` off the
+    environment - so a launcher that hands the process a free port is obeyed,
+    instead of a number baked into a command line that is wrong the moment
+    something else is already listening on it.
+
+    Not part of `dispatch`: `uvicorn.run` owns its own event loop, so it must
+    not be started from inside one.
+    """
+    import uvicorn
+
+    settings = get_settings()
+    uvicorn.run("ainews.web.app:app", host=settings.host, port=settings.port, workers=1)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ainews", description="AI news digest agent")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -74,14 +92,18 @@ def main(argv: list[str] | None = None) -> int:
         "--mode",
         choices=("digest", "manual"),
         default="manual",
-        help="'digest' is the scheduled 07:00 run; 'manual' is the same work, labelled",
+        help="'manual' is what the dashboard button writes; 'digest' is the same work, labelled",
     )
 
     sub.add_parser("sources", help="list the seeded feeds and their last status")
     sub.add_parser("init", help="create the database and seed the feed list")
+    sub.add_parser("serve", help="run the dashboard on HOST:PORT from the environment")
 
     args = parser.parse_args(argv)
     configure_logging(get_settings().log_level)
+
+    if args.command == "serve":
+        return _serve()
 
     async def dispatch() -> int:
         try:

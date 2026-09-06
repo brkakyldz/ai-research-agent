@@ -2,7 +2,7 @@
 
 Tavily is the last resort, not a source. It is reached only when a feed gave us
 a headline and no body and trafilatura could not fetch one either - typically a
-Hacker News link to a page that blocks scrapers.
+linkblog pointing at a page that blocks scrapers.
 
 The free tier is 1,000 credits a month, so the cap is the whole point of this
 module. It lives in the `daily_counters` table rather than in a module-level

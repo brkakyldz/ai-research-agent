@@ -2,26 +2,31 @@
 
 {% block content %}
   {% if not runs %}
-    <p class="empty">{{ t.empty_archive }}</p>
+    <div class="panel"><p class="empty">{{ t.empty_archive }}</p></div>
   {% else %}
-  <section class="intro">
-    <p class="mono">{{ t.archive_heading }}</p>
-    <p class="tags" style="padding-top:8px">
-      {% for r in runs %}
-      <a href="/archive?lang={{ language }}&amp;run={{ r.id }}"
-         {% if selected and r.id == selected.id %}aria-current="true"{% endif %}>{{ r.started_at|clock }}</a>
-      {% endfor %}
-    </p>
+
+  {% if selected and selected.editor_note %}
+  <section class="brief">
+    <div class="brief__b">
+      <p class="brief__l">{{ t.brief_label }}</p>
+      <div class="brief__t">{% for para in selected.editor_note|paragraphs %}<p>{{ para }}</p>{% endfor %}</div>
+    </div>
+    <p class="brief__m mono">{{ selected.started_at|stamp }}</p>
+  </section>
+  {% endif %}
+
+  <section class="feed-col">
+    <div class="filter">
+      <div class="tags">
+        {% for r in runs %}
+        <a href="/archive?lang={{ language }}&amp;run={{ r.id }}"
+           {% if selected and r.id == selected.id %}aria-current="true"{% endif %}>{{ r.started_at|clock }}{% if r.language != language %} · <span lang="{{ r.language }}">{{ t['lang_' ~ r.language] }}</span>{% endif %}</a>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if selected %}{% include "_stories.html" %}{% endif %}
   </section>
 
-  {% if selected %}
-    {% if selected.editor_note %}
-    <section class="intro">
-      <p class="mono">{{ t.note_label }}</p>
-      <p>{{ selected.editor_note }}</p>
-    </section>
-    {% endif %}
-    {% include "_stories.html" %}
-  {% endif %}
   {% endif %}
 {% endblock %}

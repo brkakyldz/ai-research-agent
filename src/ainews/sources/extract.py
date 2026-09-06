@@ -2,8 +2,8 @@
 
 Feeds fall into three groups. Some ship the whole post in `content:encoded`,
 which needs only tag-stripping. Some ship a two-line teaser, which is thin but
-often enough. Hacker News ships a title and someone else's URL, which is nothing
-at all.
+often enough. A linkblog or a newsletter roundup ships a sentence and someone
+else's URL, which is nearly nothing at all.
 
 So there are two functions: `clean_html` for the first two, and `fetch_article`
 for the third. Both go through trafilatura, whose job is exactly this - pulling
@@ -83,7 +83,11 @@ def fetch_article(url: str, timeout: float = 15.0) -> str:
     try:
         response = httpx.get(url, headers=DEFAULT_HEADERS, follow_redirects=True, timeout=timeout)
         response.raise_for_status()
-    except httpx.HTTPError as exc:
+    # `InvalidURL` is not an `HTTPError`: httpx raises it while building the
+    # request, for a stored feed link like `http://[::1` or an un-encodable IDNA
+    # host. Uncaught it escapes `asyncio.gather` in the enrich node and fails the
+    # whole run over one bad link - the same trap `rss.fetch_feed` guards against.
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         log.debug("body fetch failed for %s: %s", url, exc)
         return ""
 

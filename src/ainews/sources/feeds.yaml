@@ -9,8 +9,13 @@
 # the thing - outrank commentary about it.
 #
 # No arXiv, deliberately (PLAN.md): ~300 items/day would dominate ranking, and
-# the papers that matter reach the digest through Hacker News, Hugging Face and
-# Simon Willison anyway.
+# the papers that matter reach the digest through Hugging Face and Simon Willison
+# anyway.
+#
+# No Hacker News and no r/LocalLLaMA, dropped 2026-09-04: both are firehoses that
+# arrive as a title plus someone else's link, so every item that ranks costs an
+# extra extraction round, and neither is a primary source. Removed rather than
+# shipped-disabled - a default list is an editorial position, not a menu.
 #
 # Verified live on 2026-09-04; see reports/research/2026-09-04_ai-news-newsletter-agent.md.
 
@@ -45,10 +50,6 @@
   weight: 1.8
 
 # Aggregators and commentary.
-- name: Hacker News (100+ points)
-  url: https://hnrss.org/newest?points=100
-  weight: 1.1
-
 - name: Simon Willison
   url: https://simonwillison.net/atom/everything/
   weight: 1.5
@@ -86,8 +87,3 @@
 - name: Ars Technica - AI
   url: https://arstechnica.com/ai/feed/
   weight: 1.0
-
-# Rate-limits aggressively without a browser User-Agent, and sometimes anyway.
-- name: r/LocalLLaMA
-  url: https://www.reddit.com/r/LocalLLaMA/.rss
-  weight: 0.8

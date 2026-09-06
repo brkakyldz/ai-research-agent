@@ -90,7 +90,9 @@ async def _insert_new_items(
 
     urls = [i.url_canonical for i in fresh]
     known: set[str] = set()
-    # SQLite caps a statement at 999 bound parameters by default.
+    # Chunked because the `IN` list is unbounded, not because 999 is the cap:
+    # SQLite raised SQLITE_MAX_VARIABLE_NUMBER to 32766 in 3.32. One statement
+    # per 500 feeds keeps the query planner's job small either way.
     for start in range(0, len(urls), 500):
         chunk = urls[start : start + 500]
         rows = await session.execute(

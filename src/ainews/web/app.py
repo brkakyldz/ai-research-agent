@@ -2,8 +2,9 @@
 
 The app owns three things: the database lifecycle (created on start,
 WAL-checkpointed on stop), the seeded feed list, and the scheduler - which lives
-here rather than in its own process so that the cron path and the "Run now"
-button call the same function (ADR 0004).
+here rather than in its own process so that the timed path and the button call
+the same function (ADR 0004). Since ADR 0015 the scheduler winds one job, the
+feed poll; the digest is started by a person from `/runs`.
 """
 
 from __future__ import annotations

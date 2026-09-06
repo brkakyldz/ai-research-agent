@@ -13,11 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ainews.db import Run, db_session
 from ainews.web import queries
 from ainews.web.views import (
-    base_context,
-    build_header,
     get_templates,
+    impact_split,
     language_of,
-    remember_language,
+    remember_preferences,
+    shell_context,
 )
 
 router = APIRouter()
@@ -31,9 +31,11 @@ async def index(
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     language = language_of(request)
-    run = await queries.latest_digest_run(session, language)
+    # Not filtered by `language`: the shell's switch translates the interface,
+    # it does not choose which bulletin exists (ADR 0017).
+    run = await queries.latest_digest_run(session)
 
-    context = base_context(request, language, page="digest")
+    context = await shell_context(request, session, language, page="digest", run=run)
     context.update(
         {
             "run": run,
@@ -41,23 +43,52 @@ async def index(
             "stories": [],
             "n_others": 0,
             "tags": [],
+            "n_topics": 0,
+            "topics": [],
+            "split": [],
             "tag": tag,
             "show_all": all,
-            "runs": [],
-            "header": await build_header(session, language, run),
+            # The side column reports on the machine, so it is filled whether or
+            # not there is a digest to read - an empty page is exactly when the
+            # reader wants to know when the last run was and what it said.
+            "activity": await queries.recent_activity(session),
         }
     )
 
     if run is not None:
-        stories = await queries.stories_for_run(session, run, ranked_only=not all, tag=tag)
+        stories = await queries.stories_for_run(
+            session, run, language=language, ranked_only=not all, tag=tag
+        )
         context["stories"] = stories
         # Only offer the expander when there is something behind it.
         context["n_others"] = 0 if all else await queries.count_unranked(session, run)
-        context["tags"] = await queries.tag_counts(session, run)
-        context["runs"] = await queries.recent_runs(session, limit=8)
+        # Every count on this page is a count of the list the reader can reach.
+        # `all=1` widens the list, so it widens the counts with it - a filter
+        # pill promising 27 stories on a page that holds fifteen, and returning
+        # four when pressed, was three numbers disagreeing about one day.
+        ranked_only = not all
+        # The filter row follows the list on screen; the whole list is fetched
+        # so the row can draw twelve of it and the disclosure the rest.
+        topics_shown = await queries.tag_counts(session, run, limit=200, ranked_only=ranked_only)
+        context["tags"] = topics_shown[:12]
+        # The brief's footnote does not follow it. That line is the size of the
+        # *digest* - the same eleven stories the rail badge counts - so opening
+        # `?all=1` must not leave "11 haber" beside a topic count taken over
+        # ninety-one. It counted `tags|length` until 2026-09-06, which was the
+        # row's twelve-item cap reporting itself as a measurement.
+        context["n_topics"] = (
+            len(topics_shown)
+            if ranked_only
+            else len(await queries.tag_counts(session, run, limit=200))
+        )
+        # The two intelligence panels in the side column. Both are read off the
+        # same rows the feed is: `topic_pulse` counts the run's tags against the
+        # week behind it, `impact_split` counts the list already in `context`.
+        context["topics"] = await queries.topic_pulse(session, run, ranked_only=ranked_only)
+        context["split"] = impact_split(stories)
 
     response = get_templates().TemplateResponse(request, "index.html", context)
-    remember_language(response, language)
+    remember_preferences(request, response, language)
     return response
 
 
@@ -68,22 +99,25 @@ async def archive(
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     language = language_of(request)
-    runs = await queries.digest_runs(session, language)
+    runs = await queries.digest_runs(session)
     selected: Run | None = None
     if runs:
         selected = next((r for r in runs if r.id == run), runs[0])
 
-    context = base_context(request, language, page="archive")
+    context = await shell_context(request, session, language, page="archive", run=selected)
     context.update(
         {
             "runs": runs,
             "selected": selected,
-            "stories": await queries.stories_for_run(session, selected) if selected else [],
-            "header": await build_header(session, language, selected),
+            "stories": (
+                await queries.stories_for_run(session, selected, language=language)
+                if selected
+                else []
+            ),
         }
     )
     response = get_templates().TemplateResponse(request, "archive.html", context)
-    remember_language(response, language)
+    remember_preferences(request, response, language)
     return response
 
 
@@ -94,14 +128,13 @@ async def search(
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     language = language_of(request)
-    context = base_context(request, language, page="search")
+    context = await shell_context(request, session, language, page="search")
     context.update(
         {
             "query": q,
             "stories": await queries.search_stories(session, q, language) if q.strip() else [],
-            "header": await build_header(session, language),
         }
     )
     response = get_templates().TemplateResponse(request, "search.html", context)
-    remember_language(response, language)
+    remember_preferences(request, response, language)
     return response

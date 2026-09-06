@@ -1,235 +1,1408 @@
 /* =========================================================
-   AI DIGEST - a daily reading tool
+   AI DIGEST - a daily reading tool, in a console shell
    ---------------------------------------------------------
-   Copied from mockups/digest.html, which stays the source of
-   truth for palette and scale. The rationale is in DESIGN.md;
-   what is repeated here is only what a line needs to be read.
+   Palette and scale came from mockups/v3/*.html; the editorial
+   story block and the shell's information architecture came
+   from the 2026-09-05 revision. DESIGN.md holds the why,
+   ADR 0008 the shell, ADR 0009 this revision. What is repeated
+   here is only what a line needs in order to be read.
 
-   This is not a portfolio page, it is a tool. Nobody has to be
-   persuaded, so there is no hero, no card, no glass, no grain,
-   no scroll reveal. All of those are atmosphere, and atmosphere
-   is an instrument of persuasion.
+   The page is still a tool, not a landing page: no hero, no
+   glass, no grain, no scroll reveal. The accent marks three
+   things and no fourth - the active rail item, the primary
+   action, and the filter you are standing in. --alarm marks a
+   failure. Nothing else on the page is coloured.
 
-   The only hierarchy device on the page is typography, and it
-   is not invented: a headline's size comes from the story's
-   importance score. That is why there is no rank number, no
-   importance badge and no coloured marker - all three were
-   annotations repeating what the type already said.
+   THEMING. `color-scheme` inherits, and every `light-dark()`
+   beneath it recomputes - so three states (follow system /
+   forced dark / forced light) come out of one token block
+   instead of three. `light-dark()` takes colours only, so the
+   surface differences between the two themes (light draws
+   with shadow, dark draws with a hairline) are expressed as
+   colours that go transparent, never as a second rule block.
    ========================================================= */
 
 :root {
-  --bg:      #0F1113;   /* flat. no layer, no wash, no vignette */
-  --bg-soft: #15181B;   /* hover and table rows only */
+  color-scheme: light dark;
 
-  /* Ink steps. The importance score moves between these; with no
-     separate accent colour, the steps do real work. */
-  --ink-0: #EDEEF0;
-  --ink-1: #C3C7CC;
-  --ink-2: #979CA4;
-  --ink-3: #6B7079;
+  --page:    light-dark(#EFF0F2, #0E1013);  /* the window behind the panels */
+  --panel:   light-dark(#FFFFFF, #15181D);  /* panel fill */
+  --panel-2: light-dark(#F4F5F7, #1A1E24);  /* second layer: row hover, inset */
+  /* The "why it matters" plate. It took `--panel-2` until 2026-09-05, which in
+     dark is a 5-6 L step above the page and in light is under two - F4F5F7 on
+     EFF0F2, a plate you have to look for. The plate was chosen for being read
+     as a different kind of thing at a glance (A1), so it takes the same step in
+     both themes: light's second layer over the page is white. */
+  --plate:   light-dark(#FFFFFF, #1A1E24);
 
-  --line:      rgba(255, 255, 255, 0.07);
-  --line-soft: rgba(255, 255, 255, 0.035);
+  --line:      light-dark(rgba(16,18,22,.08),  rgba(255,255,255,.07));
+  --line-soft: light-dark(rgba(16,18,22,.055), rgba(255,255,255,.04));
 
-  /* The ONLY colour on the page. Not decoration - errors. */
-  --alarm: #D4756A;
+  /* Ink steps. The importance score moves between these, so the steps do
+     real work. Every one of them clears 4.5:1 on both --page and --panel:
+     the 11px mono labels are small text, and small text gets no discount. */
+  --ink-0: light-dark(#14171C, #F2F3F5);
+  --ink-1: light-dark(#3C424B, #C6CAD1);
+  --ink-2: light-dark(#545B65, #8F959F);
+  --ink-3: light-dark(#646B75, #7C838D);
+
+  /* The secondary colour is a blue (2026-09-05, Berke): the light, slightly
+     cool blue of a ChatGPT call to action, not a cyan and not a violet. Dark
+     takes #5A9BFF - 6.3:1 on the panel; light takes the same hue dropped to
+     #1A5FD6, which is 5.8:1 on white and 5.0:1 on the page behind it. One hue,
+     two values, because a value bright enough to carry a dark panel is 1.9:1
+     on a white one. */
+  --accent:      light-dark(#1A5FD6, #5A9BFF);
+  --accent-soft: light-dark(rgba(26,95,214,.10), rgba(90,155,255,.16));
+  --good:        light-dark(#15794C, #5FD08A);
+  --alarm:       light-dark(#B93B31, #E0736A);
+
+  /* The impact scale, and the third job colour was given on 2026-09-05. It is
+     deliberately NOT --alarm and --good reused: those two mean "this run
+     failed" and "this run finished", and a low-impact story is neither. Same
+     hues, different tokens, so a future change to the run status cannot
+     silently repaint the story list. Red reads as "skip this", green as "read
+     this" - which is what the reader is sorting for. */
+  --imp-low:  light-dark(#CE3A2C, #EE5B4C);
+  --imp-mid:  light-dark(#B76410, #F2933A);
+  --imp-high: light-dark(#15794C, #46C486);
+
+  /* Surfaces. Light lifts with a shadow and drops the hairline; dark does
+     the reverse. Both live here as colours that vanish in the other theme. */
+  --shadow-near: light-dark(rgba(16,18,22,.05), transparent);
+  --shadow-far:  light-dark(rgba(16,18,22,.14), transparent);
+  --shadow: 0 1px 2px var(--shadow-near), 0 8px 24px -12px var(--shadow-far);
+  --panel-line: light-dark(transparent, rgba(255,255,255,.07));
+  --raised:     light-dark(#FFFFFF, #15181D);   /* button, field, rail footer */
+  --raised-2:   light-dark(#FFFFFF, #1A1E24);   /* their hover */
+
+  --nav-on-bg:   light-dark(rgba(26,95,214,.10), #1A1E24);
+  --nav-on-ink:  light-dark(#1A5FD6, #F2F3F5);
+  --nav-on-ring: light-dark(transparent, rgba(255,255,255,.07));
+
+  /* The one filled button on the page. White on blue in both themes, the way
+     the reference does it - an inverted pale button in dark would read as a
+     second accent rather than as the same one. */
+  --pri-bg:       light-dark(#1A5FD6, #2A63D8);
+  --pri-bg-hover: light-dark(#1750B8, #3672EC);
+  --pri-ink:      light-dark(#FFFFFF, #FFFFFF);
+
+  --pill-bg:      light-dark(#E7E9ED, #1A1E24);
+  --pill-acc-bg:  light-dark(#1A5FD6, rgba(90,155,255,.16));
+  --pill-acc-ink: light-dark(#FFFFFF, #5A9BFF);
+
+  --seg-bg:        light-dark(#E4E6EA, #15181D);
+  --seg-on-bg:     light-dark(#FFFFFF, #1A1E24);
+  --seg-on-shadow: light-dark(rgba(16,18,22,.10), transparent);
+
+  --row-hover: light-dark(#FAFAFB, #171B21);
+  /* The rail is told apart from the page by a step of tone, not by a rule.
+     A 1px border down the full height of the window is the loudest line on a
+     page whose whole argument is that lines are expensive. */
+  --rail-bg: light-dark(#E7E9ED, #0A0C0F);
+  --bar-off:   light-dark(#E2E4E9, rgba(255,255,255,.09));
+  /* A chart bar is data, not a track: it needs to be legible on its own, which
+     the score bars' unfilled state deliberately is not. */
+  --chart-bar: light-dark(#C2C7CF, rgba(255,255,255,.20));
+  --brand-bg:  light-dark(#1A5FD6, #1A2331);
+  --brand-ink: light-dark(#FFFFFF, #5A9BFF);
+
+  /* The brief panel's three stops. Tokens inside one gradient rather than a
+     `light-dark()` wrapped around two gradients: `light-dark()` is specified
+     over colours, so a gradient inside it renders in Chromium but is not
+     something the spec promises. This also gives both themes the lift; only
+     dark used to have it. */
+  --brief-1: light-dark(#24365C, #1F2F52);
+  --brief-2: light-dark(#17223A, #141D30);
+  --brief-3: light-dark(#101828, #0D1420);
 
   --sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
 
+  --r: 14px;
+  --r-sm: 10px;
+  --rail: 264px;
+  /* The page's outer width, and the two parts of it that are the side column.
+     Every page is `--measure` wide, whether or not it draws a side column, so
+     the content's right edge never moves between pages. */
+  --measure: 1460px;
+  --side-w: 324px;
+  --split-gap: 32px;
+  /* Where the side column starts and stops: the sticky bar's height plus the
+     main's top padding. It is a token because two rules need it to agree -
+     the column's `top` and the height it is allowed to grow to. */
+  --side-top: 78px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur: 180ms;
+  --dur: 170ms;
 }
+
+/* The two forced states. Nothing but `color-scheme` is restated: every
+   token above recomputes on its own once this line lands. */
+html[data-theme="light"] { color-scheme: light; }
+html[data-theme="dark"]  { color-scheme: dark; }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  background: var(--bg);
+  background: var(--page);
   color: var(--ink-1);
   font-family: var(--sans);
-  font-size: 15px;
-  line-height: 1.62;
-  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.6;
+  font-synthesis: none;
+  /* Nothing on this page is allowed to make the window scroll sideways; a
+     table that is too wide scrolls inside its own box instead. */
+  overflow-x: hidden;
 }
-h1, h2, h3 { margin: 0; font-weight: 600; line-height: 1.25; letter-spacing: -0.015em; color: var(--ink-0); }
+h1, h2, h3 {
+  margin: 0;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--ink-0);
+}
 p, ul, ol { margin: 0; }
 a { color: inherit; text-decoration: none; }
-::selection { background: rgba(255,255,255,0.16); }
-:focus-visible { outline: 1px solid var(--ink-1); outline-offset: 3px; }
+svg { display: block; }
+::selection { background: var(--accent-soft); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
-.wrap { max-width: 47rem; margin-inline: auto; padding: 0 24px; }
+/* The keyboard's way past a fixed rail and a sticky bar. */
+.skip {
+  position: fixed;
+  left: 10px;
+  top: -60px;
+  z-index: 60;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  background: var(--pri-bg);
+  color: var(--pri-ink);
+  font-size: 13px;
+  transition: top var(--dur) var(--ease);
+}
+.skip:focus { top: 10px; }
 
-/* mono micro-label - date, source, counter, table heading */
+/* Two kinds of small text, and until 2026-09-05 they were one class.
+
+   `.mono` is machine output - a timestamp, an id, a column of digits - and it
+   keeps the monospaced face because the characters have to line up under each
+   other. `.lbl` is a word a person put on a section: "why it matters",
+   "activity", "high impact", "more". Setting those in a monospaced face at
+   9.5px under 0.14em of tracking made the letterforms the thing being read
+   instead of the word, and the tracking cost the reader the word shape that
+   would have let them skip it. They take the body face now, and buy their
+   emphasis with weight instead of with space. */
 .mono {
   font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.13em;
+  font-size: 12px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
 }
+/* The section label, third revision and the first one that is not small.
+   ADR 0011 took it out of the monospaced face and left it where it was: 11px,
+   uppercased, tracked 0.05em. That is still the shape of a caption on a stock
+   chart, and at 11px Inter's 600 loses its stems on a 1x screen - Berke read
+   the whole shell as "kucuk ve ucuz" on 2026-09-06, which is what a page reads
+   as when every word around the reading is set below the size type is drawn
+   for. It is sentence case now and 12.5px: the capital at the front does the
+   job the uppercasing was doing, at the cost of nothing, and the strings gained
+   that capital in `i18n.py` the same day.
 
-/* Link = underline. Not colour. There is no accent here at all:
-   the rule turns to ink on hover. */
+   `.why__l` and `th` are no longer in this rule. The first is inside the story
+   block and is set by ADR 0009; the second is a table column and is quieter
+   than a section heading by a step. */
+.lbl, .unit__h {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-2);
+}
+/* The story block's label keeps the uppercase it was given on 2026-09-05: it is
+   a caption under a plate inside the reading, where the reader has already
+   stopped, and not one of the shell's headings. */
+.why__l {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+/* Prose that happens to be small - a status line, a footnote under the feed.
+   Not a label, so neither uppercased nor tracked. */
+.hint { font-size: 12.5px; color: var(--ink-3); }
+/* Machine text that is a sentence rather than a label - an error, a URL.
+   Same face as `.mono`, but uppercasing a stack trace makes it unreadable. */
+.raw {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-2);
+}
+.vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.num {
+  font-weight: 300;
+  letter-spacing: -0.03em;
+  color: var(--ink-0);
+  font-variant-numeric: tabular-nums;
+}
+/* Colour appears in exactly one place: something that failed. */
+.bad { color: var(--alarm); }
+.ok  { color: var(--good); }
+
+/* A link reads as a link. The underline is the affordance, not a colour. */
 .lnk {
-  border: 0; padding: 0; background: none; cursor: pointer;
-  font: inherit; color: var(--ink-1);
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: var(--ink-1);
   border-bottom: 1px solid var(--line);
+  cursor: pointer;
   transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.lnk:hover, .lnk:focus-visible { color: var(--ink-0); border-bottom-color: var(--ink-2); }
-.lnk[aria-current="true"] { color: var(--ink-0); border-bottom-color: var(--ink-1); }
-.lnk:disabled { color: var(--ink-3); cursor: default; }
+.lnk:hover { color: var(--ink-0); border-bottom-color: var(--ink-2); }
 
-/* =========================================================
-   TOP STRIP - one line. Not a title, a status.
-   A masthead would be a persuasion gesture here: you already
-   know what this page is, you open it yourself every morning.
-   ========================================================= */
-.bar {
-  border-bottom: 1px solid var(--line);
-  background: var(--bg);
-  position: sticky; top: 0; z-index: 5;
-}
-.bar__in {
-  display: flex; align-items: center; gap: 20px;
-  height: 46px;
-}
-.bar__stats { display: flex; gap: 16px; margin-left: auto; }
-@media (max-width: 640px) { .bar__stats span:nth-child(n+3) { display: none; } }
+/* ---------- shell ---------- */
 
-/* Work indicator: a 1px line advancing left to right.
-   Not a spinner - a spinner says "waiting", this says "working".
-   In the mockup the width was animated on a fixed timer; a real run
-   takes as long as it takes, so it loops instead of pretending to
-   know a duration it cannot know. */
-.bar__prog {
-  height: 1px; width: 0; background: var(--ink-2);
+.app { display: grid; grid-template-columns: var(--rail) 1fr; min-height: 100vh; }
+.col { min-width: 0; }   /* without this a wide table stretches the grid column */
+
+/* ---------- left rail: navigation, and nothing else ---------- */
+
+.rail {
+  background: var(--rail-bg);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px 14px;
+  gap: 14px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
 }
-.bar.is-running .bar__prog {
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 4px;
+}
+.brand__mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--brand-bg);
+  color: var(--brand-ink);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.brand__w { display: block; min-width: 0; }
+/* The application's own name, and it was set at the size of a nav link with
+   the tagline under it at 11px - the two smallest things in the rail were the
+   two at the top of it. */
+.brand__t { display: block; font-size: 15.5px; color: var(--ink-0); font-weight: 600; letter-spacing: -0.01em; }
+.brand__s { display: block; font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+/* The group label is what turns five links into three kinds of errand. It is
+   never a link itself - a heading you can click is a heading you have to try. */
+/* It takes `.lbl`'s size and weight through this rule's absence: only the ink
+   and the space around it are the rail's business. */
+.nav__g {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-3);
+  padding: 16px 10px 6px;
+}
+.nav__g:first-child { padding-top: 4px; }
+.nav a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 8px 11px;
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  font-size: 14.5px;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.nav a:hover { background: var(--panel); color: var(--ink-1); }
+.nav a[aria-current] {
+  background: var(--nav-on-bg);
+  color: var(--nav-on-ink);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--nav-on-ring);
+}
+/* The icon never travels alone - it is drawn beside the word, never
+   instead of it, which is the whole reason it is allowed here. */
+.nav svg { width: 17px; height: 17px; stroke: currentColor; stroke-width: 1.5; fill: none; flex: none; opacity: .85; }
+.nav a[aria-current] svg { opacity: 1; }
+.nav__l { flex: 1; min-width: 0; }
+
+.pill {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: var(--pill-bg);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.pill--acc { background: var(--pill-acc-bg); color: var(--pill-acc-ink); }
+/* In the rail the pill sits on `--rail-bg`, and in the light theme that is the
+   same #E7E9ED as `--pill-bg` - so the capsule vanished and the count stood as
+   a bare digit beside the link, while in dark the same count wore a capsule.
+   One step up from whatever the rail is drawn on, in both themes. */
+.rail .pill:not(.pill--acc) { background: var(--raised-2); }
+
+/* The foot of the rail, and it is a foot rather than a card. It held one
+   sentence inside a raised box floating in the space under the last link,
+   which read as a note somebody left there. Unboxed, separated by the same
+   hairline the nav groups use, and given the one preference that is not about
+   the content, it reads as the bottom of the rail. */
+.rail__foot {
+  margin-top: auto;
+  padding: 12px 8px 2px;
+  border-top: 1px solid var(--line-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* The runs link, moved out of the record group into the foot on 2026-09-06. It
+   is a nav link and it inherits every nav rule; what it does not inherit is the
+   ink. The five links above it are places to read and they are set in `--ink-2`;
+   this is the place to act, so it takes the accent - the job the accent already
+   has everywhere else on the page, not a sixth colour.
+
+   A filled accent button stood here for one afternoon. It was three objects
+   stacked in the foot of a quiet rail with the loudest of them on top, and the
+   press it offered belonged on the page that explains it. What is left is a
+   link and the one line saying when following it is worth doing. */
+/* It takes `.nav` as well as this class, so the icon sizing, the padding and
+   the hover shape are the list's and not a second copy of them. Only the ink
+   is different, which is the whole point. */
+.run-nav { gap: 3px; }
+.nav--go { color: var(--accent); font-weight: 500; }
+.nav--go:hover, .nav--go[aria-current] { background: var(--accent-soft); color: var(--accent); }
+.rail__next {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 11px 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+/* The value was a fire time and is now a phrase - "in 8h 16m" - so it takes
+   `.raw` rather than `.mono`: same machine face, no uppercasing, because ADR
+   0011 gives the uppercase to machine *output* and a sentence in it shouts. */
+.rail__next .raw { font-size: 12px; color: var(--ink-2); }
+
+/* ---------- top bar: the reader's controls, and nothing else ---------- */
+
+/* Three groups, laid out as three columns rather than as one flex row with an
+   `auto` margin in the middle of it. The middle column is the search box and it
+   is centred on the window, not on whatever is left over after the title - so
+   the box does not move sideways when the page name changes length or the run
+   status appears. The outer columns are `1fr` and equal, which is what holds
+   the middle one still. */
+.top-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 380px) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--line-soft);
+  position: sticky;
+  top: 0;
+  background: var(--page);
+  z-index: 4;
+}
+/* The title column can be narrower than its contents on a 1320px window, and
+   when it is, the stamp is the half that goes - it is the least of the three
+   things in the bar and the only one that is not a control. `min-width: 0` on
+   the stamp is what enforces that: without it the stamp will not shrink, and
+   the item after it - the bulletin's language - is the one that gets cut off
+   instead, which is the opposite of the rule. */
+.bar__id { display: flex; align-items: baseline; gap: 10px; min-width: 0; overflow: hidden; }
+/* The page name, and it was the same size as a nav link. It is the one word
+   that says which of five pages this is, so it is set as a heading. */
+.bar__id h1 { font-size: 17px; font-weight: 600; white-space: nowrap; flex: none; }
+.bar__id .mono { font-size: 12px; color: var(--ink-3); white-space: nowrap; min-width: 0; overflow: hidden; }
+/* Bültenin dili, yalnızca sayfanın dilinden farklıysa çiziliyor. Damga makine
+   çıktısı, bu bir etiket: gövde yüzü, 600 (ADR 0011). Rozet gibi duruyor çünkü
+   bir ölçüm değil, bir uyarı - okuduğun metin arayüzün dilinde değil. Dar
+   ekranda damga gizleniyor, bu kalıyor: biri süs, bu değil. */
+.bar__lang {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+  flex: none;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+/* `min-width: 0` for the same reason `.bar__id` has it: a grid item's automatic
+   minimum is its min-content width, so without it the track grows past its
+   `1fr` rather than letting the row inside it reflow. */
+.bar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.btn {
+  border: 1px solid var(--panel-line);
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 13.5px;
+  padding: 8px 13px;
+  border-radius: 9px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.btn:hover { background: var(--raised-2); color: var(--ink-0); }
+.btn svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.6; fill: none; flex: none; }
+/* One accent button on the page, and it is the only thing that spends money. */
+.btn--pri { background: var(--pri-bg); border-color: transparent; color: var(--pri-ink); font-weight: 500; }
+.btn--pri:hover { background: var(--pri-bg-hover); color: var(--pri-ink); }
+.btn[disabled] { opacity: .55; cursor: default; }
+/* The run log's link, drawn only where the rail has no foot to hold it - the
+   same "written twice, drawn once" rule as `.seg--narrow`. */
+.nav--narrow { display: none !important; }
+
+/* The one field on the page, and the middle of the bar. It draws no shadow:
+   it is not a raised control, it is the lane you type into. */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  background: var(--panel-2);
+  border-radius: 9px;
+  padding: 6px 8px 6px 11px;
   width: 100%;
-  animation: sweep 2.4s var(--ease) infinite;
-  transform-origin: left;
+  color: var(--ink-2);
+  transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease),
+              background var(--dur) var(--ease);
 }
-@keyframes sweep {
-  0%   { transform: scaleX(0); opacity: 0.9; }
-  70%  { transform: scaleX(1); opacity: 0.9; }
-  100% { transform: scaleX(1); opacity: 0; }
+.search:hover { background: var(--panel); }
+/* The whole box takes the focus ring, because the whole box is the target. */
+.search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search:focus-within input { outline: none; }
+.search svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; flex: none; }
+.search input, .field {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink-0);
+  outline: none;
+  width: 100%;
+}
+.field::placeholder, .search input::placeholder { color: var(--ink-2); }
+kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+  flex: none;
 }
 
-/* =========================================================
-   INTRO - the editor's note. The system genuinely produces it,
-   so it stays. It is not dressed up in serif, italic or a huge
-   size: a note is a note.
-   ========================================================= */
-.intro { padding: 44px 0 34px; border-bottom: 1px solid var(--line); }
-.intro p { max-width: 60ch; color: var(--ink-1); font-size: 16px; }
-.intro .mono { margin-bottom: 14px; }
+/* The theme switch is rendered twice and only ever drawn once: in the rail on
+   a wide window, in the bar below 860px where the rail has become a five-slot
+   navigation bar and dropped its foot. Two renders of one control beat a
+   preference that disappears on a phone. */
+.seg--narrow { display: none; }
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  background: var(--seg-bg);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  padding: 3px;
+}
+.seg > * {
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  padding: 6px 10px;
+  border-radius: 7px;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.seg a:hover { color: var(--ink-0); }
+.seg [aria-current] {
+  background: var(--seg-on-bg);
+  color: var(--ink-0);
+  box-shadow: 0 1px 2px var(--seg-on-shadow);
+}
+.seg--theme { grid-template-columns: repeat(3, 1fr); }
+/* In the rail the track sits on a ground one step darker than the page, so it
+   needs an edge of its own to read as a control rather than as a shadow. */
+.rail__foot .seg { box-shadow: inset 0 0 0 1px var(--line-soft); }
+/* Two languages, named in themselves, so a reader scanning for their own
+   language finds the word they would have written. */
+.seg--lang > * { font-weight: 500; }
 
-/* =========================================================
-   STORIES
-   ---------------------------------------------------------
-   One column, no boxes. A card draws a frame, and a frame's job
-   is to separate an object from a background; there is no
-   background here to separate from. Between items there is only
-   space and a rule.
+/* Waiting is a 1px line that advances, not a spinner: a spinner says
+   "I am waiting", a line says "it is running". */
+.prog {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 1px;
+  width: 0;
+  background: var(--accent);
+  transition: width 3.4s linear;
+}
+.is-running .prog { width: 100%; }
 
-   Headline size and colour come from the importance score
-   (.p5 ... .p1). No number states the order; the order is the order.
-   ========================================================= */
-.list { list-style: none; padding: 0; }
+/* ---------- content ---------- */
 
+/* One outer measure, and every page ends at the same place. It was 1120px here
+   and 1460px on the split digest until 2026-09-06, so walking from the digest to
+   the run log moved the right edge of the content 213px to the left and left a
+   228px band of nothing where the side column had been on the previous page.
+   Two pages cannot disagree about where the page ends; the reader reads the
+   difference as a column that is missing rather than as one that was never
+   there. The split page's number wins because it is the one with a layout
+   behind it - 1116 of reading, 32 of gap, 312 of side column. */
+.main {
+  padding: 22px 22px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: var(--measure);
+}
+
+/* The reading column has no container. Until 2026-09-06 the whole feed sat in
+   a `.panel` - a fill, a radius and a hairline drawn around fifteen rows that
+   already separate themselves with a rule and a step of type. Three frames deep
+   (page, panel, row) is what made a page of prose read as a dashboard, and the
+   panel was the frame that carried no information. The rows sit on the page
+   now. Since 2026-09-06 there is no surface in the feed at all: the lead's
+   plate went the same way, for the same reason (ADR 0014). */
+.feed-col { min-width: 0; }
+
+/* On the two pages with no side column the feed would otherwise have the whole
+   window - a hundred and ten characters a line, which is not a measure. The cap
+   is on the column, not on the paragraph: Berke's 2026-09-05 objection was to
+   text stopping short of the box drawn around it, and there is no box here to
+   stop short of, so the column ends where the reading ends.
+
+   The width is the digest's own reading column, which is what this rule always
+   claimed to be and was not: it was a flat 740px against the digest's 1116, so
+   the same story rows were a quarter narrower on `/search` than on `/` and the
+   700px left over read as a side column that had gone missing. It is now the
+   subtraction it describes - the measure, less the column the split page puts
+   there. Change `--measure` and the two stay equal. */
+.main:not(.main--split) .feed-col,
+.main:not(.main--split) > .brief {
+  max-width: calc(var(--measure) - var(--side-w) - var(--split-gap));
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  box-shadow: var(--shadow);
+  border-radius: var(--r);
+}
+.ph {
+  padding: 13px 20px;
+  border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ph h2 { font-size: 15.5px; }
+.ph .mono { margin-left: auto; }
+.pb { padding: 15px 20px; }
+.empty { padding: 44px 20px; color: var(--ink-2); text-align: center; }
+.fails { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- the day's brief ---------- */
+
+/* One label, a few sentences, and the size of the day beside them. The panel
+   is deep in both themes - it is the one place the page inverts - and it is a
+   navy built from the secondary hue, with the same top-right lift in light as
+   in dark.
+
+   On the digest it is `.brief--side`: a card at the head of the side column
+   rather than a band above the feed. Full width it was answering "what
+   happened today" from the position the first headline wanted, and the first
+   headline is the better answer to that question. The archive keeps the band,
+   because there the brief is the only thing above a list of timestamps. */
+.brief {
+  border-radius: var(--r);
+  padding: 14px 18px;
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  background: var(--brief-2);
+  /* One lift, not a spotlight. The radial stop at 78%/8% put a bright corner
+     on a paragraph, which is the kind of decoration this page does not spend
+     on; a linear ramp does the one job that was wanted - the panel is not flat
+     ink - without drawing a light source nothing else on the page has. */
+  background-image: linear-gradient(160deg, var(--brief-1) 0%, var(--brief-2) 52%, var(--brief-3) 100%);
+}
+.brief__b { min-width: 0; }
+/* The label is set in the body face, not the mono one. A mono all-caps kicker
+   reads as a machine tag, and this is the one sentence on the page a person
+   wrote for a person. */
+.brief__l { font-family: var(--sans); font-size: 13px; font-weight: 600; color: #A9BCDD; letter-spacing: 0; }
+/* Three short paragraphs since 2026-09-05, not one block: the brief is read
+   once, standing still, and a single 90-word paragraph in a 30ch column is a
+   wall. The gap between them is smaller than the line height of the body text
+   below, so they still read as one note rather than three notes. */
+.brief__t { color: #E4E7EC; margin-top: 5px; font-size: 14px; line-height: 1.55; max-width: 78ch; }
+.brief__t p + p { margin-top: 9px; }
+.brief__m { margin-left: auto; color: #A9BCDD; white-space: nowrap; flex: none; padding-top: 3px; }
+
+.brief--side {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 14px 16px;
+  /* Below 1240px the side column flattens into a grid; the brief is a
+     paragraph, not a figure, so it takes the whole row above the rest. */
+  grid-column: 1 / -1;
+}
+.brief--side .brief__t { font-size: 13.5px; line-height: 1.55; max-width: none; }
+.brief--side .brief__m {
+  margin: 11px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, .10);
+  white-space: normal;
+}
+/* The size of the day: three counted things, not a machine stamp. Set as the
+   caption it is - mono uppercasing turned "16 kaynak" into a serial number. */
+.brief__c { font-size: 12.5px; font-weight: 500; letter-spacing: 0.01em; }
+
+
+/* ---------- the side column ---------- */
+
+/* Two columns on a wide screen. The reading column keeps its measure and the
+   side column takes the width that was going to be empty anyway. Every figure
+   in it comes off `runs` and `sources` - see `queries.recent_activity`. */
+.main--split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--side-w);
+  gap: var(--split-gap);
+  align-items: start;
+}
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* The side column scrolls itself. Sticky alone pins the box at `top` and
+   leaves whatever does not fit below the fold permanently out of reach: a
+   sticky element never travels, so its own bottom cannot be scrolled into
+   view - the reader had to run the whole feed down and still never saw it.
+   Capping the height at the window and giving it `overflow-y` makes the
+   overflow reachable where it is, and the feed keeps its own scroll.
+
+   `overflow-y: auto` computes the other axis to `auto` too - one axis cannot
+   stay `visible` - so the panels are clipped horizontally as well. That costs
+   nothing here: `--shadow` is `0 1px 2px` and `0 8px 24px -12px`, and a 24px
+   blur pulled in by a 12px negative spread reaches about a pixel sideways. It
+   is a shadow cast downwards, so only the container's top and bottom edges cut
+   anything, which is what an edge content scrolls under is meant to do.
+
+   `scrollbar-gutter: stable` keeps the lane reserved whether or not the column
+   overflows, so the cards do not change width between a long day and a short
+   one. The scrollbar lands on the column's right edge, in line with the feed's. */
+/* It is a bar, and since 2026-09-06 it looks like one. Taking the containers
+   off the feed (ADR 0013) took them off this column too, which left five
+   headings and a run of small figures floating on the page with nothing saying
+   where the reading stopped and the instruments started - Berke read it as part
+   of the screen rather than as a bar beside it. It gets one ground, not five:
+   a single surface around the whole column, the way the rail is one surface
+   around all of its links. The units inside keep their 26px and their labels
+   and gain nothing, so this adds exactly one box to the page and not six.
+
+   `padding-right` is short of `padding-left` by the width of the reserved
+   scrollbar lane, so the content still sits centred in the box. */
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  position: sticky;
+  top: var(--side-top);
+  max-height: calc(100vh - var(--side-top) - 18px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  /* `--chart-bar`, not `--bar-off`: the thumb was 9% white on the dark panel,
+     which is invisible, so a column that ends mid-chart at the window's edge
+     showed a cut bar and nothing saying it could be scrolled. The chart bar is
+     the tone that is legible on its own, which is what a thumb has to be. */
+  scrollbar-color: var(--chart-bar) transparent;
+  background: var(--panel);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  padding: 20px 12px 22px 20px;
+}
+
+/* A unit, not a card. Four bordered boxes stacked down a 296px column is a
+   filing cabinet, and three of the four were reporting on the machine rather
+   than on the day. What separates one unit from the next is 26px and a label -
+   the same two devices the feed uses, so the two columns read as one page.
+
+   The order is the argument: what a person would write about today, what the
+   day was about, how heavy it was, how big against the week, and last and
+   smallest whether the machine is well. */
+.unit { display: block; }
+.unit__h { color: var(--ink-3); margin-bottom: 12px; }
+
+/* Today's themes. The word is the figure and the bar under it is the share of
+   the run carrying it, so a count of six is legible as most of the day or as a
+   corner of it without the reader doing arithmetic. */
+/* One line per topic: the word, then a fixed 64px track carrying the share,
+   then the count - a small horizontal bar chart. Until 2026-09-06 the bar ran
+   under the row at the row's full width with no track, which made six bars of
+   36% and under read as six rules that had stopped short; Berke called the
+   block cheap on sight. The variants tried are in
+   `mockups/v4/variants-side-topics.html` (B shipped). The count left the
+   monospaced face for the body face at `--ink-1`: it is the figure the row is
+   about, and it was the smallest thing in the column. */
+.topics { list-style: none; display: flex; flex-direction: column; gap: 10px; padding: 0; }
+.topics a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--ink-1);
+  transition: color var(--dur) var(--ease);
+}
+.topics a:hover { color: var(--ink-0); }
+.topics a[aria-current] { color: var(--accent); }
+/* The word takes the slack, so the track and the count stand in one column on
+   the right whatever the word's length. */
+.topics__n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topics__c {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  color: var(--ink-1);
+  font-variant-numeric: tabular-nums;
+  min-width: 2ch;
+  text-align: right;
+  flex: none;
+}
+/* The one comparative claim on the page, so it is a mark and a title rather
+   than a coloured word: "rising" spelled out beside six topics would be six
+   more things to read before the six topics. */
+.rise { display: inline-flex; color: var(--imp-high); flex: none; }
+.rise svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 2; fill: none; }
+/* A visible track under the fill, in `--bar-off`: a bar with no track is a
+   line of unknown length, a bar on a track is a fraction. */
+.topics__b {
+  display: block;
+  width: 64px;
+  height: 4px;
+  flex: none;
+  border-radius: 2px;
+  background: var(--bar-off);
+  overflow: hidden;
+}
+.topics__b i { display: block; height: 100%; border-radius: 2px; background: var(--chart-bar); }
+.topics a[aria-current] .topics__b i { background: var(--accent); }
+
+/* The feed's own shape, drawn with the feed's own meter. Three rows, always
+   all three: a scale with rows appearing and disappearing is read as three
+   unrelated numbers. A band with nothing in it keeps its place and loses its
+   colour. */
+.split { list-style: none; display: flex; flex-direction: column; gap: 9px; padding: 0; }
+.split li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.split__l { color: var(--ink-1); }
+.split__n {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-0);
+  font-variant-numeric: tabular-nums;
+}
+.split .is-off { --imp: var(--bar-off); }
+.split .is-off .split__l, .split .is-off .split__n { color: var(--ink-3); }
+
+/* Last in the column and smallest in it: two lines and a link. Everything the
+   machine has to say about itself that is not on `/runs`. */
+.unit--foot { margin-top: -4px; }
+.status { display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; color: var(--ink-1); }
+.status__d { font-size: 12px; color: var(--ink-3); }
+.status--src { margin-top: 4px; color: var(--ink-3); font-size: 13px; }
+.unit--foot .lnk { display: inline-block; margin-top: 11px; font-size: 13.5px; color: var(--ink-2); }
+
+/* Seven bars, scaled to the tallest day. The accent marks today and nothing
+   else here - the same job it does in the rail. No axis, no gridline, no
+   legend: the numbers are in each bar's title and the shape is the point. */
+.chart {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  padding: 0;
+}
+.chart__t { display: flex; align-items: flex-end; height: 58px; }
+.chart__b { width: 100%; background: var(--chart-bar); border-radius: 3px; min-height: 2px; }
+.chart .on .chart__b { background: var(--accent); }
+.chart__d {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  text-align: center;
+}
+.chart .on .chart__d { color: var(--ink-1); }
+
+/* Below this the side column stops being a column and lays its units out two
+   by two under the digest - still read, just not beside it. It gives up its own
+   scroll box with its stickiness: in the flow it is the page's to scroll, and a
+   scroller nested in the thing already scrolling is a trap, not a convenience. */
+@media (max-width: 1240px) {
+  /* One column, and it takes a measure rather than the window: the cap the
+     side column used to impose has to come from somewhere once it is gone. */
+  .main--split { grid-template-columns: minmax(0, 1fr); max-width: 920px; }
+  /* It also gives up its surface. Below the feed it is not a bar beside the
+     reading, it is the last section of the page, and a fill would make it the
+     only box in a column of prose - the exact thing ADR 0013 removed. A rule
+     above it is enough where a whole edge was needed beside it. */
+  .side {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 28px 40px;
+    max-height: none;
+    overflow: visible;
+    background: none;
+    border: 0;
+    border-top: 1px solid var(--line-soft);
+    border-radius: 0;
+    box-shadow: none;
+    padding: 22px 0 0;
+  }
+  .unit--foot { margin-top: 0; }
+}
+@media (max-width: 720px) {
+  .side { grid-template-columns: 1fr; }
+}
+
+/* ---------- the story list ---------- */
+
+.feed { list-style: none; margin: 0; padding: 0; }
+/* Space, then a hairline - in that order of importance. The rule is the
+   fallback for a reader running down the page fast; the 26px of air above and
+   below each story is what actually separates them. A hover fill was removed
+   with the panel: a row that lights up under the pointer is a table idiom, and
+   nothing here is a row you click. */
 .item {
   padding: 26px 0;
   border-bottom: 1px solid var(--line-soft);
 }
+.item:first-child { padding-top: 6px; }
 .item:last-child { border-bottom: 0; }
 
-.item__meta { display: flex; gap: 12px; margin-bottom: 7px; flex-wrap: wrap; }
-.item__meta .src { color: var(--ink-2); }
+/* There is no lead treatment. The day's first story used to be dressed as one -
+   a plate, a border and a 30px headline - and that dressing said "first in the
+   list" while every other size on the page says "this scored a 5". Two ranking
+   systems on one column: the reader compares the top story to the one under it
+   and cannot tell whether it is bigger because it matters more or because it
+   happens to be at the top. Position already marks it, and the importance step
+   already sizes it. Berke marked it on 2026-09-06; ADR 0014 supersedes the lead
+   half of ADR 0013. The feed now has no surface in it at all. */
 
-.item__title { display: inline; }
-.item__title a {
-  border-bottom: 1px solid transparent;
-  transition: border-color var(--dur) var(--ease);
+.item__m { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+/* The source name keeps its own capitals. It was lowercased, which turned
+   "OpenAI" into "openai" - the one word on the row a reader recognises. */
+.src {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-1);
+  min-width: 0;
 }
-.item__title a:hover, .item__title a:focus-visible { border-bottom-color: var(--ink-2); }
+.favi {
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  background: var(--panel-2);
+  font-size: 10px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  flex: none;
+}
+/* The same size as the source name it follows: the meta row was three sizes on
+   one baseline (12, 11.5, 11), which reads as three things that do not belong
+   to each other. The ink step is what makes the age quieter than the name. */
+.when { font-size: 12px; color: var(--ink-3); flex: none; }
+.when::before { content: "·"; margin-right: 8px; }
 
-.item__sum { margin-top: 9px; max-width: 66ch; color: var(--ink-2); }
-/* "Why it matters" is not a separate block with a label: it is bold
-   inside the sentence, one feature doing the whole job. */
-.item__sum b { font-weight: 500; color: var(--ink-1); }
+/* The score, named. The bars alone were a shape with no legend. */
+.score { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+/* The word is the meter's legend, not a headline of its own. It was the same
+   weight and tracking as the section labels, uppercased, on every row - and on
+   a good day every ranked story reads "HIGH IMPACT", so fifteen identical
+   shouts sat down the right of the page carrying nothing. Two steps quieter and
+   no longer uppercased: the reader finds it when they look at a meter and skips
+   it when they are running down the headlines. */
+.score__l {
+  font-family: var(--sans);
+  /* 12px, not 11: the quietness is the ink step and the lost uppercase, and
+     11px was the last thing on the row set under the size type is drawn for. */
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--ink-3);
+}
+/* Three rising bars, lit up to the band and coloured by it - the shape of a
+   charge or signal meter, which is a scale the reader already knows how to
+   read without a key. Height carries the order, colour carries the verdict;
+   neither is doing the job alone, so the row still reads without colour. */
+.score--low  { --imp: var(--imp-low); }
+.score--mid  { --imp: var(--imp-mid); }
+.score--high { --imp: var(--imp-high); }
+.bars { display: flex; align-items: flex-end; gap: 2.5px; height: 13px; }
+.bars i { width: 3.5px; border-radius: 1.5px; background: var(--bar-off); display: block; }
+.bars i:nth-child(1) { height: 7px; }
+.bars i:nth-child(2) { height: 10px; }
+.bars i:nth-child(3) { height: 13px; }
+.bars i.f { background: var(--imp); }
 
-/* --- importance steps ---------------------------------------
-   The score is visible only here. You can tell a 5 from a 2 by
-   the shape of the page, without reading either. */
-.p5 .item__title { font-size: 25px; color: var(--ink-0); font-weight: 600; }
-.p4 .item__title { font-size: 21px; color: var(--ink-0); font-weight: 600; }
-.p3 .item__title { font-size: 18px; color: var(--ink-1); font-weight: 500; }
-.p2 .item__title { font-size: 15.5px; color: var(--ink-2); font-weight: 500; }
-.p1 .item__title { font-size: 15px;   color: var(--ink-3); font-weight: 400; }
+.item__t { letter-spacing: -0.02em; }
+.item__t a { border-bottom: 1px solid transparent; }
+.item__t a:hover { border-bottom-color: var(--ink-2); }
+/* No measure cap. A paragraph that stops short of the panel it sits in leaves a
+   band of nothing down the right of every row - Berke marked it on 2026-09-05
+   and it is the one thing about this block that reads as a mistake rather than
+   a choice. Two attempts at fixing it from the other end (a 64ch paragraph, then
+   a 620px column with the slack pushed into the middle of the page) both moved
+   the emptiness somewhere else instead of removing it. The text fills the panel,
+   and the panel is what carries the width. */
+.item__s { margin-top: 9px; color: var(--ink-2); font-size: 14px; line-height: 1.65; }
 
-/* A low-scoring story shows no summary. Everything was summarised
-   and is in the archive; showing it here only lengthened the list. */
-.p2 .item__sum, .p1 .item__sum { display: none; }
+/* "Why it matters" is the reason this is not a feed reader, so it is labelled
+   and set apart. It was bold inside the summary until 2026-09-05, where it read
+   as emphasis rather than as a different kind of sentence; then a left rule,
+   which said "quoted" more than it said "this is the point". It is a surface
+   now - the panel's second layer with a hairline inside it - because a plate is
+   read as a different kind of thing at a glance, where a rule has to be
+   noticed first. Still no colour and still no border: the plate is one step of
+   ink, not a box drawn around a paragraph. */
+/* The plate stays; the box around it does not. The inset hairline made a
+   rectangle of the one paragraph on the row that is an argument rather than a
+   report, and a rectangle is the shape this whole page is trying to spend less
+   of. What is left is a surface and an ink step, which is what Berke picked on
+   2026-09-05 (A1) with the outline turned off.
+
+   The hierarchy inside it is inverted from where it started. The label used to
+   be the strongest thing in the block and the sentence the palest; the sentence
+   is now set one ink step ABOVE the summary above it - the only body text on
+   the row brighter than the summary - and the label is the caption it sits
+   under. That is the block saying what it is: not an aside, the conclusion. */
+.why {
+  margin-top: 12px;
+  padding: 12px 15px 13px;
+  border-radius: var(--r-sm);
+  background: var(--plate);
+}
+.why__l { color: var(--ink-3); }
+.why__t { margin-top: 4px; color: var(--ink-0); font-size: 14px; line-height: 1.55; }
+
+.item__f { margin-top: 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* Three topics per story, and they lost their fill on 2026-09-06. The filter at
+   the top of the page is a row of filled pills, and so was this - forty-five
+   identical capsules down the feed, every one of which the reader had to test
+   to find out whether it was a control or a caption. The size and the face
+   ADR 0011 gave them are unchanged; only the capsule is gone, so the row reads
+   as what it is - three words about the story, which happen to be links.
+
+   The separator is drawn by the list rather than by each chip, so no chip
+   carries a dot it would have to hide at the end of the row. */
+.chips { display: flex; align-items: center; flex-wrap: wrap; min-width: 0; }
+.chip {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+  transition: color var(--dur) var(--ease);
+}
+.chip + .chip::before { content: "\00b7"; margin: 0 7px; color: var(--line); }
+.chip:hover { color: var(--ink-0); }
+/* Getting to the source is the last step of every story, so it is always in
+   the same place: the end of the row, quiet until it is looked for. */
+.go {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-3);
+  padding: 4px 2px;
+  transition: color var(--dur) var(--ease);
+}
+.go svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.8; fill: none; }
+.item:hover .go, .go:hover { color: var(--ink-0); }
+
+/* The importance score rides the type. It is the only ranking indicator on
+   the page - no rank number, no badge, no coloured marker, because all
+   three would repeat what the size already says. */
+.p5 .item__t { font-size: 23px;   color: var(--ink-0); font-weight: 500; }
+.p4 .item__t { font-size: 19px;   color: var(--ink-0); font-weight: 500; }
+.p3 .item__t { font-size: 16.5px; color: var(--ink-1); font-weight: 500; }
+.p2 .item__t { font-size: 14.5px; color: var(--ink-2); }
+.p1 .item__t { font-size: 14.5px; color: var(--ink-2); }
+/* Below 3 the story is a headline and nothing else: the reader is scanning by
+   then, and a summary they will not read is in the way of the next headline. */
 .p2, .p1 { padding: 13px 0; }
+.p2 .item__m, .p1 .item__m { margin-bottom: 4px; }
+.p2 .item__s, .p1 .item__s,
+.p2 .why,     .p1 .why,
+.p2 .item__f, .p1 .item__f { display: none; }
 
-.more { padding: 30px 0 0; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.feed__f { padding: 20px 0 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
-/* =========================================================
-   TABLES - runs and sources. Same page, different density.
-   ========================================================= */
-.runs { margin-top: 56px; padding-top: 30px; border-top: 1px solid var(--line); }
-.runs h2 { font-size: 15px; font-weight: 500; color: var(--ink-2); margin-bottom: 16px; }
-.runs table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
-.runs th {
-  text-align: left; font-weight: 500; font-size: 10px; letter-spacing: 0.13em;
-  text-transform: uppercase; color: var(--ink-3);
-  padding: 0 12px 8px 0; border-bottom: 1px solid var(--line);
+/* ---------- the topic filter ---------- */
+
+/* A row of destinations, because that is what it is. Six of them, and the
+   rest behind a disclosure: every tag the day produced is a second list to
+   read before the list.
+
+   It lost the panel header it used to sit in with the panel itself: a control
+   row above a list of prose does not need a fill and a rule under it as well
+   as the space it already has. Only the topic you are standing in is filled -
+   an unfilled pill is a word with a hit area, and seven filled ones were seven
+   things competing with the headline six lines below them. */
+/* The row is a control and the list under it is the content, so they get the
+   step of air that says so. With the feed's panel gone (ADR 0013) nothing was
+   left between the last pill and the first source line but the pill's own 5px
+   of padding, and the two read as one block. */
+.filter { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+.tags { display: flex; flex-wrap: wrap; gap: 7px; min-width: 0; }
+/* A topic is a word, and a word set in a monospaced face at 11px is read one
+   letter at a time. Body face, one step up, and the pill grown to match: this
+   row is a control, and it was the smallest thing on the page. */
+.tags a {
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.runs td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--line-soft); color: var(--ink-2); }
-.runs tr:hover td { color: var(--ink-1); background: var(--bg-soft); }
-.runs td:last-child, .runs th:last-child { padding-right: 0; }
-.runs .bad { color: var(--alarm); }
-/* A table has to be able to scroll rather than push the page sideways. */
-.scroll { overflow-x: auto; }
+/* The count is not dimmed. It was `opacity: .65`, which composited an 11px
+   digit down to 2.7:1 on the pill in the light theme - small text, no
+   large-text discount, and a number nobody can read is not a quieter number. */
+.tags a b { font-weight: 400; }
+.tags a:hover { background: var(--pill-bg); color: var(--ink-0); }
+.tags a[aria-current] { background: var(--pill-acc-bg); color: var(--pill-acc-ink); }
 
-.foot { padding: 26px 0 60px; display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; }
-
-/* =========================================================
-   ADDITIONS BEYOND THE MOCKUP
-   ---------------------------------------------------------
-   The mockup showed one screen. These are the controls the real
-   pages need, each built from the same three materials the rest
-   of the page uses: the rule, the ink step, and the mono label.
-   Nothing new was introduced - no accent, no fill, no shadow.
-   ========================================================= */
-
-/* Search and "add a feed": a field is a baseline, not a box. */
-.field {
-  border: 0; border-bottom: 1px solid var(--line); background: none;
-  font: inherit; color: var(--ink-0); padding: 4px 0; min-width: 12rem;
-  transition: border-color var(--dur) var(--ease);
+/* The disclosure is the last pill of the row, not a control beside it. As a
+   sibling of the row it took a flex line of its own the moment the pills
+   wrapped, which stranded "more" on a third line with the panel's whole width
+   to its left. Inside the row it is one more item until it is opened, and
+   opening it makes it claim a full line so the remaining topics have somewhere
+   to lay out. */
+.more { flex: none; }
+.more[open] { flex: 1 1 100%; }
+.more summary {
+  list-style: none;
+  cursor: pointer;
+  width: fit-content;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: 8px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.field::placeholder { color: var(--ink-3); }
-.field:focus { outline: none; border-bottom-color: var(--ink-2); }
+.more summary:hover { background: var(--pill-bg); color: var(--ink-0); }
+.more summary::-webkit-details-marker { display: none; }
+.more summary::after { content: " +"; }
+.more[open] summary::after { content: " −"; }
+.more .tags { margin-top: 8px; }
 
-.controls { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; padding: 22px 0 0; }
-.controls form { display: flex; gap: 10px; align-items: baseline; }
+/* ---------- the advice to run ---------- */
 
-/* Tag filter. Tags were deliberately removed from the story rows
-   (fifteen lines of noise); their place is here, once. */
-.tags { display: flex; gap: 12px; flex-wrap: wrap; padding: 14px 0 0; }
-.tags a { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: var(--ink-3); }
-.tags a:hover, .tags a[aria-current="true"] { color: var(--ink-1); }
+/* The head of `/runs`, and the answer to a question the clock used to answer by
+   itself: is it worth spending money on a digest right now (ADR 0015). It wears
+   no panel, for the reason the feed does not - the containers came off on
+   2026-09-06 and what separates a block from the next one is air and a rule.
 
-.empty { padding: 60px 0; color: var(--ink-3); max-width: 52ch; }
-.note { color: var(--ink-3); }
-.bad { color: var(--alarm); }
+   Two rows. The sentence and the button, because the reader is here to decide
+   and then press; then three facts under a hairline, in the same label-figure-
+   detail shape the spend below uses, so the page reads as one page and not as a
+   control panel bolted onto a log. */
+.advice { display: flex; flex-direction: column; gap: 18px; padding: 2px 2px 0; }
 
-/* Source rows carry one toggle each; the button is the same link. */
-.runs form { display: inline; }
+/* The press and the question, one swapping for the other in place. No dialog
+   and no overlay: a modal would be the only one in the application, and what is
+   being confirmed is already described in the two lines above it - the question
+   adds the two facts those lines cannot carry, what the press will do and what
+   the last one cost. */
+.act { display: flex; flex-direction: column; gap: 11px; align-items: flex-start; }
+.act__go { padding: 10px 18px; font-size: 13.5px; border-radius: 10px; }
+.act__go svg { width: 16px; height: 16px; }
+.act__q { font-size: 13.5px; line-height: 1.55; color: var(--ink-1); max-width: 54ch; }
+/* The money is the fact the reader is actually weighing, so it gets its own
+   line and the figure face rather than being buried in the prose above it. */
+.act__c { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); margin-top: -4px; }
+/* Bültenin dili: soruyla düğmeler arasında, etiketi solunda.
+   Kabuktaki dil anahtarıyla aynı iki yuvalı biçim, çünkü aynı türden soru -
+   ama bu, para harcayan basışın kendi seçimi (ADR 0017). */
+.act__l { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.act__lb { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+/* Yuvalar bağlantı değil düğme: sayfayı değiştirmiyor, parçayı tazeliyor.
+   Tarayıcının düğme kabuğu tamamen kalkıyor, geriye .seg'in kendi rayı kalıyor. */
+.seg--out button {
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: inherit;
+  cursor: pointer;
+}
+.seg--out button:hover { color: var(--ink-0); }
+
+.act__r { display: flex; gap: 9px; }
+.act__r .btn { padding: 9px 16px; font-size: 13px; }
+
+/* The state is a sentence at headline size and it carries no colour of its own:
+   the ranked feed already spends the page's ink budget on typography, and a
+   green "ready" here would be a fourth job for colour that DESIGN.md has not
+   named. The accent on this screen belongs to the rail's button, which is the
+   thing that acts. The one exception is a broken key, which is `--alarm` doing
+   the job it already has - something is wrong, not something is late. */
+.advice__state { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink-0); }
+.advice__why { margin-top: 6px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); max-width: 58ch; }
+
+.advice__facts {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  padding-top: 17px;
+  border-top: 1px solid var(--line-soft);
+}
+.advice__n { font-size: 17px; line-height: 1.15; margin-top: 2px; }
+.advice__s { margin-top: 4px; font-size: 12.5px; color: var(--ink-3); }
+
+@media (max-width: 700px) {
+  .advice__facts { gap: 26px; }
+}
+
+/* The spend, on the page that owns the machine's numbers. Three figures in a
+   row with no box around them: they are a caption on the table under them, not
+   three cards. */
+.totals { display: flex; gap: 40px; padding: 2px 2px 4px; flex-wrap: wrap; }
+.totals__n { font-size: 21px; line-height: 1.1; }
+
+/* ---------- tables ---------- */
+
+/* border-collapse is `separate` on purpose: a collapsed border disappears
+   under a sticky header, and that is a spec gap (csswg-drafts#3136), not a
+   bug to wait out. The header rule is drawn with an inset shadow instead. */
+/* The radius belongs to the panel, but the table is what reaches the edges,
+   so the scroller carries the corners or a hovered row squares them. */
+.scroll { overflow-x: auto; border-radius: 0 0 var(--r) var(--r); }
+.panel > .scroll:first-child { border-radius: var(--r); }
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* The heading is a word; the column under it is data. Leaving the table's
+   monospaced face is also what tells the two apart. */
+/* The column heading left `.lbl` on 2026-09-06 with the rest of the shell's
+   uppercasing. It is a word over a column of machine output, so it takes the
+   body face at 12px - one step under a section heading, which is the step that
+   says it labels a column rather than a block. */
+th {
+  text-align: left;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-2);
+  padding: 13px 10px 9px 20px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+td {
+  padding: 10px 10px 10px 20px;
+  box-shadow: inset 0 -1px 0 var(--line-soft);
+  color: var(--ink-2);
+}
+tr:last-child td { box-shadow: none; }
+tr:hover td { background: var(--row-hover); color: var(--ink-1); }
+td.strong { color: var(--ink-0); }
+
+/* ---------- forms ---------- */
+
+.controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* Built the way the bar's search box is built - a hairline and the second
+   layer, no shadow - because it is the same kind of thing: a lane you type
+   into, not a raised control. It used to take the button's construction, and in
+   the light theme that is white on white with a shadow for an edge, so the
+   field on `/sources` read as a slab floating on the panel. */
+.controls .field {
+  width: auto;
+  min-width: 18rem;
+  max-width: 100%;
+  border: 1px solid var(--line-soft);
+  background: var(--panel-2);
+  border-radius: 9px;
+  padding: 8px 12px;
+  transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.controls .field:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.controls form { display: contents; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition: none !important; animation: none !important; }
+  *, *::before, *::after { transition: none !important; }
+}
+
+/* =========================================================
+   NARROWER WINDOWS
+   Four steps, and each one is a different problem: the rail
+   stops fitting, the bar's three columns stop fitting, the
+   rail stops fitting at all, then the meta rows stop fitting
+   on one line.
+   ========================================================= */
+
+/* 1. The rail gives up its width before it gives up its shape. */
+@media (max-width: 1180px) {
+  :root { --rail: 220px; }
+  .brand__s { display: none; }
+  .bar__id .mono { display: none; }
+  .main--split { gap: 28px; }
+}
+
+/* 2. The bar stops being three columns. The search box cannot be centred on a
+      window this narrow without squeezing it to nothing, so it gives up the
+      middle and takes the width that is left between the title and the
+      buttons - which is the same layout, expressed as a flex row. */
+@media (max-width: 1024px) {
+  .top-bar { display: flex; flex-wrap: wrap; row-gap: 10px; align-items: center; }
+  .bar__id { flex: none; }
+  .search { flex: 1; min-width: 160px; }
+  .bar-right { flex: none; }
+}
+
+/* 3. The rail becomes a bottom bar. It is navigation only by then, which is
+      exactly what a phone wants within reach of a thumb; the brand and the
+      next-run line are the two things that do not survive the move, and
+      neither is something the reader acts on. The theme switch does survive,
+      because it is a preference and not a report - it is the second render of
+      it, the one the bar carries and hides above this width. */
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; }
+  .rail {
+    position: fixed;
+    inset: auto 0 0 0;
+    height: auto;
+    flex-direction: row;
+    gap: 0;
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    z-index: 20;
+  }
+  .brand, .rail__foot, .nav__g { display: none; }
+  .seg--narrow { display: grid; }
+  .nav--narrow { display: flex !important; }
+  .nav--go { display: none; }
+  .nav { flex-direction: row; width: 100%; gap: 0; }
+  .nav a {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-height: 48px;
+    padding: 6px 2px;
+    font-size: 11px;
+    text-align: center;
+    position: relative;
+  }
+  .nav__l { flex: none; }
+  .nav svg { width: 18px; height: 18px; }
+  /* The count rides the icon here; there is no room for it on the line. */
+  /* Offset past the icon's right edge rather than over it: at 6px the capsule
+     sat on the icon's strokes. */
+  .pill { position: absolute; top: 2px; left: 50%; margin-left: 9px; font-size: 9px; padding: 1px 5px; }
+  .main { padding: 16px 16px calc(76px + env(safe-area-inset-bottom)); }
+  th, td { padding-left: 16px; }
+  .p5 .item__t { font-size: 21px; }
+  .p4 .item__t { font-size: 18px; }
+  .totals { gap: 26px; }
+}
+
+/* 4. One column, and the meta rows stop competing for it. */
+@media (max-width: 560px) {
+  .top-bar { padding: 10px 14px; gap: 8px; }
+  /* Its own row, and allowed to shrink into it. The `flex-wrap` here was
+     written at some point and had never once fired: `.bar-right` takes
+     `flex: none` at 1024px, which is `flex-shrink: 0`, so on a 375px phone the
+     row stayed 398px wide and the window scrolled sideways instead - the one
+     thing the responsive rules are supposed to guarantee never happens. The
+     run button moving into the rail on 2026-09-06 is what surfaced it: the
+     bar's copy is labelled `çalıştır` rather than `yenile` and 23px over
+     became 37. Left-aligned rather than right, because on its own line it is a
+     row of controls and not the end of the bar. */
+  .bar-right {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+  /* The search box drops to a line of its own under the page name. It used to
+     take `order: -1` and land above the title, which was right while it lived
+     inside the button group and is wrong now that it is the bar's middle. */
+  .search { flex: 1 0 100%; }
+  .brief { flex-direction: column; gap: 10px; padding: 14px; }
+  .brief__m { margin-left: 0; }
+  .item__m { flex-wrap: wrap; row-gap: 4px; }
+  .score { margin-left: 0; width: 100%; }
+  .go { margin-left: 0; }
+  .controls .field { min-width: 0; width: 100%; }
+  .seg > * { padding: 5px 7px; }
 }

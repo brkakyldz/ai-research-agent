@@ -25,17 +25,21 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "screenshots"
 
-# Wide enough for the 47rem column plus air, tall enough that the digest page
-# needs one scroll rather than five.
-VIEWPORT = {"width": 1180, "height": 1000}
+# Wide enough for the 246px rail plus a panel that is not squeezed, tall enough
+# that the digest page needs one scroll rather than five.
+VIEWPORT = {"width": 1320, "height": 1000}
 DEVICE_SCALE = 2  # readable when GitHub renders the PNG at half size
 
+# The theme is a query parameter for the same reason the language is: it makes
+# a screenshot reproducible without clicking anything first.
 SHOTS: list[tuple[str, str, bool]] = [
     # path, filename, full_page
-    ("/", "digest.png", False),
-    ("/sources", "sources.png", False),
-    ("/runs", "runs.png", False),
-    ("/search?q=model", "search.png", False),
+    ("/?theme=dark", "digest.png", False),
+    ("/?theme=light", "digest-light.png", False),
+    ("/sources?theme=dark", "sources.png", False),
+    ("/runs?theme=dark", "runs.png", False),
+    ("/search?q=model&theme=dark", "search.png", False),
+    ("/archive?theme=light", "archive-light.png", False),
 ]
 
 
