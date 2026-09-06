@@ -49,6 +49,7 @@ doing.
 | Scheduling | `src/ainews/scheduler.py` | One interval job, in-process. |
 | Web | `src/ainews/web/` | Routes, read queries, view helpers, templates. Never writes a summary. |
 | CLI | `src/ainews/cli.py` | Calls the same functions the button and the poll call. No second implementation. |
+| Evaluation | `src/ainews/evals/` | Reads the database and calls the pipeline's node functions; never imported by the pipeline or the web layer. Spends money only behind `ainews eval judge` / `rank-stability`, never in `pytest`. |
 
 The dependency direction is one-way: web and CLI both call into pipeline, pipeline
 calls into sources and db, and nothing calls back up. `pipeline/nodes/summarize.py`
@@ -84,7 +85,10 @@ stays on the cheap model.
 
 ## 4. The data model
 
-Five real tables in `src/ainews/db/models.py`, plus a virtual one.
+Seven real tables in `src/ainews/db/models.py`, plus a virtual one. Two of the
+seven belong to the evaluation layer and are described in §14: `verdicts`, the
+reader's call on a summary, and `eval_results`, what the judge and the rank
+probe measured and what it cost.
 
 **`sources`** (`models.py:49`) — what to poll. Beyond name and URL it carries
 `etag` and `modified`, the conditional-GET tokens from the last successful fetch;
@@ -718,3 +722,63 @@ rank and persist is exercised with no network and no spend.
 | 0013 | The page stops being a dashboard *(partially superseded by 0014)* |
 | 0014 | No lead story, and a side column that looks like a bar |
 | 0015 | The digest is started by a person, and the page advises when |
+| 0016 | The shell stops whispering: nothing under 12px, sentence case in `i18n.py` |
+| 0017 | The switch translates the interface; the press chooses the bulletin's language |
+| 0019 | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth |
+
+---
+
+## 14. Evaluation
+
+Everything above produces output; nothing above says whether it is any good.
+`docs/PLAN-EVALS.md` is the plan and ADR 0019 the shape; this section is the
+mechanism.
+
+**Four layers, cheapest first.**
+
+1. **Deterministic checks over stored rows** (`evals/checks.py`) - pure
+   functions, rows in and numbers out: word budgets and the sentence histogram,
+   numerals in the summary that the article body did not contain (after a
+   Turkish/English normaliser, so "12,9 milyar" meets "$12.9 billion"), the tag
+   vocabulary's singleton share, the importance spread, how far the ranker's
+   order departs from the free importance-then-weight order, importance-5
+   stories with no ranked story in their dedupe cluster, and the editor's-note
+   shape. `ainews eval record --run <id>` writes a run to
+   `tests/fixtures/runs/<date>_<lang>.json` - deterministic, one story per line,
+   numerals taken from the text the model was shown, **never the article body**
+   (the repository is public) - and `tests/test_evals_checks.py` asserts bounds
+   over every fixture, offline. A fixture recorded before a fix landed is marked
+   `xfail(strict=True)` with the reason beside it, so the mark comes off loudly.
+2. **The reader's verdict** (`verdicts`, `POST /verdict`, `_story_foot.html`) -
+   two words under every story, *Doğru · Yanlış*, saved in place by HTMX with an
+   optional one-line reason when it is wrong. Binary, not a scale: a person can
+   say "wrong" in one click and cannot honestly say "3". These labels are the
+   ground truth everything below is calibrated against.
+3. **The sampled grounding judge** (`evals/judge.py`, `ainews eval judge`) -
+   `gpt-5.6-terra` at temperature 0 reads the body the summariser read and
+   answers one binary question: does the summary state anything as fact the
+   text does not support? The why-it-matters line is the editor's inference and
+   is failed only for an invented fact, not for drawing a conclusion. Twelve
+   summaries a run, seeded; cost estimated from body length and refused above
+   `--max-cost` before the first call; one `eval_results` row per judgement.
+   `--labelled` judges every summary that carries a verdict and prints TPR and
+   TNR separately, never one accuracy figure.
+4. **The rank-stability probe** (`evals/stability.py`,
+   `ainews eval rank-stability`) - shuffles the candidate table three ways,
+   calls `rank_summaries` for each, reports mean pairwise Kendall τ and top-N
+   Jaccard. A call that fell back to importance order is counted, not read as
+   stability.
+
+`ainews eval report` runs the checks over the live database, reads the verdicts
+and the judge and probe rows, and appends one dated section to `docs/evals.md`
+with every number beside the function that produced it. A section is never
+edited.
+
+**Measured on the first run (2026-09-04, 91 stories, see `docs/evals.md`):**
+4.4% of summaries over the 55-word budget, two ungrounded figures (one the
+probe had already found by hand), 67.6% tag singletons, ranker/fallback overlap
+6 of 11, one importance-5 story left unrepresented by the same-day source purge,
+and a rank-stability τ of **0.47** with top-N Jaccard 0.53 - under the 0.6 that
+E5 names as the trigger for permutation self-consistency in production. One run
+is one measurement; the trigger asks for it across runs.
+

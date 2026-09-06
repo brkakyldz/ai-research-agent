@@ -160,6 +160,7 @@ failed run. `DESIGN.md` lists everything that was deleted and why.
 | [0006](docs/decisions/0006-no-tailwind.md) | No Tailwind; the mockup's CSS ships as-is |
 | [0007](docs/decisions/0007-named-volume-for-sqlite.md) | A named volume for the container's database |
 | [0017](docs/decisions/0017-the-language-switch-stops-choosing-the-content.md) | The switch translates the interface; the press chooses the bulletin's language |
+| [0019](docs/decisions/0019-evaluation-is-a-sibling-command-not-a-test.md) | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth |
 
 ## Known limits
 
@@ -194,7 +195,7 @@ failed run. `DESIGN.md` lists everything that was deleted and why.
 
 ```bash
 uv sync
-uv run pytest          # 101 tests, no API key needed, no network calls
+uv run pytest          # 295 tests, no API key needed, no network calls
 uv run ruff check .
 uv run pre-commit install
 ```
@@ -202,6 +203,29 @@ uv run pre-commit install
 Tests use a fake model and `respx` for HTTP, so the whole suite runs offline in
 about six seconds. `langgraph.json` is checked in for `langgraph dev` if you want
 to step through the graph in Studio.
+
+### Evaluation
+
+Every claim about output quality is a number a command regenerates, and the
+reader's own verdicts on the page (*Doğru · Yanlış* under each story) are the
+ground truth the model judge is calibrated against. `pytest` stays offline; the
+commands that spend money say so and refuse above a cap.
+
+```bash
+uv run ainews eval record --run latest        # a run -> tests/fixtures/runs/<date>_<lang>.json, no key
+uv run ainews eval judge --run latest         # 12 sampled summaries on the judge tier, ~$0.05
+uv run ainews eval rank-stability --run latest  # 3 shuffled rank calls, Kendall tau, ~$0.01
+uv run ainews eval report                     # every number, appended to docs/evals.md
+```
+
+Recorded fixtures are checked by `tests/test_evals_checks.py` - word budgets,
+ungrounded numerals, tag vocabulary, importance spread, ranker-vs-fallback,
+unrepresented fives, the editor's-note shape - with no key and no network.
+`ainews eval judge --labelled` prints TPR and TNR against the reader's verdicts
+once there are about sixty. At one judged run a day the whole layer costs about
+$2 a month on top of the product's $2.50. [ADR 0019](docs/decisions/0019-evaluation-is-a-sibling-command-not-a-test.md)
+says why it is shaped this way; [`docs/PLAN-EVALS.md`](docs/PLAN-EVALS.md) is
+the plan and [`docs/evals.md`](docs/evals.md) the record.
 
 Screenshots in this README are regenerated with:
 

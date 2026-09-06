@@ -53,6 +53,13 @@ def add_eval_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore[ty
     stability.add_argument("--times", type=int, default=3)
     stability.add_argument("--seed", type=int, default=0)
 
+    report = evals.add_parser(
+        "report", help="print every number and append a dated section to docs/evals.md (no key)"
+    )
+    report.add_argument("--since", default="30d", help="window in days, e.g. 30d")
+    report.add_argument("--out", type=Path, default=None, help="file (default: docs/evals.md)")
+    report.add_argument("--no-write", action="store_true", help="print only")
+
 
 async def _record(run_ref: str, out: Path | None) -> int:
     from ainews.evals.record import record_run, resolve_run_id, write_fixture
@@ -124,6 +131,20 @@ async def _stability(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _report(args: argparse.Namespace) -> int:
+    from ainews.evals.report import append_report, build_report, parse_since, render_markdown
+
+    await init_db(get_engine())
+    async with session_scope() as session:
+        report = await build_report(session, since_days=parse_since(args.since))
+    text = render_markdown(report)
+    print(text, end="")
+    if not args.no_write:
+        path = append_report(text, args.out)
+        print(f"appended to {path}", file=sys.stderr)
+    return 0
+
+
 async def run_eval(args: argparse.Namespace) -> int:
     try:
         if args.eval_command == "record":
@@ -132,6 +153,11 @@ async def run_eval(args: argparse.Namespace) -> int:
             return await _judge(args)
         if args.eval_command == "rank-stability":
             return await _stability(args)
+        if args.eval_command == "report":
+            return await _report(args)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except LookupError as exc:
         print(str(exc), file=sys.stderr)
         return 2

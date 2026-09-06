@@ -183,4 +183,3 @@ async def post_verdict(
         "_story_foot.html",
         {"story": story, "language": language, "t": strings(language), "saved": True},
     )
-
