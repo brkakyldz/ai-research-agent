@@ -6,12 +6,15 @@ template family: they all render the same story list, read at different times.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ainews.db import Run, db_session
+from ainews.db import Run, Summary, Verdict, db_session
+from ainews.db.models import utcnow
 from ainews.web import queries
+from ainews.web.i18n import strings
 from ainews.web.views import (
     get_templates,
     impact_split,
@@ -138,3 +141,46 @@ async def search(
     response = get_templates().TemplateResponse(request, "search.html", context)
     remember_preferences(request, response, language)
     return response
+
+
+@router.post("/verdict", response_class=HTMLResponse)
+async def post_verdict(
+    request: Request,
+    summary_id: int = Form(...),
+    verdict: str = Form(...),
+    note: str = Form(""),
+    session: AsyncSession = Depends(db_session),
+) -> HTMLResponse:
+    """The reader's call on one summary (PLAN-EVALS E2.3).
+
+    Answers with the story's re-rendered foot line, not a redirect: a verdict
+    is given mid-read, and a page reload would throw the reader back to the
+    top of a list they were halfway down. One row per summary - a second
+    verdict overwrites the first - and the note is kept only with "wrong",
+    because "right, and here is why" is not a thing a reader writes.
+    """
+    language = language_of(request)
+    if verdict not in ("ok", "wrong"):
+        raise HTTPException(status_code=422, detail="verdict is 'ok' or 'wrong'")
+    if await session.get(Summary, summary_id) is None:
+        raise HTTPException(status_code=404, detail="no such summary")
+
+    row = (
+        await session.execute(select(Verdict).where(Verdict.summary_id == summary_id))
+    ).scalar_one_or_none()
+    cleaned = note.strip() or None if verdict == "wrong" else None
+    if row is None:
+        session.add(Verdict(summary_id=summary_id, verdict=verdict, note=cleaned))
+    else:
+        row.verdict = verdict
+        row.note = cleaned
+        row.created_at = utcnow()
+    await session.commit()
+
+    story = await queries.story_for_summary(session, summary_id, language)
+    return get_templates().TemplateResponse(
+        request,
+        "_story_foot.html",
+        {"story": story, "language": language, "t": strings(language), "saved": True},
+    )
+

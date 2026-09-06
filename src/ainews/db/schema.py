@@ -1,6 +1,6 @@
 """Schema creation, including the parts SQLAlchemy will not model.
 
-The ORM owns the five real tables. The FTS5 index over `summaries` is a virtual
+The ORM owns the six real tables. The FTS5 index over `summaries` is a virtual
 table plus three triggers, which is DDL the ORM has no vocabulary for, so it is
 written out here and applied in the same idempotent `init_db()` call.
 

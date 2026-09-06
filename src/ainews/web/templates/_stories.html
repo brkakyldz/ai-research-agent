@@ -54,24 +54,9 @@
     </div>
     {% endif %}
 
-    <p class="item__f">
-      {% if story.tags %}
-      {# Three, not all of them: the tag row is orientation, and a story
-         carrying eight of them is telling the reader nothing by the fourth.
-         They are set as quiet text rather than as filled pills - the pills at
-         the top of the page are the filter, and forty-five identical pills
-         under the stories made the reader check every one of them to find out
-         which were controls. Same face and size as before, no fill. #}
-      <span class="chips">
-        {% for name in story.tags[:3] %}
-        <a class="chip" href="/?lang={{ language }}&amp;all=1&amp;tag={{ name }}">{{ name }}</a>
-        {% endfor %}
-      </span>
-      {% endif %}
-      <a class="go" href="{{ story.url }}" target="_blank" rel="noreferrer noopener">
-        {{ t.open_source }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg>
-      </a>
-    </p>
+    {# The foot line lives in its own fragment because the reader's verdict
+       re-renders it in place (PLAN-EVALS E2); see `_story_foot.html`. #}
+    {% include "_story_foot.html" %}
   </li>
   {% endfor %}
 </ol>

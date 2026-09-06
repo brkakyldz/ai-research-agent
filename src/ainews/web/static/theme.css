@@ -1075,6 +1075,45 @@ kbd {
 .go svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.8; fill: none; }
 .item:hover .go, .go:hover { color: var(--ink-0); }
 
+/* The reader's verdict: two words on the foot line, the chips' face and size,
+   the chosen one in full ink with a check after it. It is drawn beside the
+   reader's other actions rather than on the meta line, which belongs to the
+   machine (source, age, impact), and it is not hover-only, which would hide
+   the one control on the page a person is asked to use. Placement is V1 of
+   mockups/v4/variants-verdict.html - provisional until Berke picks (E2.1).
+   No fill, no colour: --accent's three jobs are taken (DESIGN.md), and a
+   verdict is the reader's own note, not a state of the machine. */
+.vd { margin-left: auto; display: inline-flex; align-items: center; font-size: 12px; }
+.vd button {
+  background: none; border: 0; padding: 4px 2px; font: inherit; font-weight: 500;
+  color: var(--ink-3); cursor: pointer; transition: color var(--dur) var(--ease);
+}
+.vd button:hover, .vd button[aria-pressed="true"] { color: var(--ink-0); }
+.vd button + button::before { content: " b7"; margin: 0 7px; color: var(--line); }
+/* The check, not the colour, is what marks the chosen word: hover paints the
+   same ink, so colour alone would say "chosen" under the pointer. */
+.vd button[aria-pressed="true"]::after { content: " ¹3"; }
+/* `.go` used to push itself to the end with `margin-left: auto`; the verdict
+   now sits between the chips and it, so the auto margin moves to `.vd` and
+   the link keeps its place as the row's last step. */
+.vd ~ .go { margin-left: 0; }
+
+/* The reason, when the verdict is "wrong": a second row under the foot line,
+   as quiet as the line above it. No box (ADR 0013) - an underlined field and
+   one word to save it. */
+.vd-note { flex-basis: 100%; margin-top: 6px; display: flex; align-items: center; gap: 10px; }
+.vd-note input[type="text"] {
+  flex: 1; min-width: 0; background: none; border: 0; border-bottom: 1px solid var(--line);
+  padding: 4px 0; font: inherit; font-size: 13px; color: var(--ink-0); border-radius: 0;
+}
+.vd-note input::placeholder { color: var(--ink-3); }
+.vd-note input:focus { outline: 0; border-bottom-color: var(--ink-2); }
+.vd-note button {
+  background: none; border: 0; padding: 4px 2px; font: inherit; font-size: 12px;
+  font-weight: 500; color: var(--accent); cursor: pointer;
+}
+.vd-note__ok { font-size: 12px; color: var(--ink-3); }
+
 /* The importance score rides the type. It is the only ranking indicator on
    the page - no rank number, no badge, no coloured marker, because all
    three would repeat what the size already says. */

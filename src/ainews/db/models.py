@@ -3,7 +3,9 @@
 Four tables carry the pipeline: `sources` (what to poll), `articles` (what came
 back), `summaries` (what the LLM made of it) and `runs` (what each execution did
 and cost). A fifth, `daily_counters`, is the durable side of the Tavily credit
-cap - it has to survive a restart, so it cannot live in memory.
+cap - it has to survive a restart, so it cannot live in memory. A sixth,
+`verdicts`, is the reader's own call on a summary - the ground truth the
+evaluation layer is calibrated against (PLAN-EVALS E2).
 
 An FTS5 virtual table mirrors `summaries` for the dashboard's search box; it is
 created and kept in sync by triggers in `ainews.db.schema`, not by the ORM.
@@ -181,6 +183,31 @@ class Summary(Base):
         CheckConstraint("importance between 1 and 5", name="ck_summaries_importance"),
         Index("ix_summaries_run_rank", "run_id", "rank"),
     )
+
+
+class Verdict(Base):
+    """The reader's own call on one summary: right, or wrong.
+
+    Binary, not a 1-5 score - a person reading a digest can say "that is
+    wrong" in one click and cannot honestly say "that is a 3", and the
+    grounding judge (`ainews eval judge --labelled`) is calibrated against
+    exactly this yes/no. One row per summary: a later verdict overwrites the
+    earlier one rather than accumulating a history nobody reads. `note` is the
+    reader's reason, free text, and it is the raw material a judge prompt is
+    rewritten from when its numbers say it should be (PLAN-EVALS E2, E5).
+    """
+
+    __tablename__ = "verdicts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    summary_id: Mapped[int] = mapped_column(ForeignKey("summaries.id"), unique=True)
+    verdict: Mapped[str] = mapped_column(String(10))
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    summary: Mapped[Summary] = relationship()
+
+    __table_args__ = (CheckConstraint("verdict in ('ok', 'wrong')", name="ck_verdicts_verdict"),)
 
 
 class DailyCounter(Base):

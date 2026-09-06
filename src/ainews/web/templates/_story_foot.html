@@ -1,0 +1,62 @@
+{# The foot of one story: its topics, the reader's verdict, the way to the
+   source - and, when the verdict is "wrong", one line for the reason.
+
+   One fragment rather than a control inside the foot, because the note has to
+   land *under* the foot line and a control that grows a second row inside a
+   flex row pushes its neighbours about. So `POST /verdict` answers with this
+   whole block and HTMX swaps it in place (`hx-swap="outerHTML"`), the same
+   shape as `_run_action.html`: the page never reloads under a reader who is
+   halfway down it.
+
+   Placement is V1 of `mockups/v4/variants-verdict.html` - on the reader's own
+   line, beside the other things the reader does, leaving the meta line to the
+   machine. Provisional until Berke picks; the other two placements change
+   which template the control is drawn in, not how it works. #}
+<div class="item__f" id="foot-{{ story.id }}">
+  {% if story.tags %}
+  {# Three, not all of them: the tag row is orientation, and a story
+     carrying eight of them is telling the reader nothing by the fourth.
+     They are set as quiet text rather than as filled pills - the pills at
+     the top of the page are the filter, and forty-five identical pills
+     under the stories made the reader check every one of them to find out
+     which were controls. Same face and size as before, no fill. #}
+  <span class="chips">
+    {% for name in story.tags[:3] %}
+    <a class="chip" href="/?lang={{ language }}&amp;all=1&amp;tag={{ name }}">{{ name }}</a>
+    {% endfor %}
+  </span>
+  {% endif %}
+
+  {# Two words, the chips' face and size, the chosen one in full ink with a
+     check after it. No fill and no colour: the accent's jobs are taken, and a
+     verdict is the reader's own note, not a state of the machine. #}
+  <span class="vd" role="group">
+    {%- for value in ('ok', 'wrong') %}
+    <button type="button"
+            {% if story.verdict == value %}aria-pressed="true"{% endif %}
+            hx-post="/verdict?lang={{ language }}"
+            hx-vals='{"summary_id": {{ story.id }}, "verdict": "{{ value }}"}'
+            hx-target="#foot-{{ story.id }}" hx-swap="outerHTML">{{ t['verdict_' ~ value] }}</button>
+    {%- endfor %}
+  </span>
+
+  <a class="go" href="{{ story.url }}" target="_blank" rel="noreferrer noopener">
+    {{ t.open_source }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg>
+  </a>
+
+  {% if story.verdict == 'wrong' %}
+  {# The reason, one line, optional. It is what a judge prompt gets rewritten
+     from when the numbers say so (E5), so it is asked for at the moment the
+     reader has it and never again. #}
+  <form class="vd-note"
+        hx-post="/verdict?lang={{ language }}"
+        hx-target="#foot-{{ story.id }}" hx-swap="outerHTML">
+    <input type="hidden" name="summary_id" value="{{ story.id }}">
+    <input type="hidden" name="verdict" value="wrong">
+    <input type="text" name="note" value="{{ story.verdict_note or '' }}"
+           placeholder="{{ t.verdict_note }}" maxlength="500" autocomplete="off">
+    <button type="submit">{{ t.verdict_save }}</button>
+    {% if saved and story.verdict_note %}<span class="vd-note__ok">{{ t.verdict_saved }}</span>{% endif %}
+  </form>
+  {% endif %}
+</div>

@@ -16,11 +16,12 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, get_settings
-from ainews.db import Article, Run, Source, Summary
+from ainews.db import Article, Run, Source, Summary, Verdict
 
 
 @dataclass(slots=True)
 class Story:
+    id: int
     source: str
     url: str
     title_local: str
@@ -29,6 +30,9 @@ class Story:
     importance: int
     tags: list[str]
     age: str
+    # The reader's verdict on this summary, if one was given: "ok" | "wrong".
+    verdict: str | None = None
+    verdict_note: str | None = None
 
 
 async def latest_digest_run(session: AsyncSession) -> Run | None:
@@ -55,12 +59,19 @@ async def latest_digest_run(session: AsyncSession) -> Run | None:
     ).scalar_one_or_none()
 
 
-def _to_story(summary: Summary, article: Article, source_name: str, age: str) -> Story:
+def _to_story(
+    summary: Summary,
+    article: Article,
+    source_name: str,
+    age: str,
+    verdict: Verdict | None = None,
+) -> Story:
     try:
         tags = json.loads(summary.tags_json or "[]")
     except json.JSONDecodeError:
         tags = []
     return Story(
+        id=summary.id,
         source=source_name,
         url=article.url,
         title_local=summary.title_local,
@@ -69,6 +80,8 @@ def _to_story(summary: Summary, article: Article, source_name: str, age: str) ->
         importance=summary.importance,
         tags=tags,
         age=age,
+        verdict=verdict.verdict if verdict else None,
+        verdict_note=verdict.note if verdict else None,
     )
 
 
@@ -94,9 +107,10 @@ async def stories_for_run(
     from ainews.web.views import relative_age
 
     query = (
-        select(Summary, Article, Source.name)
+        select(Summary, Article, Source.name, Verdict)
         .join(Article, Article.id == Summary.article_id)
         .join(Source, Source.id == Article.source_id)
+        .outerjoin(Verdict, Verdict.summary_id == Summary.id)
         .where(Summary.run_id == run.id)
     )
     if ranked_only:
@@ -108,14 +122,37 @@ async def stories_for_run(
     )
 
     stories = []
-    for summary, article, source_name in (await session.execute(query)).all():
+    for summary, article, source_name, verdict in (await session.execute(query)).all():
         story = _to_story(
-            summary, article, source_name, relative_age(article.published_at, language)
+            summary, article, source_name, relative_age(article.published_at, language), verdict
         )
         if tag and tag not in story.tags:
             continue
         stories.append(story)
     return stories
+
+
+async def story_for_summary(
+    session: AsyncSession, summary_id: int, language: Language
+) -> Story | None:
+    """One story by its summary id - what `POST /verdict` re-renders."""
+    from ainews.web.views import relative_age
+
+    row = (
+        await session.execute(
+            select(Summary, Article, Source.name, Verdict)
+            .join(Article, Article.id == Summary.article_id)
+            .join(Source, Source.id == Article.source_id)
+            .outerjoin(Verdict, Verdict.summary_id == Summary.id)
+            .where(Summary.id == summary_id)
+        )
+    ).first()
+    if row is None:
+        return None
+    summary, article, source_name, verdict = row
+    return _to_story(
+        summary, article, source_name, relative_age(article.published_at, language), verdict
+    )
 
 
 async def count_unranked(session: AsyncSession, run: Run) -> int:
@@ -356,17 +393,18 @@ async def search_stories(
 
     rows = (
         await session.execute(
-            select(Summary, Article, Source.name)
+            select(Summary, Article, Source.name, Verdict)
             .join(Article, Article.id == Summary.article_id)
             .join(Source, Source.id == Article.source_id)
+            .outerjoin(Verdict, Verdict.summary_id == Summary.id)
             .where(Summary.id.in_(ids))
             .order_by(Summary.created_at.desc())
         )
     ).all()
 
     return [
-        _to_story(summary, article, name, relative_age(article.published_at, language))
-        for summary, article, name in rows
+        _to_story(summary, article, name, relative_age(article.published_at, language), verdict)
+        for summary, article, name, verdict in rows
     ]
 
 

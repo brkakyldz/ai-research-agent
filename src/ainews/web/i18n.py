@@ -121,6 +121,13 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "impact_mid": "Orta etki",
         "impact_low": "Düşük etki",
         "open_source": "Kaynağa git",
+        # The reader's verdict on a summary (PLAN-EVALS E2). Two words, no
+        # question mark: they sit on the foot line beside the other actions.
+        "verdict_ok": "Doğru",
+        "verdict_wrong": "Yanlış",
+        "verdict_note": "Neyi yanlış yaptı? (isteğe bağlı)",
+        "verdict_save": "Kaydet",
+        "verdict_saved": "Kaydedildi",
         "more_topics": "Daha fazla",
         "topics": "Konular",
         "skip_to_content": "İçeriğe geç",
@@ -257,6 +264,11 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "impact_low": "Low impact",
         # "Open source" alone is the licensing term; the label is an instruction.
         "open_source": "Go to source",
+        "verdict_ok": "Right",
+        "verdict_wrong": "Wrong",
+        "verdict_note": "What did it get wrong? (optional)",
+        "verdict_save": "Save",
+        "verdict_saved": "Saved",
         "more_topics": "More",
         "topics": "Topics",
         "skip_to_content": "Skip to content",
