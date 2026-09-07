@@ -120,7 +120,8 @@ in a billing dashboard.
 | `/archive` | Past runs, by day. |
 | `/search` | Full-text over every summary ever written (FTS5, prefix-matched so Turkish suffixes stop mattering). |
 | `/sources` | Enable, disable or add a feed; last status per source. |
-| `/runs` | Every run with its cost, duration and errors. |
+| `/runs` | Every run with its cost, duration and errors, and how many summaries carry your verdict. |
+| `/runs/<id>` | One run, node by node: which step took the time, which took the money, and which model wrote it (ADR 0022). Click a run's time. |
 
 ![Sources and runs](docs/screenshots/sources.png)
 
