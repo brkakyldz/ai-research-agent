@@ -105,6 +105,28 @@
     </div>
   </section>
 
+  {# The week, one bar a day. It was the fourth unit of the digest's right rail
+     until 2026-09-08 and it moved here rather than being deleted with it: it is
+     the only figure on the page that is a shape rather than a number, and what
+     it reports - how much came in on each of the last seven days - is the run
+     log's own subject read at a different grain. It is labelled for what it
+     counts, not for how long it counts: `7 gün` is already three inches to the
+     left of it, spending money. #}
+  {% if activity.days %}
+  <section class="week">
+    <p class="unit__h">{{ t.week_stories }}</p>
+    {% set tallest = activity.days|map(attribute='n')|max %}
+    <ul class="chart">
+      {% for day in activity.days %}
+      <li{% if day.today %} class="on"{% endif %} title="{{ t.day_stories.format(d=day.label, n=day.n) }}">
+        <span class="chart__t"><span class="chart__b" style="height: {{ (100 * day.n / tallest)|round|int if tallest else 0 }}%"></span></span>
+        <span class="chart__d">{{ day.label }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
   <section class="panel">
     <div class="scroll">{% include "_runs_table.html" %}</div>
   </section>

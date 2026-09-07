@@ -1,5 +1,5 @@
-{# The shell every page wears: one bar across the top, and two rails hanging
-   under its two ends with the reading between them.
+{# The shell every page wears: one bar across the top, a navigation rail
+   hanging under its left end, and the reading beside it.
 
    Until 2026-09-07 the bar started where the left rail stopped, so the window's
    top edge was two bands that happened to be the same height: the brand sat in
@@ -10,10 +10,14 @@
    so each rail is one surface from the top of the window to the bottom, and the
    bar is the head of both rather than a strip laid over them (ADR 0021).
 
-   The right rail is the day read sideways and it is only on the digest, which
-   is the one page that has a day. A page that leaves it empty sets no
-   `app_mod` and the grid is two columns instead of three; the bar's last cell
-   is then the width of the switches it holds and nothing follows it down.
+   There was a third column between 2026-09-06 and 2026-09-08: a right rail on
+   the digest, holding the day's brief, its themes, the impact spread, the week
+   and one status line. Berke took it off. The brief is at the top of the
+   reading now, the spread is at the end of the topic row, the week is on
+   `/runs`, and the themes and the status line are gone - the first was the
+   topic row written a second time three lines below it, the second was the run
+   log's first sentence and the left rail's foot written a third. The bar's last
+   cell is the width of the switches it holds and nothing follows it down.
 
    The left rail is navigation and nothing else. It is grouped rather than flat,
    because five
@@ -31,7 +35,7 @@
 
    The bar is four cells and it is laid out as four: the brand over the left
    rail, what page this is and when its bulletin was made, the search box, and
-   over the right rail the two switches and the status of a run in flight. Both
+   at the end the two switches with the status of a run in flight. Both
    switches, since 2026-09-07: they are the same kind of control - a thing you
    set once - and they had been sitting at opposite corners of the window. The
    run button lived here until 2026-09-06 and is now on `/runs` alone: it is the
@@ -102,7 +106,7 @@
 </div>
 {% endmacro %}
 
-<div class="app{% block app_mod %}{% endblock %}">
+<div class="app">
 
   <header class="top-bar" id="bar">
     {# The bar's first cell, and it is the rail's width on purpose: the brand
@@ -260,11 +264,6 @@
       {% block content %}{% endblock %}
     </main>
   </div>
-
-  {# The right rail, and it is a column of the shell rather than a card inside
-     the reading. Only the digest fills it; a page that leaves it empty sets no
-     `app_mod` and the grid has two columns instead of three. #}
-  {% block side %}{% endblock %}
 
 </div>
 

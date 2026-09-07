@@ -47,14 +47,9 @@ async def index(
             "n_others": 0,
             "tags": [],
             "n_topics": 0,
-            "topics": [],
             "split": [],
             "tag": tag,
             "show_all": all,
-            # The side column reports on the machine, so it is filled whether or
-            # not there is a digest to read - an empty page is exactly when the
-            # reader wants to know when the last run was and what it said.
-            "activity": await queries.recent_activity(session),
         }
     )
 
@@ -84,10 +79,14 @@ async def index(
             if ranked_only
             else len(await queries.tag_counts(session, run, limit=200))
         )
-        # The two intelligence panels in the side column. Both are read off the
-        # same rows the feed is: `topic_pulse` counts the run's tags against the
-        # week behind it, `impact_split` counts the list already in `context`.
-        context["topics"] = await queries.topic_pulse(session, run, ranked_only=ranked_only)
+        # How heavy the day in view is, drawn at the end of the topic row. It is
+        # counted off the list already in `context` rather than off the run, so
+        # the filtered page answers for its filter.
+        #
+        # `topic_pulse` was called beside it until 2026-09-08, for the right
+        # rail's themes list. That list drew a name, a share and a count per
+        # topic, which is the filter row three lines above it written a second
+        # time; the rail came off and the query went with it.
         context["split"] = impact_split(stories)
 
     response = get_templates().TemplateResponse(request, "index.html", context)

@@ -313,10 +313,11 @@ svg { display: block; }
    there, and the reader's controls belonged to the content rather than to the
    shell (ADR 0021). One grid, and the bar is a row of it.
 
-   The cells are placed rather than left to auto-flow, because the third column
-   is conditional in two directions: only the digest fills it, and below 1240px
-   it stops being a column at all and becomes a band under the reading. That is
-   a different cell, not a narrower one, and auto-flow cannot say so. */
+   The cells are placed rather than left to auto-flow. There were three of them
+   until 2026-09-08: the digest carried a right rail, and it was conditional in
+   two directions - only that page filled it, and below 1240px it stopped being
+   a column at all. Berke took the rail off. Two columns now, on every page, so
+   the bar's last cell is the switches it holds and nothing follows it down. */
 .app {
   display: grid;
   grid-template-columns: var(--rail) minmax(0, 1fr);
@@ -332,16 +333,6 @@ svg { display: block; }
 /* `min-width: 0`, or a wide table stretches the track it sits in. */
 .col     { grid-column: 2; grid-row: 2; min-width: 0; }
 
-/* The digest is the one page with a day, so it is the one page with a right
-   rail. Everything else runs two columns and the bar's last cell shrinks to
-   the switches it holds. */
-.app--side { grid-template-columns: var(--rail) minmax(0, 1fr) var(--side-w); }
-.app--side .side { grid-column: 3; grid-row: 2; }
-/* The bar's last track is the rail's width on the page that has one, which is
-   what makes the two read as one column rather than as a control group that
-   happens to sit above a panel. */
-.app--side .top-bar { grid-template-columns: var(--rail) minmax(min-content, 1fr) minmax(0, 1fr) var(--side-w); }
-
 /* The reading scrolls, the shell does not. Until 2026-09-07 the window was the
    only scroller on the page: the rails were `position: sticky` inside a
    document that ran the full height of the feed, so a wheel anywhere - over the
@@ -349,18 +340,20 @@ svg { display: block; }
    pins a column in place; it does not make it a column of its own. Berke's
    note: scrolling on the left bar still pulls the news down.
 
-   The shell is exactly the window now and never scrolls. The three cells under
-   the bar are three scrollers, each ending where it is drawn, so a wheel acts
-   on whatever is under the pointer and on nothing else. `overscroll-behavior:
+   The shell is exactly the window now and never scrolls. The two cells under
+   the bar are two scrollers, each ending where it is drawn, so a wheel acts on
+   whatever is under the pointer and on nothing else. `overscroll-behavior:
    contain` is what keeps that true at the ends: without it a column scrolled
    past its last row hands the rest of the gesture to its parent, which is the
    same bug arriving one wheel-click later.
 
-   Guarded at 1241px, and the guard is the same one the layout already has.
-   Below it the right rail stops being a column and becomes the last band of the
-   page in row three (see the 1240px block): a locked shell would put that band
-   below the window's edge with nothing able to reach it. Under 1241px the
-   document scrolls, which is what a page laid out as one column wants. */
+   Guarded at 1241px. The guard was the right rail's - below it that column
+   became a band in row three, and a locked shell would have put the band below
+   the window's edge with nothing able to reach it - and the rail is gone, but
+   the number is kept: what is under it is a narrow window walking towards the
+   860px layout where the rail is a bar fixed to the foot of the screen, and a
+   page laid out as one column wants the document to be the thing that
+   scrolls. */
 @media (min-width: 1241px) {
   .app {
     height: 100vh;
@@ -375,17 +368,17 @@ svg { display: block; }
      rails keep their `position: sticky` and it costs nothing: with no scrolling
      ancestor left, sticky computes as relative.
 
-     Written as children of the shell rather than as three bare classes, and
-     that is specificity rather than pedantry: `.side` is given a height and an
-     overflow of its own further down the file, and one class against one class
-     is settled by which came last. These are the shell's own cells; saying so
-     is also what makes the rule win. */
-  .app > .rail, .app > .col, .app > .side { height: 100%; min-height: 0; overscroll-behavior: contain; }
+     Written as children of the shell rather than as two bare classes. That was
+     specificity rather than pedantry while a third cell existed - the right
+     rail set its own height and overflow further down the file, and one class
+     against one class is settled by which came last. It is kept because it is
+     still true: these are the shell's own cells and nothing else is. */
+  .app > .rail, .app > .col { height: 100%; min-height: 0; overscroll-behavior: contain; }
   .app > .rail, .app > .col { overflow-y: auto; }
-  /* The scrollbar's lane is reserved whether or not the reading overflows, for
-     the reason the right rail reserves its own: a short page and a long one
-     cannot disagree about where the column ends. Same thin thumb in the same
-     tone, so the two scrollers read as one shell rather than as two widgets. */
+  /* The scrollbar's lane is reserved whether or not the reading overflows: a
+     short page and a long one cannot disagree about where the column ends.
+     Same thin thumb as the rail's, in the same tone, so the two scrollers read
+     as one shell rather than as two widgets. */
   .app > .col {
     scrollbar-gutter: stable;
     scrollbar-width: thin;
@@ -743,14 +736,12 @@ svg { display: block; }
   height: 100%;
   padding: 0 16px;
 }
-.app--side .bar__side {
-  justify-content: space-between;
-  background: var(--rail-bg);
-}
-/* Both switches share this cell, and at 340px they share it tightly - five
-   slots of a word each. The step comes off the slot padding rather than off the
-   type: ADR 0016 put a floor under the shell's sizes, and 12.5px is where these
-   already sat. */
+/* Both switches share this cell - five slots of a word each - and they share it
+   tightly. The step comes off the slot padding rather than off the type: ADR
+   0016 put a floor under the shell's sizes, and 12.5px is where these already
+   sat. The cell carried the right rail's ground and a `space-between` while the
+   rail hung under it; with the rail gone there is nothing under it to be the
+   head of, so it is a control group at the end of the bar and drawn as one. */
 .bar__side .seg > * { padding: 6px 9px; }
 
 .btn {
@@ -866,10 +857,6 @@ kbd {
   box-shadow: 0 1px 2px var(--seg-on-shadow);
 }
 .seg--theme { grid-template-columns: repeat(3, 1fr); }
-/* On the digest the track sits on the rail's ground, one step off the page, so
-   it needs an edge of its own to read as a control rather than as a shadow.
-   On the pages where the cell is transparent the page behind it does that. */
-.app--side .bar__side .seg { box-shadow: inset 0 0 0 1px var(--line-soft); }
 /* Two languages, named in themselves, so a reader scanning for their own
    language finds the word they would have written. */
 .seg--lang > * { font-weight: 500; }
@@ -928,12 +915,20 @@ kbd {
 
    It applies on every page now, the digest included. It used to be written as
    `:not(.main--split)` because on the digest the side column was inside the
-   reading and imposed the cap by taking the width; the column is one of the
-   shell's own since 2026-09-07 and imposes nothing, so the cap has to be said
-   out loud there too or the feed would run the width of the track on a wide
-   window. */
+   reading and imposed the cap by taking the width; the column became one of the
+   shell's own on 2026-09-07 and imposed nothing, so the cap had to be said out
+   loud there too or the feed would run the width of the track on a wide window.
+
+   Centred, since the rail came off on 2026-09-08. Left-aligned was fine while a
+   340px column stood in the space to its right and it is not fine now: on a
+   1920px window the reading stopped 356px short of the page's own measure and
+   the whole of the slack piled up on one side, which is Berke's 2026-09-05
+   objection arriving at the scale of the page instead of the paragraph - a side
+   column that has gone missing. Auto margins on the cross axis of a column flex
+   container split the slack in two, so the reading sits in the middle of what
+   it has. */
 .feed-col,
-.main > .brief { max-width: var(--read); }
+.main > .brief { max-width: var(--read); margin-inline: auto; width: 100%; }
 .panel {
   background: var(--panel);
   border: 1px solid var(--panel-line);
@@ -961,11 +956,12 @@ kbd {
    navy built from the secondary hue, with the same top-right lift in light as
    in dark.
 
-   On the digest it is `.brief--side`: a card at the head of the side column
-   rather than a band above the feed. Full width it was answering "what
-   happened today" from the position the first headline wanted, and the first
-   headline is the better answer to that question. The archive keeps the band,
-   because there the brief is the only thing above a list of timestamps. */
+   It is a band above the feed on every page again. It was `.brief--side` from
+   2026-09-06 to 2026-09-08 - a card at the head of the right rail, on the
+   argument that at full width it answered "what happened today" from the
+   position the first headline wanted. The rail is gone and the brief is the one
+   thing that came out of it whole, so it takes the top of the reading: a note a
+   person wrote, then the topics the day had, then the day. */
 .brief {
   border-radius: var(--r);
   padding: 14px 18px;
@@ -992,182 +988,40 @@ kbd {
 .brief__t p + p { margin-top: 9px; }
 .brief__m { margin-left: auto; color: #A9BCDD; white-space: nowrap; flex: none; padding-top: 3px; }
 
-.brief--side {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  padding: 14px 16px;
-  /* Below 1240px the side column flattens into a grid; the brief is a
-     paragraph, not a figure, so it takes the whole row above the rest. */
-  grid-column: 1 / -1;
-}
-.brief--side .brief__t { font-size: 13.5px; line-height: 1.55; max-width: none; }
-.brief--side .brief__m {
-  margin: 11px 0 0;
-  padding: 10px 0 0;
-  border-top: 1px solid rgba(255, 255, 255, .10);
-  white-space: normal;
-}
 /* The size of the day: three counted things, not a machine stamp. Set as the
    caption it is - mono uppercasing turned "16 kaynak" into a serial number. */
 .brief__c { font-size: 12.5px; font-weight: 500; letter-spacing: 0.01em; }
 
 
-/* ---------- the side column ---------- */
+/* ---------- what the shell keeps of the side column ---------- */
 
-/* Every figure in the right rail comes off `runs` and `sources` - see
-   `queries.recent_activity`. */
-.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* The right rail is gone (2026-09-08). Five things lived in it: the day's
+   brief, today's themes, the impact spread, the week, and one status line.
 
-/* The side column scrolls itself. Sticky alone pins the box at `top` and
-   leaves whatever does not fit below the fold permanently out of reach: a
-   sticky element never travels, so its own bottom cannot be scrolled into
-   view - the reader had to run the whole feed down and still never saw it.
-   Capping the height at the window and giving it `overflow-y` makes the
-   overflow reachable where it is, and the feed keeps its own scroll.
+   The brief moved to the top of the reading and is styled with the rest of the
+   briefs. The impact spread moved into the topic filter row and is styled with
+   it. The week moved to `/runs`, which is where the record already lives, and
+   is styled just below. Two did not survive the move, and neither is a loss:
+   the themes list drew a name, a share and a count for each topic, which is a
+   second copy of the filter row three lines above it; and the status line was
+   the last run's state and stamp, which `/runs` states verbatim at the head of
+   the page and the left rail's foot states on every page.
 
-   `overflow-y: auto` computes the other axis to `auto` too - one axis cannot
-   stay `visible` - so the panels are clipped horizontally as well. That costs
-   nothing here: `--shadow` is `0 1px 2px` and `0 8px 24px -12px`, and a 24px
-   blur pulled in by a 12px negative spread reaches about a pixel sideways. It
-   is a shadow cast downwards, so only the container's top and bottom edges cut
-   anything, which is what an edge content scrolls under is meant to do.
-
-   `scrollbar-gutter: stable` keeps the lane reserved whether or not the column
-   overflows, so the cards do not change width between a long day and a short
-   one. The scrollbar lands on the column's right edge, in line with the feed's. */
-/* It is a rail, and since 2026-09-07 it is drawn as one. Taking the containers
-   off the feed (ADR 0013) took them off this column too, which left five
-   headings and a run of small figures floating on the page with nothing saying
-   where the reading stopped and the instruments started; ADR 0014 answered that
-   with one ground around the whole column, as a card - a fill, a radius, a
-   shadow, floating inside the reading with the bar's controls sitting above it
-   and unrelated to it.
-
-   It is the shell's third column now, on the shell's own ground, running to
-   both edges of the window and up into the bar's last cell (ADR 0021). Berke's
-   note on 2026-09-07: the right bar is not a separate structure, it is joined.
-   A card cannot be joined to anything - a radius is a statement that the thing
-   ends here - and the argument for the ground was never that this is a card,
-   it was that a column of instruments beside a column of prose has to be told
-   apart from it. A rail does that and says what it is as well.
-
-   The units inside keep their 26px and their labels and gain nothing, so this
-   is still exactly one surface and not six.
-
-   `padding-right` is short of `padding-left` by the width of the reserved
-   scrollbar lane, so the content still sits centred in the box. */
-.side {
-  display: flex;
-  flex-direction: column;
-  gap: 26px;
-  position: sticky;
-  top: var(--bar-h);
-  height: calc(100vh - var(--bar-h));
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  /* `--chart-bar`, not `--bar-off`: the thumb was 9% white on the dark panel,
-     which is invisible, so a column that ends mid-chart at the window's edge
-     showed a cut bar and nothing saying it could be scrolled. The chart bar is
-     the tone that is legible on its own, which is what a thumb has to be. */
-  scrollbar-color: var(--chart-bar) transparent;
-  background: var(--rail-bg);
-  padding: 20px 12px 22px 20px;
-}
-
-/* A unit, not a card. Four bordered boxes stacked down a 296px column is a
-   filing cabinet, and three of the four were reporting on the machine rather
-   than on the day. What separates one unit from the next is 26px and a label -
-   the same two devices the feed uses, so the two columns read as one page.
-
-   The order is the argument: what a person would write about today, what the
-   day was about, how heavy it was, how big against the week, and last and
-   smallest whether the machine is well. */
-.unit { display: block; }
+   `.unit__h` is the one class the column leaves behind, because it was never
+   only the column's: `/runs` labels its facts and its totals with it, and this
+   rule is the one that decides they are quiet. */
 .unit__h { color: var(--ink-3); margin-bottom: 12px; }
 
-/* Today's themes. The word is the figure and the bar under it is the share of
-   the run carrying it, so a count of six is legible as most of the day or as a
-   corner of it without the reader doing arithmetic. */
-/* One line per topic: the word, then a fixed 64px track carrying the share,
-   then the count - a small horizontal bar chart. Until 2026-09-06 the bar ran
-   under the row at the row's full width with no track, which made six bars of
-   36% and under read as six rules that had stopped short; Berke called the
-   block cheap on sight. The variants tried are in
-   `mockups/v4/variants-side-topics.html` (B shipped). The count left the
-   monospaced face for the body face at `--ink-1`: it is the figure the row is
-   about, and it was the smallest thing in the column. */
-.topics { list-style: none; display: flex; flex-direction: column; gap: 10px; padding: 0; }
-.topics a {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  color: var(--ink-1);
-  transition: color var(--dur) var(--ease);
-}
-.topics a:hover { color: var(--ink-0); }
-.topics a[aria-current] { color: var(--accent); }
-/* The word takes the slack, so the track and the count stand in one column on
-   the right whatever the word's length. */
-.topics__n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.topics__c {
-  font-family: var(--sans);
-  font-size: 13.5px;
-  color: var(--ink-1);
-  font-variant-numeric: tabular-nums;
-  min-width: 2ch;
-  text-align: right;
-  flex: none;
-}
-/* The one comparative claim on the page, so it is a mark and a title rather
-   than a coloured word: "rising" spelled out beside six topics would be six
-   more things to read before the six topics. */
-.rise { display: inline-flex; color: var(--imp-high); flex: none; }
-.rise svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 2; fill: none; }
-/* A visible track under the fill, in `--bar-off`: a bar with no track is a
-   line of unknown length, a bar on a track is a fraction. */
-.topics__b {
-  display: block;
-  width: 64px;
-  height: 4px;
-  flex: none;
-  border-radius: 2px;
-  background: var(--bar-off);
-  overflow: hidden;
-}
-.topics__b i { display: block; height: 100%; border-radius: 2px; background: var(--chart-bar); }
-.topics a[aria-current] .topics__b i { background: var(--accent); }
-
-/* The feed's own shape, drawn with the feed's own meter. Three rows, always
-   all three: a scale with rows appearing and disappearing is read as three
-   unrelated numbers. A band with nothing in it keeps its place and loses its
-   colour. */
-.split { list-style: none; display: flex; flex-direction: column; gap: 9px; padding: 0; }
-.split li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
-.split__l { color: var(--ink-1); }
-.split__n {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--ink-0);
-  font-variant-numeric: tabular-nums;
-}
-.split .is-off { --imp: var(--bar-off); }
-.split .is-off .split__l, .split .is-off .split__n { color: var(--ink-3); }
-
-/* Last in the column and smallest in it: two lines and a link. Everything the
-   machine has to say about itself that is not on `/runs`. */
-.unit--foot { margin-top: -4px; }
-.status { display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; color: var(--ink-1); }
-.status__d { font-size: 12px; color: var(--ink-3); }
-.status--src { margin-top: 4px; color: var(--ink-3); font-size: 13px; }
-.unit--foot .lnk { display: inline-block; margin-top: 11px; font-size: 13.5px; color: var(--ink-2); }
+/* ---------- the week, on /runs ---------- */
 
 /* Seven bars, scaled to the tallest day. The accent marks today and nothing
    else here - the same job it does in the rail. No axis, no gridline, no
-   legend: the numbers are in each bar's title and the shape is the point. */
+   legend: the numbers are in each bar's title and the shape is the point.
+
+   It is capped at the width of the spend totals above it rather than running
+   the page: seven bars stretched across 1460px is a chart claiming to be the
+   most important thing on a page whose subject is a table. */
+.week { max-width: 520px; }
 .chart {
   list-style: none;
   display: grid;
@@ -1188,47 +1042,6 @@ kbd {
   text-align: center;
 }
 .chart .on .chart__d { color: var(--ink-1); }
-
-/* Below this the side column stops being a column and lays its units out two
-   by two under the digest - still read, just not beside it. It gives up its own
-   scroll box with its stickiness: in the flow it is the page's to scroll, and a
-   scroller nested in the thing already scrolling is a trap, not a convenience. */
-@media (max-width: 1240px) {
-  /* The right rail stops being a column and becomes the last band of the page.
-     It is a different cell, not a narrower one - row three of the grid, under
-     the reading, in the reading's own track - so it is placed rather than left
-     to reflow. The bar's last cell shrinks back to the switches it holds. */
-  .app--side { grid-template-columns: var(--rail) minmax(0, 1fr); }
-  .app--side .side { grid-column: 2; grid-row: 3; }
-  .app--side .bar__side { justify-content: flex-end; }
-  /* One measure, and it takes it rather than the window: the cap the rail used
-     to impose beside the reading has to come from somewhere once it is no
-     longer beside it. */
-  .main { max-width: 920px; }
-  .feed-col, .main > .brief { max-width: none; }
-  /* It also gives up its ground. Below the feed it is not a rail beside the
-     reading, it is the last section of the page, and a fill would make it the
-     only box in a column of prose - the exact thing ADR 0013 removed. A rule
-     above it is enough where a whole column was needed beside it. */
-  .side {
-    position: static;
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 28px 40px;
-    height: auto;
-    overflow: visible;
-    background: none;
-    border-top: 1px solid var(--line-soft);
-    padding: 22px 22px 64px;
-    max-width: 920px;
-    margin: 0 auto;
-    width: 100%;
-  }
-  .unit--foot { margin-top: 0; }
-}
-@media (max-width: 720px) {
-  .side { grid-template-columns: 1fr; }
-}
 
 /* ---------- the story list ---------- */
 
@@ -1402,7 +1215,18 @@ kbd {
   transition: color var(--dur) var(--ease);
 }
 .go svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.8; fill: none; }
-.item:hover .go, .go:hover { color: var(--ink-0); }
+/* It lights under its own pointer and not under the card's. `.item:hover .go`
+   brightened the link the moment the cursor entered the story - anywhere in it,
+   including the headline eight lines above - so the one hover state on the row
+   fired for a gesture that had nothing to do with the link, and by the time the
+   reader actually reached it there was no change left to report. Berke,
+   2026-09-08: it lighting up like that is meaningless. A hover state is a
+   promise that this is what the click will hit.
+
+   The reader's verdict is not this and stays on `.item:hover`: it is drawn from
+   nothing on the card's hover rather than brightened, and being invisible until
+   the story is under the pointer is the whole of what was picked in E2.1. */
+.go:hover { color: var(--ink-0); }
 
 /* The reader's verdict: two words on the foot line, the chips' face and size,
    the chosen one in full ink with a check after it. It is drawn beside the
@@ -1468,13 +1292,32 @@ kbd {
 .p3 .item__t { font-size: 16.5px; color: var(--ink-1); font-weight: 500; }
 .p2 .item__t { font-size: 14.5px; color: var(--ink-2); }
 .p1 .item__t { font-size: 14.5px; color: var(--ink-2); }
-/* Below 3 the story is a headline and nothing else: the reader is scanning by
-   then, and a summary they will not read is in the way of the next headline. */
-.p2, .p1 { padding: 13px 0; }
+/* Below 3 the story keeps its headline and drops its prose: the reader is
+   scanning by then, and a summary they will not read is in the way of the next
+   headline.
+
+   The horizontal padding is not the story's to drop, and it did drop it. This
+   rule was written on 2026-09-06, when a story was a run of text on the page
+   and 22px of nothing to its left would have been an indent; ADR 0021 put the
+   card back the next day and gave `.item` `20px 22px 18px`, and `13px 0` went
+   on overriding both axes of it. The result is what Berke marked on
+   2026-09-08: on a low story the source name started 0.8px inside the card's
+   own border and the impact meter ended flush against the right one, so the
+   one row on the page with no summary to fill it was also the one row whose
+   contents sat on the frame. Same 22px as every other card now, and only the
+   vertical step is the low story's own.
+
+   The foot line comes back with it (2026-09-08). Hiding it took away the
+   topics, the link to the source and the reader's own `doğru · yanlış` - and
+   that last one is not decoration: E3's calibration is fed by labels, a label
+   exists because a person pressed a word, and a third of the feed was drawn
+   with nothing to press. What stays hidden is the prose, which is what the
+   rule was actually arguing about. */
+.p2, .p1 { padding: 13px 22px 12px; }
 .p2 .item__m, .p1 .item__m { margin-bottom: 4px; }
 .p2 .item__s, .p1 .item__s,
-.p2 .why,     .p1 .why,
-.p2 .item__f, .p1 .item__f { display: none; }
+.p2 .why,     .p1 .why { display: none; }
+.p2 .item__f, .p1 .item__f { margin-top: 9px; }
 
 .feed__f { padding: 20px 0 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
@@ -1493,8 +1336,50 @@ kbd {
    step of air that says so. With the feed's panel gone (ADR 0013) nothing was
    left between the last pill and the first source line but the pill's own 5px
    of padding, and the two read as one block. */
-.filter { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-.tags { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.filter { display: flex; align-items: flex-start; gap: 12px 24px; flex-wrap: wrap; margin-bottom: 20px; }
+.tags { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; flex: 1 1 auto; }
+
+/* How heavy the day in view is, at the end of the row the topics start. It was
+   a unit of the right rail until 2026-09-08 and it is the one figure from that
+   column the reading actually wanted next to it: the pills say what the day was
+   about, and this says how much of it is worth stopping for. Counted off the
+   list the reader can reach, so a filtered page answers for its filter.
+
+   Read across rather than down, because the row it now sits in is a row. Each
+   band is the story list's own meter at the story list's own colours - three
+   bars lit to the band - so the three items here and the fifteen down the page
+   are one system read twice. The word is drawn beside each one for the reason
+   `.score__l` exists: three bars with no legend are a shape, and a shape is
+   what the reader was given before 2026-09-05 and could not read.
+
+   `margin-left: auto` and not `justify-content: space-between` on the parent:
+   the topics wrap and the spread must not be dragged onto a line of its own
+   until they have actually filled one. `flex-start` keeps it on the first row
+   of pills when they do wrap, and the padding is the pill's own so the two sit
+   on one optical line. */
+.spread {
+  list-style: none;
+  flex: none;
+  margin-left: auto;
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 0;
+}
+.spread li { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+/* It wraps rather than clipping. `body` is `overflow-x: hidden`, so a row that
+   runs past the window is not a scroll, it is a missing band - and the three
+   words plus their figures come to about 340px, which is the whole of a 375px
+   screen less its margins. */
+.spread { flex-wrap: wrap; }
+.spread__l { color: var(--ink-3); font-weight: 500; }
+.spread__n { color: var(--ink-1); font-weight: 500; font-variant-numeric: tabular-nums; }
+/* An empty band keeps its row: a scale with holes in it is read as a scale,
+   and one with rows appearing and disappearing is read as three unrelated
+   numbers. Unlit and one ink step down is what says the row is empty. */
+.spread .is-off { --imp: var(--bar-off); }
+.spread .is-off .spread__l, .spread .is-off .spread__n { color: var(--ink-3); }
 /* A topic is a word, and a word set in a monospaced face at 11px is read one
    letter at a time. Body face, one step up, and the pill grown to match: this
    row is a control, and it was the smallest thing on the page.
@@ -1830,9 +1715,8 @@ tr:hover .span__t i { opacity: 0.42; }
       it has lived in the bar since 2026-09-07, so it is already where a phone
       would have needed it to be. */
 @media (max-width: 860px) {
-  .app, .app--side { grid-template-columns: minmax(0, 1fr); }
+  .app { grid-template-columns: minmax(0, 1fr); }
   .col { grid-column: 1; }
-  .app--side .side { grid-column: 1; }
   .rail {
     position: fixed;
     inset: auto 0 0 0;
@@ -1851,11 +1735,10 @@ tr:hover .span__t i { opacity: 0.42; }
   .bar__brand { width: auto; flex: none; padding: 0 0 0 14px; background: none; }
   .brand__w, .rail-tog { display: none; }
   .rail__foot, .nav__g { display: none; }
-  /* Neither end of the bar sits over a column here - the left rail is a bar at
-     the foot of the window and the right one is a band at the end of the page -
-     so neither keeps the ground that said which column it belonged to. */
-  .bar__side, .app--side .bar__side { padding: 0; background: none; }
-  .app--side .bar__side .seg { box-shadow: none; }
+  /* The bar's ends sit over nothing here - the left rail is a bar at the foot
+     of the window - so the switches drop the padding that kept them clear of a
+     column edge. */
+  .bar__side { padding: 0; }
   .nav--narrow { display: flex !important; }
   .nav--go { display: none; }
   .nav { flex-direction: row; width: 100%; gap: 0; }
@@ -1902,6 +1785,14 @@ tr:hover .span__t i { opacity: 0.42; }
     flex-wrap: wrap;
     justify-content: flex-start;
     gap: 8px;
+    /* And it is as tall as the switches, not as tall as the bar. `height: 100%`
+       is right for a grid cell that has to carry a column's ground down the
+       side of the window and wrong the moment the bar wraps: on its own flex
+       line it made that line 160px tall - the whole of the bar's inner height -
+       so the switches were drawn 110px below the bar's own bottom edge, over
+       the first paragraph of the brief. Found 2026-09-08; it had been there
+       since the cell got its ground on 2026-09-07. */
+    height: auto;
   }
   /* The search box drops to a line of its own under the page name. It used to
      take `order: -1` and land above the title, which was right while it lived

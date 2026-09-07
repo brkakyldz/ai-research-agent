@@ -93,11 +93,22 @@ async def stories_for_run(
     ranked_only: bool = True,
     tag: str | None = None,
 ) -> list[Story]:
-    """The run's stories, in reading order.
+    """The run's stories, heaviest first.
 
-    Ranked items come first in the order the ranker chose; the rest follow by
-    importance. That is the same ordering the page's typography expresses, so a
-    reader scanning downward sees the ink fade monotonically.
+    Importance leads the sort since 2026-09-08, and `rank` only breaks its ties.
+    It was the other way round, and the docstring claimed exactly what this
+    paragraph claims - that the reader scanning downward sees the ink fade
+    monotonically - while the query made it false: `rank` is the ranker's own
+    order over the run, `importance` is the model's 1-5 score on one story, and
+    the two disagree constantly. A real day came out p4, p3, p3, p2, p3, which
+    on a page whose only ranking indicator is the size of the headline (ADR
+    0014) reads as no order at all. Berke, 2026-09-08: the stories look randomly
+    arranged.
+
+    `rank` still decides *which* stories are here - `ranked_only` is the top-N
+    filter, and that is the job it was written for. What it no longer does is
+    decide the order they are read in, which is what the typography is already
+    saying.
 
     `language` is the page's, not the run's, and only the age string uses it:
     "3 saat" is a button, not reporting - it is written by this app rather than
@@ -116,8 +127,8 @@ async def stories_for_run(
     if ranked_only:
         query = query.where(Summary.rank.isnot(None))
     query = query.order_by(
-        Summary.rank.asc().nullslast(),
         Summary.importance.desc(),
+        Summary.rank.asc().nullslast(),
         Summary.id.asc(),
     )
 
@@ -196,93 +207,6 @@ async def tag_counts(
         except json.JSONDecodeError:
             continue
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
-
-
-@dataclass(slots=True)
-class Topic:
-    """One topic in the side column's themes list.
-
-    `share` is the percentage of the run's stories carrying the tag, and it is
-    what the bar draws - a count alone tells the reader nothing about whether
-    six is most of the day or a corner of it.
-
-    `rising` is the only derived claim on the page, so it is deliberately dull:
-    the tag has to appear at least twice today AND at least half again as often
-    as its own average across the digests of the previous week. With no prior
-    run to compare against, nothing rises - an empty week must not make every
-    topic look like a trend.
-    """
-
-    name: str
-    n: int
-    share: int
-    rising: bool
-
-
-async def topic_pulse(
-    session: AsyncSession,
-    run: Run,
-    *,
-    limit: int = 6,
-    window_days: int = 7,
-    ranked_only: bool = True,
-) -> list[Topic]:
-    """The run's topics, with a baseline from the week behind it.
-
-    Counted in Python for the same reason `tag_counts` is: the tags live in a
-    JSON column, and a week of digests is a few hundred rows.
-
-    `ranked_only` reaches the history query as well as today's, because a
-    baseline drawn from every summary of last week against a count drawn from
-    the ranked fifteen of today would make everything look like it is falling.
-    Like against like, or the comparison is not one.
-    """
-    today = dict(await tag_counts(session, run, limit=200, ranked_only=ranked_only))
-    if not today:
-        return []
-
-    counted = select(func.count()).select_from(Summary).where(Summary.run_id == run.id)
-    if ranked_only:
-        counted = counted.where(Summary.rank.isnot(None))
-    n_stories = (await session.execute(counted)).scalar_one() or 1
-
-    since = run.started_at - timedelta(days=window_days)
-    history_query = (
-        select(Summary.run_id, Summary.tags_json)
-        .join(Run, Run.id == Summary.run_id)
-        .where(Run.language == run.language)
-        .where(Run.kind != "collect")
-        .where(Run.id != run.id)
-        .where(Run.started_at >= since)
-        .where(Run.started_at < run.started_at)
-    )
-    if ranked_only:
-        history_query = history_query.where(Summary.rank.isnot(None))
-    prior = (await session.execute(history_query)).all()
-
-    runs_seen: set[str] = set()
-    history: dict[str, int] = {}
-    for run_id, raw in prior:
-        runs_seen.add(run_id)
-        try:
-            for tag in json.loads(raw or "[]"):
-                history[tag] = history.get(tag, 0) + 1
-        except json.JSONDecodeError:
-            continue
-    n_prior = len(runs_seen)
-
-    topics = []
-    for name, n in sorted(today.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]:
-        baseline = history.get(name, 0) / n_prior if n_prior else None
-        topics.append(
-            Topic(
-                name=name,
-                n=n,
-                share=round(100 * n / n_stories),
-                rising=bool(baseline is not None and n >= 2 and n > 1.5 * baseline),
-            )
-        )
-    return topics
 
 
 @dataclass(slots=True)

@@ -8,6 +8,7 @@ than at seven in the morning.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -106,6 +107,61 @@ def test_importance_drives_the_class_that_drives_the_type(client: TestClient, di
     assert 'class="item p4"' in body
     # No badge, no rank number - the whole point of the removals.
     assert "importance" not in body.lower()
+
+
+async def test_the_feed_is_ordered_by_importance_not_by_rank(
+    client: TestClient, session: AsyncSession
+) -> None:
+    """The ink has to fade downwards, and until 2026-09-08 it did not.
+
+    `rank` led the sort and `importance` only broke its ties. They are two
+    different measurements - the ranker's order over the whole run against the
+    model's 1-5 score on one story - so they disagree constantly, and a real day
+    came out p4, p3, p3, p2, p3. On a page whose only ranking indicator is the
+    size of the headline (ADR 0014) that reads as no order at all; Berke marked
+    it the same day. `rank` still chooses which stories are on the page, which
+    is the job it was written for.
+
+    Seeded so the two orders are exact opposites: the least important story is
+    ranked first.
+    """
+    src = Source(name="OpenAI", url="https://openai.com/news/rss.xml")
+    session.add(src)
+    await session.flush()
+    run = Run(
+        kind="digest", language="tr", status="ok", n_summarized=4, finished_at=datetime.now(UTC)
+    )
+    session.add(run)
+    await session.flush()
+
+    for position, importance in enumerate([2, 5, 3, 4]):
+        art = Article(
+            source_id=src.id,
+            title=f"Haber {importance}",
+            url=f"https://openai.com/news/o{position}",
+            url_canonical=f"https://openai.com/news/o{position}",
+            published_at=datetime.now(UTC),
+        )
+        session.add(art)
+        await session.flush()
+        session.add(
+            Summary(
+                article_id=art.id,
+                run_id=run.id,
+                language="tr",
+                title_local=f"Haber {importance}",
+                summary="Ozet.",
+                why_it_matters="Bu yuzden onemli.",
+                tags_json="[]",
+                importance=importance,
+                # Rank ascends as importance descends: the worst story is first.
+                rank=position + 1,
+            )
+        )
+    await session.commit()
+
+    body = client.get("/").text
+    assert re.findall(r'class="item p(\d)"', body) == ["5", "4", "3", "2"]
 
 
 def test_the_expander_reveals_everything_summarised(client: TestClient, digest: Run) -> None:
@@ -633,8 +689,8 @@ def test_the_theme_links_keep_the_rest_of_the_query(client: TestClient, digest: 
 def test_a_story_names_its_impact_band(client: TestClient, digest: Run) -> None:
     """The bars are a shape; the word beside them is what makes it a scale."""
     body = client.get("/").text
-    assert "Yüksek etki" in body, "the 5 and the 4 are the high band"
-    assert "Orta etki" in body, "the 3 is the middle one"
+    assert "Yüksek ilgi" in body, "the 5 and the 4 are the high band"
+    assert "Orta ilgi" in body, "the 3 is the middle one"
 
 
 def test_the_impact_meter_lights_one_bar_per_step_of_the_band(
@@ -695,52 +751,56 @@ def test_a_low_scoring_story_is_only_a_headline(client: TestClient, digest: Run)
 # -- the header and the rail --------------------------------------------------
 
 
-def test_execution_metrics_are_off_the_reading_page_entirely(
-    client: TestClient, digest: Run
-) -> None:
+def test_the_reading_page_says_nothing_about_the_machine(client: TestClient, digest: Run) -> None:
     """Cost is not deleted, it is placed - and the place is `/runs`.
 
     It came off the top bar on 2026-09-05 and off the digest's side column on
     2026-09-06, on the same argument both times: it says how the page was made,
-    not what is on it. The digest keeps one line about the machine, which is
-    whether the last run worked.
+    not what is on it. The last line about the machine went with the right rail
+    on 2026-09-08 - the run log states it at the head of the page and the left
+    rail's foot states it on every page, so the reading holds no copy at all.
     """
     body = client.get("/").text
     assert "$0.042" not in body, "spend belongs to the run log"
     assert "$0.042" in client.get("/runs").text
-    assert "Tamam" in body.split('class="side"', 1)[1], "the status line stays"
+    assert 'class="status"' not in body, "and so does the machine's own state"
 
 
-def test_the_side_column_leads_with_the_day_not_the_machine(
+def test_the_digest_reads_the_note_then_the_topics_then_the_day(
     client: TestClient, digest: Run
 ) -> None:
-    """The column's order is its argument: the note, the themes, the weight of
-    the day, the week, and the machine last."""
-    side = client.get("/").text.split('class="side"', 1)[1]
+    """The order is the page's argument, and it survived the right rail.
+
+    Until 2026-09-08 the brief and the impact spread were units of a column
+    beside the feed. Berke took the column off; the two of them landed in the
+    reading in the order they already had, above the stories rather than
+    beside them.
+    """
+    body = client.get("/").text
     order = [
-        side.index("brief--side"),
-        side.index(">Günün konuları<"),
-        side.index(">Etki dağılımı<"),
-        side.index(">Son 7 gün<"),
-        side.index('class="status"'),
+        body.index(">Bugünün özeti<"),
+        body.index('<div class="filter">'),
+        body.index('class="spread"'),
+        body.index('<ol class="feed">'),
     ]
     assert order == sorted(order)
+    assert 'class="side"' not in body, "there is no column beside the reading"
 
 
 def test_every_count_is_a_count_of_the_list_you_can_reach(client: TestClient, digest: Run) -> None:
-    """The filter pill, the themes panel and the feed have to agree.
+    """The filter pill and the feed have to agree.
 
     They did not until 2026-09-06: the tags were counted over every summary the
     run produced while the filter narrowed the ranked ones, so a pill could
     promise 27 stories on a page holding fifteen and return four when pressed.
+    The themes panel was the third party to this agreement until 2026-09-08,
+    when the right rail came off and took it along.
 
     Seeded: five summaries, three of them ranked. `openai` is on the first two
     (both ranked), `policy` on the last three (one ranked).
     """
     body = client.get("/").text
     assert "openai <b>2</b>" in body and "policy <b>1</b>" in body
-    assert 'style="width: 67%"' in body, "openai is on two of the three ranked"
-    assert 'style="width: 33%"' in body, "policy is on one of them"
     # And the promise holds when pressed.
     assert client.get("/?tag=openai").text.count('class="item ') == 2
     assert client.get("/?tag=policy").text.count('class="item ') == 1
@@ -752,8 +812,6 @@ def test_showing_everything_widens_the_counts_with_the_list(
     """`all=1` is the same agreement over a longer list, not a different rule."""
     body = client.get("/?all=1").text
     assert "openai <b>2</b>" in body and "policy <b>3</b>" in body
-    assert 'style="width: 40%"' in body, "openai is on two of five"
-    assert 'style="width: 60%"' in body, "policy is on three of five"
     assert body.count('class="item ') == 5
 
 
@@ -770,31 +828,49 @@ def test_the_briefs_footnote_counts_topics_rather_than_reporting_a_cap(
     assert "3 haber · 1 kaynak · 3 konu" in client.get("/?all=1").text
 
 
-def test_nothing_rises_without_a_week_behind_it(client: TestClient, digest: Run) -> None:
-    """The one derived claim on the page must not fire on a database with a
-    single run in it - with no baseline, every topic would look like a trend."""
-    assert 'class="rise"' not in client.get("/").text
-
-
 def test_the_impact_spread_keeps_all_three_bands(client: TestClient, digest: Run) -> None:
     """Three ranked stories: one 5, one 4, one 3 - so two high, one mid, no low.
     The empty band keeps its row, dimmed, because a scale with holes in it is
-    still read as a scale."""
-    side = client.get("/").text.split('class="side"', 1)[1]
-    assert side.count('<li class="score--') == 3
-    assert 'class="score--low is-off"' in side
+    still read as a scale.
+
+    It is drawn at the end of the topic row since 2026-09-08, so what it is read
+    against is the row three lines above the stories rather than a column
+    standing beside them.
+    """
+    spread = client.get("/").text.split('class="spread"', 1)[1].split("</ul>", 1)[0]
+    assert spread.count('<li class="score--') == 3
+    assert 'class="score--low is-off"' in spread
 
 
-def test_the_side_column_is_read_from_real_runs(client: TestClient, digest: Run) -> None:
-    """Nothing here is projected or filled in - if the numbers were invented the
-    panel would not be worth the space it took."""
-    body = client.get("/").text
+def test_the_spread_counts_the_list_the_reader_can_reach(client: TestClient, digest: Run) -> None:
+    """It is counted off the stories in view rather than off the run, so a
+    filter narrows it along with the feed. Seeded: three ranked (5, 4, 3), and
+    `openai` is on the two that scored highest."""
+
+    def counts(path: str) -> list[str]:
+        page = client.get(path).text
+        spread = page.split('class="spread"', 1)[1].split("</ul>", 1)[0]
+        return re.findall(r'<span class="spread__n">(\d+)</span>', spread)
+
+    assert counts("/") == ["2", "1", "0"]
+    assert counts("/?tag=openai") == ["2", "0", "0"]
+
+
+def test_the_week_is_read_from_real_runs_on_the_run_log(client: TestClient, digest: Run) -> None:
+    """Nothing in it is projected or filled in - if the numbers were invented
+    the chart would not be worth the space it takes.
+
+    It was the fourth unit of the digest's right rail until 2026-09-08 and moved
+    to `/runs` when that rail came off: it is the record's own subject read at a
+    different grain, and the reading page has nowhere to put a chart.
+    """
+    body = client.get("/runs").text
     assert 'class="chart"' in body
     assert body.count('class="chart__b"') == 7, "seven local days"
     # The seeded run summarised five stories today, so today's bar is the tallest.
     assert 'style="height: 100%"' in body
     assert '<li class="on"' in body
-    assert "16 kaynak açık" in body or "1 kaynak açık" in body
+    assert 'class="chart"' not in client.get("/").text, "and not on the reading"
 
 
 def test_no_story_is_dressed_differently_for_being_first(client: TestClient, digest: Run) -> None:
@@ -806,12 +882,13 @@ def test_no_story_is_dressed_differently_for_being_first(client: TestClient, dig
         assert "data-lead" not in client.get(path).text, path
 
 
-async def test_the_side_column_survives_an_empty_database(
+async def test_the_week_survives_an_empty_database(
     client: TestClient, session: AsyncSession
 ) -> None:
     """The emptiest page is exactly when a reader wants to know whether anything
-    has ever run, so the column renders with no runs behind it."""
-    body = client.get("/").text
+    has ever run, so `/runs` draws its seven days with no runs behind them - a
+    flat chart rather than a missing one."""
+    body = client.get("/runs").text
     assert "Henüz çalışma yok" in body
     assert 'class="chart"' in body
     assert 'style="height: 0%"' in body
@@ -934,25 +1011,19 @@ def test_the_bar_spans_the_shell_and_carries_the_brand(client: TestClient, diges
     assert 'class="brand"' not in rest.split("</aside>", 1)[0], "and not the rail's head"
 
 
-def test_the_right_rail_is_a_column_of_the_shell_not_a_card_in_the_reading(
-    client: TestClient, digest: Run
-) -> None:
-    """Berke, 2026-09-07: the right bar is not a separate structure, it is joined.
+def test_the_shell_is_one_rail_and_the_reading(client: TestClient, digest: Run) -> None:
+    """Berke, 2026-09-08: the right rail is not needed any more.
 
-    It used to be the last child of the digest's content block, inside `<main>`,
-    which is what made it a card floating in the reading with the bar's controls
-    parked above it and unrelated to it. It is a grid item of `.app` now, a
-    sibling of the reading, and the one page that fills it says so by giving the
-    shell its third column.
+    It was a card inside the digest's content block from 2026-09-06, then a
+    column of the shell from 2026-09-07 (ADR 0021, on his note that a rail
+    cannot be a separate structure), and then nothing. Every page is two columns
+    now, so `.app` carries no modifier at all and no page has a third cell.
     """
-    body = client.get("/").text
-    assert '<div class="app app--side">' in body
-    assert body.index("</main>") < body.index('<aside class="side"'), "outside the reading"
-
-    for path in ("/runs", "/sources", "/search"):
-        plain = client.get(path).text
-        assert "app--side" not in plain, f"{path} has no day to report on"
-        assert 'class="side"' not in plain
+    for path in ("/", "/runs", "/sources", "/search", "/archive"):
+        body = client.get(path).text
+        assert '<div class="app">' in body, path
+        assert "app--side" not in body, path
+        assert 'class="side"' not in body, path
 
 
 def test_the_rail_can_be_put_away_and_says_so(client: TestClient, digest: Run) -> None:
