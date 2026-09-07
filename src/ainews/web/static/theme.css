@@ -530,15 +530,24 @@ svg { display: block; }
 /* Four cells, laid out as four columns rather than as one flex row with an
    `auto` margin in the middle of it. The first is the brand and it is exactly
    the rail's width, so the bar and the rail share one column and the shell has
-   one vertical edge. The third is the search box and it is centred on the
-   window, not on whatever is left over after the title - so the box does not
-   move sideways when the page name changes length or the run status appears.
-   The two `1fr` columns either side of it are equal, which is what holds it
-   still. */
+   one vertical edge. The third is the search box and it is centred in what the
+   rail leaves, not in whatever is left over after the title - so the box does
+   not move sideways when the page name changes length or the run status
+   appears. Three equal `1fr` columns after the rail are what hold it still.
+
+   The two outer ones are floored at `min-content` and the middle one is not,
+   which is the whole of how this row decides what gives. Written as
+   `minmax(0, 1fr)` on the sides and a flat `520px` in the middle - which is
+   what it was until the date arrived - the sides were free to shrink under
+   their own contents and the middle was not: on a 1320px window "6 Eylül 2026"
+   was cut off mid-year while the search box held 520px it did not need. The
+   floor says the title and the controls are not allowed to be clipped, and the
+   cap on the box rather than on the track says the search is the one that
+   gives. It reaches 520px on any window wide enough to spare it. */
 .top-bar {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: var(--rail) minmax(0, 1fr) minmax(0, 520px) minmax(0, 1fr);
+  grid-template-columns: var(--rail) minmax(min-content, 1fr) minmax(0, 1fr) minmax(min-content, 1fr);
   align-items: center;
   gap: 16px;
   /* No left padding: the first column is the rail's, and it carries its own. */
@@ -594,13 +603,14 @@ svg { display: block; }
   fill: none;
   transition: transform var(--dur) var(--ease);
 }
-/* The title column can be narrower than its contents on a 1320px window, and
-   when it is, the stamp is the half that goes - it is the least of the three
-   things in the bar and the only one that is not a control. `min-width: 0` on
-   the stamp is what enforces that: without it the stamp will not shrink, and
-   the item after it - the bulletin's language - is the one that gets cut off
-   instead, which is the opposite of the rule. */
-.bar__id { display: flex; align-items: baseline; gap: 10px; min-width: 0; overflow: hidden; }
+/* No `min-width: 0`, and that is load-bearing rather than an omission. The
+   track above is floored at this cell's `min-content`, and a flex container
+   whose minimum is zeroed contributes zero to that floor - the floor would be
+   written and would mean nothing. Until 2026-09-07 the rule here was the
+   opposite: the cell was allowed to shrink under its contents so the stamp
+   would be the half that goes. It did not go, it was cut in half. Losing a
+   date is a decision; losing the last four characters of one is a defect. */
+.bar__id { display: flex; align-items: baseline; gap: 10px; }
 /* The page name, and it was the same size as a nav link. It is the one word
    that says which of five pages this is, so it is set as a heading. */
 .bar__id h1 { font-size: 17px; font-weight: 600; white-space: nowrap; flex: none; }
@@ -618,8 +628,6 @@ svg { display: block; }
   font-size: 12.5px;
   color: var(--ink-2);
   white-space: nowrap;
-  min-width: 0;
-  overflow: hidden;
   /* Its own baseline is the icon's, and the row's is the heading's. */
   align-self: center;
 }
@@ -638,15 +646,15 @@ svg { display: block; }
   border-radius: 999px;
   padding: 1px 8px;
 }
-/* `min-width: 0` for the same reason `.bar__id` has it: a grid item's automatic
-   minimum is its min-content width, so without it the track grows past its
-   `1fr` rather than letting the row inside it reflow. */
+/* No `min-width: 0`, for the same reason `.bar__id` has none: its track is
+   floored at this cell's `min-content` and a zeroed minimum would erase the
+   floor. These are controls, and a control clipped to fit is a control that
+   cannot be pressed. */
 .bar-right {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  min-width: 0;
 }
 
 .btn {
@@ -689,6 +697,11 @@ svg { display: block; }
      gap rather than as the lane the bar is built around. */
   padding: 8px 8px 8px 12px;
   width: 100%;
+  /* The cap is on the box, not on its track: a capped track cannot give width
+     back when the cells beside it need it, and giving it back is this row's
+     only way of not clipping something that must not be clipped. */
+  max-width: 520px;
+  margin: 0 auto;
   color: var(--ink-2);
   transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease),
               background var(--dur) var(--ease);
@@ -706,6 +719,10 @@ svg { display: block; }
   color: var(--ink-0);
   outline: none;
   width: 100%;
+  /* The box gives its width back to the bar's outer cells before they clip, so
+     on a narrow window the placeholder is the thing that runs out of room. An
+     ellipsis is what says that was allowed for. */
+  text-overflow: ellipsis;
 }
 .field::placeholder, .search input::placeholder { color: var(--ink-2); }
 /* Both shortcuts, because both are real: the script at the foot of `base.html`
@@ -1602,7 +1619,6 @@ td.strong { color: var(--ink-0); }
 @media (max-width: 1180px) {
   :root { --rail: 220px; }
   .brand__s { display: none; }
-  .top-bar { grid-template-columns: var(--rail) minmax(0, 1fr) minmax(0, 400px) minmax(0, 1fr); }
   .main--split { gap: 28px; }
 }
 
