@@ -18,7 +18,11 @@ services:
       PHOENIX_ENABLED: ${PHOENIX_ENABLED:-false}
       PHOENIX_ENDPOINT: http://phoenix:6006/v1/traces
     ports:
-      - "8000:8000"
+      # Bound to the loopback interface, not published to every interface on the
+      # host. There is no auth on this dashboard (README, "Known limits"), so
+      # `"8000:8000"` would have put the day's bulletin and the run button on
+      # every device sharing the network.
+      - "127.0.0.1:8000:8000"
     volumes:
       # A named volume, not a bind mount to ./data. WAL needs a shared-memory
       # file beside the database, and a Windows host directory mounted into a
@@ -48,7 +52,9 @@ services:
       PHOENIX_WORKING_DIR: /mnt/data
     ports:
       # 6006 serves both the UI and the OTLP/HTTP endpoint the app posts to.
-      - "6006:6006"
+      # Loopback for the same reason the app is: traces carry the exact prompts
+      # and the raw model responses, which is the last thing to hand the network.
+      - "127.0.0.1:6006:6006"
     volumes:
       - phoenix-data:/mnt/data
 

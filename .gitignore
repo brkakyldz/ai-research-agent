@@ -16,3 +16,7 @@ data/
 .claude/
 .waltest*/
 scratch/
+
+# Agent working instructions and the research-store marker: local, not published.
+CLAUDE.md
+reports/.reports-architecture
