@@ -8,6 +8,7 @@ gets its numbers.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -166,6 +167,39 @@ def test_usage_falls_back_to_legacy_metadata() -> None:
 
     usage = usage_from_message(Legacy())
     assert (usage.tokens_in, usage.tokens_out) == (10, 3)
+
+
+def test_usage_falls_through_when_the_modern_keys_are_renamed() -> None:
+    """The legacy branch used to be reached only when `usage_metadata` was
+    missing. A dict that is present but whose keys have been renamed upstream
+    read as zero and returned there, so the fallback that still had the numbers
+    was never consulted."""
+
+    class Renamed:
+        def __init__(self) -> None:
+            self.usage_metadata = {"inputTokens": 900, "outputTokens": 300}
+            self.response_metadata = {
+                "token_usage": {"prompt_tokens": 900, "completion_tokens": 300}
+            }
+
+    usage = usage_from_message(Renamed())
+    assert (usage.tokens_in, usage.tokens_out) == (900, 300)
+
+
+def test_usage_that_cannot_be_read_says_so(caplog: pytest.LogCaptureFixture) -> None:
+    """A completed call always spent input tokens, so zero is not a cheap call -
+    it is accounting that has stopped working. Silent, it reaches the screen as
+    `$0.000` on every row and a month of spend reported as nothing, which is the
+    surprise `/runs` exists to prevent."""
+
+    class Blank:
+        pass
+
+    with caplog.at_level(logging.WARNING, logger="ainews.pipeline.llm"):
+        usage = usage_from_message(Blank())
+
+    assert (usage.tokens_in, usage.tokens_out) == (0, 0)
+    assert "no token usage" in caplog.text
 
 
 # -- the graph ----------------------------------------------------------------

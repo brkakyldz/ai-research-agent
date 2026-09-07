@@ -144,6 +144,49 @@ async def test_the_steps_costs_add_up_to_the_runs_cost(
     assert all(by_node[n].est_cost_usd == 0.0 for n in ("collect", "dedupe", "enrich", "persist"))
 
 
+async def test_the_costs_add_up_when_the_state_carries_no_model(
+    session: AsyncSession, settings: Settings, fake_llm: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`persist_run` prices the run from `settings` when the state names no
+    model; the two step rows used to fall back to an empty string instead, and
+    `est_cost_usd` reads an empty model as zero. The run row then charged for
+    the tokens while its own breakdown showed a dash in both cost cells - a
+    second set of numbers about the same two minutes, which is the one thing
+    this table exists not to be."""
+    monkeypatch.setattr(graph_module, "collect_articles", _no_collect)
+    monkeypatch.setattr(graph_module, "enrich_articles", _no_enrich)
+    await _seed_articles(session, 3)
+    run = Run(kind="manual", language="tr")
+    session.add(run)
+    await session.commit()
+    # The shape a checkpoint written before ADR 0020 resumes with.
+    await (
+        graph_module.build_graph()
+        .compile()
+        .ainvoke({**INITIAL, "run_id": run.id}, config={"recursion_limit": 50})
+    )
+    rows = await _rows(session, run.id)
+    await session.refresh(run)
+
+    assert run.est_cost_usd > 0
+    assert sum(r.est_cost_usd for r in rows) == pytest.approx(run.est_cost_usd)
+    by_node = {r.node: r for r in rows}
+    assert by_node["summarize"].model == settings.openai_model_summarize
+    assert by_node["rank"].model == settings.openai_model
+
+
+def test_the_two_carrier_ids_are_one_number() -> None:
+    """`TOKEN_CARRIER_ID` is written twice on purpose - `steps.py` says why, and
+    the reason (keeping the persist path out of `runner.py`'s import graph) is
+    sound. Nothing else holds the two in step, and a divergence would be silent
+    in the worst way: `record_fan_out` would count the rank node's carrier
+    payload as a summary and report one more branch than `persist_run` wrote,
+    with no error anywhere."""
+    from ainews.pipeline.nodes.persist import TOKEN_CARRIER_ID as in_persist
+
+    assert in_persist == steps_module.TOKEN_CARRIER_ID
+
+
 async def test_the_counts_are_the_nodes_own(
     session: AsyncSession, settings: Settings, fake_llm: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -123,7 +123,9 @@ in a billing dashboard.
 | `/runs` | Every run with its cost, duration and errors, and how many summaries carry your verdict. |
 | `/runs/<id>` | One run, node by node: which step took the time, which took the money, and which model wrote it (ADR 0022). Click a run's time. |
 
-![Sources and runs](docs/screenshots/sources.png)
+![Sources](docs/screenshots/sources.png)
+
+![Runs](docs/screenshots/runs.png)
 
 Every page wears the same shell — a left rail that is navigation and nothing
 else, and a bar that holds only your own controls: search (`/` or Ctrl-K),
@@ -167,13 +169,26 @@ failed run. `DESIGN.md` lists everything that was deleted and why.
 | [0001](docs/decisions/0001-llm-gpt-5-6-luna.md) | `gpt-5.6-luna` for every LLM node |
 | [0002](docs/decisions/0002-fastapi-htmx-dashboard.md) | FastAPI + Jinja + HTMX, no Node toolchain |
 | [0003](docs/decisions/0003-sqlite-wal-fts5.md) | SQLite in WAL mode, FTS5 for search |
-| [0004](docs/decisions/0004-apscheduler-in-process.md) | APScheduler in the API process, one worker |
+| [0004](docs/decisions/0004-apscheduler-in-process.md) | APScheduler in the API process, one worker — the digest job superseded by 0015; the structure stands |
 | [0005](docs/decisions/0005-no-alembic-in-v1.md) | No migration tool in v1 |
 | [0006](docs/decisions/0006-no-tailwind.md) | No Tailwind; the mockup's CSS ships as-is |
 | [0007](docs/decisions/0007-named-volume-for-sqlite.md) | A named volume for the container's database |
+| [0008](docs/decisions/0008-console-app-shell.md) | A console shell — rail, bar, panels — and a light theme beside the dark one |
+| [0009](docs/decisions/0009-editorial-story-block.md) | The editorial story block, and the shell split into navigation, controls and record |
+| [0010](docs/decisions/0010-activity-column-and-the-secondary-colour.md) | The activity column, and a blue secondary colour |
+| [0011](docs/decisions/0011-two-label-faces-and-the-brief-in-the-side-column.md) | Two faces for small text, and the brief in the side column — the label's size superseded by 0016 |
+| [0012](docs/decisions/0012-the-impact-meter-takes-the-third-colour.md) | The impact meter takes the third colour; *why it matters* becomes a plate |
+| [0013](docs/decisions/0013-the-page-stops-being-a-dashboard.md) | The page stops being a dashboard — partly superseded by 0014 and 0021 |
+| [0014](docs/decisions/0014-no-lead-and-a-bar-that-looks-like-one.md) | No lead story, and a side column that looks like a bar — partly superseded by 0021 |
+| [0015](docs/decisions/0015-the-digest-is-started-by-a-person.md) | The digest is started by a person; the page advises when, and never refuses |
+| [0016](docs/decisions/0016-the-shell-stops-whispering.md) | The shell stops whispering — one step up, sentence case everywhere |
 | [0017](docs/decisions/0017-the-language-switch-stops-choosing-the-content.md) | The switch translates the interface; the press chooses the bulletin's language |
-| [0019](docs/decisions/0019-evaluation-is-a-sibling-command-not-a-test.md) | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth |
 | [0018](docs/decisions/0018-phoenix-behind-a-dev-profile.md) | Per-call tracing in a local Phoenix, behind a dev profile |
+| [0019](docs/decisions/0019-evaluation-is-a-sibling-command-not-a-test.md) | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth |
+| [0020](docs/decisions/0020-the-model-is-chosen-at-the-press.md) | The model is chosen at the press; the environment is only the default |
+| [0021](docs/decisions/0021-one-bar-across-the-shell-and-a-card-per-story.md) | One bar across two rails, a rail that can be put away, and a card per story |
+| [0022](docs/decisions/0022-a-run-is-recorded-node-by-node.md) | A run is recorded node by node, and the graph is a page |
+| [0023](docs/decisions/0023-the-app-does-not-start-an-evaluation.md) | The app does not start an evaluation; the eval layer keeps its one caller |
 
 ## Known limits
 
@@ -208,13 +223,13 @@ failed run. `DESIGN.md` lists everything that was deleted and why.
 
 ```bash
 uv sync
-uv run pytest          # 296 tests, no API key needed, no network calls
+uv run pytest          # 358 tests, no API key needed, no network calls
 uv run ruff check .
 uv run pre-commit install
 ```
 
 Tests use a fake model and `respx` for HTTP, so the whole suite runs offline in
-about six seconds. `langgraph.json` is checked in for `langgraph dev` if you want
+about twenty seconds. `langgraph.json` is checked in for `langgraph dev` if you want
 to step through the graph in Studio.
 
 ### Looking inside a run

@@ -67,11 +67,26 @@ def usage_from_message(message: Any) -> Usage:
     honest way to cost a run.
     """
     metadata = getattr(message, "usage_metadata", None) or {}
-    if metadata:
-        return Usage(int(metadata.get("input_tokens", 0)), int(metadata.get("output_tokens", 0)))
-    response_metadata = getattr(message, "response_metadata", None) or {}
-    legacy = response_metadata.get("token_usage") or {}
-    return Usage(int(legacy.get("prompt_tokens", 0)), int(legacy.get("completion_tokens", 0)))
+    tokens_in = int(metadata.get("input_tokens", 0))
+    tokens_out = int(metadata.get("output_tokens", 0))
+    # Fall through on *unusable* counts, not on a missing dict. A present
+    # `usage_metadata` whose keys have been renamed upstream reads as zero and
+    # used to return here, skipping the legacy path that might still have
+    # answered.
+    if not tokens_in and not tokens_out:
+        legacy = (getattr(message, "response_metadata", None) or {}).get("token_usage") or {}
+        tokens_in = int(legacy.get("prompt_tokens", 0))
+        tokens_out = int(legacy.get("completion_tokens", 0))
+    if not tokens_in and not tokens_out:
+        # Say so. A completed call always spent input tokens, so zero here is
+        # not a cheap call - it is accounting that has stopped working, and it
+        # is silent all the way to the screen: every row costs $0.000 and
+        # `/runs` reports a month of spend as nothing while the money leaves.
+        # `pricing.price_for` makes the same noise for a model it cannot price,
+        # for the same reason - a surprise in the billing dashboard is worse
+        # than a bad number in ours.
+        log.warning("no token usage on a %s; this call is costed at zero", type(message).__name__)
+    return Usage(tokens_in, tokens_out)
 
 
 def make_llm(model: str, settings: Settings | None = None, **kwargs: Any) -> ChatOpenAI:

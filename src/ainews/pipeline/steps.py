@@ -56,6 +56,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 
+from ainews.config import get_settings
 from ainews.db import RunStep
 from ainews.db.models import utcnow
 from ainews.db.session import session_scope
@@ -223,8 +224,14 @@ async def _fan_out_row(state: PipelineState) -> None:
     n_out = len({p["article_id"] for p in payloads})
     record = StepRecord(started_at=enrich.finished_at)
     record.counts(n_in, n_out)
+    # The same fallback `persist_run` uses, and it has to be the same one: that
+    # node prices the run's total from `settings` when the state carries no
+    # model, so an empty string here would cost the step at nothing while the
+    # row above it charges for the tokens. `est_cost_usd` returns 0.0 for an
+    # empty model, which is right for the four nodes that call nothing and wrong
+    # for the one that just spent money.
     record.spend(
-        state.get("model_summarize") or "",
+        state.get("model_summarize") or get_settings().openai_model_summarize,
         sum(p["tokens_in"] for p in payloads),
         sum(p["tokens_out"] for p in payloads),
     )

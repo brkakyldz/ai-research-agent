@@ -143,7 +143,9 @@ async def _rank(
         summaries, meta, state["language"], model=state.get("model_rank")
     )
     s.counts(len(summaries), len(ordered))
-    s.spend(state.get("model_rank") or "", tokens_in, tokens_out)
+    # `persist_run`'s fallback, not an empty string: see the note in
+    # `steps.record_fan_out`. The two have to price the same tokens the same way.
+    s.spend(state.get("model_rank") or get_settings().openai_model, tokens_in, tokens_out)
     return {
         "ranked": [{"article_id": aid, "rank": i} for i, aid in enumerate(ordered, start=1)],
         "editor_note": note,
