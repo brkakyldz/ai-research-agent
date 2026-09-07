@@ -317,3 +317,58 @@ async def run_status(
         "<script>document.getElementById('bar').classList.remove('is-running');"
         "setTimeout(() => location.reload(), 400);</script>"
     )
+
+
+# Registered last on purpose. FastAPI matches routes in the order they are
+# declared, and `{run_id}` would otherwise swallow `/runs/action`, `/runs/confirm`
+# and `/runs/status` - a path parameter with no pattern matches any segment, and
+# the literal routes above are the ones that have to win.
+@router.get("/runs/{run_id}", response_class=HTMLResponse)
+async def run_detail(
+    request: Request,
+    run_id: str,
+    session: AsyncSession = Depends(db_session),
+) -> HTMLResponse:
+    """One run, node by node: where its time and its money went (ADR 0022).
+
+    A run started before `run_steps` existed - or one that died before its first
+    node closed - renders with an empty step list and says so, rather than 404ing
+    on a run row that is plainly there in the table above.
+    """
+    language = language_of(request)
+    t = strings(language)  # type: ignore[arg-type]
+    run = await queries.run_by_id(session, run_id)
+    context = await shell_context(request, session, language, page="runs")
+    if run is None:
+        response = get_templates().TemplateResponse(
+            request, "run_missing.html", context, status_code=404
+        )
+        remember_preferences(request, response, language)
+        return response
+
+    steps = await queries.steps_for_run(session, run_id)
+    # The share each node took of the run's wall clock, computed here rather than
+    # in the template because a division with a zero guard is not markup. The
+    # denominator is the run's own duration and not the sum of the steps: the two
+    # differ by the scheduling between supersteps, and a bar that normalised the
+    # gap away would claim the pipeline is busy when it is waiting.
+    span = run.duration_seconds or 0.0
+    context.update(
+        {
+            "run": run,
+            "steps": [
+                {"step": s, "share": (s.duration_seconds or 0.0) / span if span else 0.0}
+                for s in steps
+            ],
+            "tokens": run.tokens_in + run.tokens_out,
+            # Which models actually ran, which until now nothing on screen could
+            # say: ADR 0020 made the model a choice at the press, and `runs` has
+            # no column for it - `run_steps` is the first place it is written
+            # down. Short names, because the tier is the whole question and the
+            # ids differ in exactly that segment.
+            "models": [(t["step_" + s.node], s.model.rsplit("-", 1)[-1]) for s in steps if s.model],
+        }
+    )
+    response = get_templates().TemplateResponse(request, "run_detail.html", context)
+    remember_preferences(request, response, language)
+    return response

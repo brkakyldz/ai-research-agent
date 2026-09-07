@@ -34,7 +34,8 @@ from ainews.pipeline.nodes.enrich import enrich_articles
 from ainews.pipeline.nodes.persist import persist_run
 from ainews.pipeline.nodes.rank import rank_summaries
 from ainews.pipeline.nodes.summarize import summarize_article
-from ainews.pipeline.state import PipelineState
+from ainews.pipeline.state import PipelineState, SummaryPayload
+from ainews.pipeline.steps import StepRecord, record_fan_out, step
 
 log = logging.getLogger(__name__)
 
@@ -44,29 +45,53 @@ def checkpoint_path(settings: Settings | None = None) -> Path:
     return settings.sqlite_path.parent / "checkpoints.db"
 
 
+# Every adapter below is wrapped in `step()`, which times it and writes one
+# `run_steps` row (ADR 0022). The counts each one reports are its own - "in" and
+# "out" mean different things at `collect` and at `rank` - so each states them
+# rather than a wrapper inferring them from the state it can see.
+
+
 async def collect_node(state: PipelineState) -> PipelineState:
-    async with session_scope() as session:
-        stats = await collect_articles(session)
-    return {
-        "n_collected": stats.n_seen,
-        "n_new": stats.n_new,
-        "errors": list(stats.errors or []),
-    }
+    async with step(state["run_id"], "collect") as s:
+        async with session_scope() as session:
+            stats = await collect_articles(session)
+        s.counts(stats.n_seen, stats.n_new)
+        s.note(f"{stats.n_sources} source(s), {stats.n_not_modified} unchanged")
+        if stats.errors:
+            s.status = "partial"
+            s.note("; ".join(stats.errors))
+        return {
+            "n_collected": stats.n_seen,
+            "n_new": stats.n_new,
+            "errors": list(stats.errors or []),
+        }
 
 
 async def dedupe_node(state: PipelineState) -> PipelineState:
-    async with session_scope() as session:
-        candidate_ids, _ = await dedupe_candidates(session)
-    return {"candidate_ids": candidate_ids}
+    async with step(state["run_id"], "dedupe") as s:
+        async with session_scope() as session:
+            candidate_ids, stats = await dedupe_candidates(session)
+        s.counts(stats.n_candidates, len(candidate_ids))
+        s.note(f"{stats.n_duplicates} restatement(s) dropped")
+        return {"candidate_ids": candidate_ids}
 
 
 async def enrich_node(state: PipelineState) -> PipelineState:
     candidate_ids = state.get("candidate_ids") or []
-    if not candidate_ids:
+    async with step(state["run_id"], "enrich") as s:
+        if not candidate_ids:
+            s.counts(0, 0)
+            return {}
+        async with session_scope() as session:
+            stats = await enrich_articles(session, candidate_ids)
+        # Out is "how many go to the model with a body", not "how many were
+        # touched": an article the fetcher and Tavily both failed on is still
+        # summarised, from its title alone, and that is the number worth seeing.
+        s.counts(stats.n_examined, stats.n_examined - stats.n_still_empty)
+        # Tavily is the only paid call in the run that costs credits rather than
+        # tokens, so it is a note here rather than a number in the cost column.
+        s.note(f"{stats.n_fetched} fetched, {stats.n_tavily} via Tavily")
         return {}
-    async with session_scope() as session:
-        await enrich_articles(session, candidate_ids)
-    return {}
 
 
 def fan_out_summaries(state: PipelineState) -> list[Send] | str:
@@ -97,6 +122,13 @@ async def rank_node(state: PipelineState) -> PipelineState:
     if not summaries:
         return {"ranked": [], "editor_note": ""}
 
+    async with step(state["run_id"], "rank") as s:
+        return await _rank(state, summaries, s)
+
+
+async def _rank(
+    state: PipelineState, summaries: list[SummaryPayload], s: StepRecord
+) -> PipelineState:
     async with session_scope() as session:
         meta: dict[int, tuple[str, float]] = {}
         for item in summaries:
@@ -110,6 +142,8 @@ async def rank_node(state: PipelineState) -> PipelineState:
     ordered, note, tokens_in, tokens_out = await rank_summaries(
         summaries, meta, state["language"], model=state.get("model_rank")
     )
+    s.counts(len(summaries), len(ordered))
+    s.spend(state.get("model_rank") or "", tokens_in, tokens_out)
     return {
         "ranked": [{"article_id": aid, "rank": i} for i, aid in enumerate(ordered, start=1)],
         "editor_note": note,
@@ -131,9 +165,17 @@ async def rank_node(state: PipelineState) -> PipelineState:
 
 
 async def persist_node(state: PipelineState) -> PipelineState:
-    async with session_scope() as session:
-        await persist_run(session, state)
-    return {}
+    async with step(state["run_id"], "persist") as s:
+        # The fan-out's own row, written here because this is the first moment
+        # both of its neighbours have rows to be measured between.
+        await record_fan_out(state)
+        async with session_scope() as session:
+            run = await persist_run(session, state)
+        # The carrier payload the rank node rides its tokens back on is not a
+        # summary and must not be counted as one.
+        payloads = [p for p in (state.get("summaries") or []) if p["article_id"] != -1]
+        s.counts(len(payloads), run.n_summarized)
+        return {}
 
 
 def build_graph() -> StateGraph:

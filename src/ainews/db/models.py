@@ -2,8 +2,9 @@
 
 Four tables carry the pipeline: `sources` (what to poll), `articles` (what came
 back), `summaries` (what the LLM made of it) and `runs` (what each execution did
-and cost). A fifth, `daily_counters`, is the durable side of the Tavily credit
-cap - it has to survive a restart, so it cannot live in memory. Two more belong
+and cost). `run_steps` breaks a run down by graph node, which is what the run
+detail page reads (ADR 0022). A sixth, `daily_counters`, is the durable side of
+the Tavily credit cap - it has to survive a restart, so it cannot live in memory. Two more belong
 to the evaluation layer: `verdicts`, the reader's own call on a summary, and
 `eval_results`, what the sampled judge and the rank probe measured and what it
 cost (PLAN-EVALS E2, E3).
@@ -144,6 +145,64 @@ class Run(Base):
     __table_args__ = (
         CheckConstraint("kind in ('collect', 'digest', 'manual')", name="ck_runs_kind"),
         Index("ix_runs_started_at", "started_at"),
+    )
+
+    @property
+    def duration_seconds(self) -> float | None:
+        if self.finished_at is None:
+            return None
+        return (self.finished_at - self.started_at).total_seconds()
+
+
+class RunStep(Base):
+    """One node of the digest graph, as it actually ran.
+
+    The `runs` row says what a run cost in total; this says where the time and
+    the money went inside it. There is one row per node and not one per model
+    call: the summarize node runs a hundred branches wide, and a hundred inserts
+    from a hundred concurrent branches against SQLite's single writer (ADR 0003)
+    would be contention bought for a level of detail nothing on screen shows.
+    Per-call detail is Phoenix's job (ADR 0018).
+
+    Rows are ordered by `started_at` rather than by a sequence number. The graph
+    is linear, so the clock already puts the nodes in their order - and the
+    fan-out's row, whose span is measured between its neighbours rather than
+    inside itself, sorts into the right place for free.
+
+    `n_in` and `n_out` are whatever the node counts, which differs by node and is
+    named on screen: articles seen and kept for `collect`, candidates in and
+    survivors out for `dedupe`. `model` is empty and cost zero for the four nodes
+    that call nothing.
+    """
+
+    __tablename__ = "run_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"))
+    node: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20), default="ok")
+
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    n_in: Mapped[int | None] = mapped_column(Integer, default=None)
+    n_out: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    model: Mapped[str] = mapped_column(String(60), default="")
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # The error that stopped the node, or a one-line note from a node that has
+    # something to say beyond two counts - how many bodies Tavily was asked for,
+    # how many branches came back empty.
+    detail: Mapped[str | None] = mapped_column(Text, default=None)
+
+    run: Mapped[Run] = relationship()
+
+    __table_args__ = (
+        CheckConstraint("status in ('ok', 'partial', 'error')", name="ck_run_steps_status"),
+        Index("ix_run_steps_run", "run_id", "started_at"),
     )
 
     @property

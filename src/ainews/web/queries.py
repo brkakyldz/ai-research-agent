@@ -16,7 +16,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, get_settings
-from ainews.db import Article, Run, Source, Summary, Verdict
+from ainews.db import Article, Run, RunStep, Source, Summary, Verdict
 
 
 @dataclass(slots=True)
@@ -487,6 +487,26 @@ async def recent_activity(session: AsyncSession, n_days: int = 7) -> Activity:
                 select(func.count()).select_from(Source).where(Source.consecutive_failures > 0)
             )
         ).scalar_one(),
+    )
+
+
+async def run_by_id(session: AsyncSession, run_id: str) -> Run | None:
+    return await session.get(Run, run_id)
+
+
+async def steps_for_run(session: AsyncSession, run_id: str) -> list[RunStep]:
+    """One run's nodes, in the order they ran.
+
+    Ordered by the clock rather than by a stored sequence, which is what lets
+    the fan-out's row - written after the fact, from between its neighbours'
+    timestamps (ADR 0022) - land in its place without anything renumbering.
+    """
+    return list(
+        (
+            await session.execute(
+                select(RunStep).where(RunStep.run_id == run_id).order_by(RunStep.started_at)
+            )
+        ).scalars()
     )
 
 

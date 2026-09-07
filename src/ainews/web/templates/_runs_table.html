@@ -11,7 +11,9 @@
   <tbody>
     {% for r in runs %}
     <tr>
-      <td class="strong">{{ r.started_at|clock }}</td>
+      {# The way into the run, on the one cell that already identifies it. A
+         separate "detail" column would be a seventh heading for a link. #}
+      <td class="strong"><a href="/runs/{{ r.id }}?lang={{ language }}">{{ r.started_at|clock }}</a></td>
       <td lang="en">{{ r.kind }}</td>
       <td>{{ r.language if r.kind != 'collect' else '—' }}</td>
       <td>{{ r.n_new }}</td>

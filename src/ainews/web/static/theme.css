@@ -1687,6 +1687,48 @@ td {
 tr:last-child td { box-shadow: none; }
 tr:hover td { background: var(--row-hover); color: var(--ink-1); }
 td.strong { color: var(--ink-0); }
+/* The way into a run is the time cell, which therefore has to read as a way in.
+   Not as a column of blue: colour is rationed on this page to a failed run
+   (DESIGN.md), and forty links would spend it forty times. The affordance is
+   drawn where the reader already is - under the pointer, on the row they are
+   reading - which is the same bargain the row hover already makes. */
+td.strong a { color: inherit; }
+tr:hover td.strong a { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- one run, node by node ---------- */
+
+/* The run detail page (ADR 0022). It adds three rules and no colours: the page
+   is the runs vocabulary - facts strip, panel, table - pointed at one row. */
+
+/* The facts strip was drawn to sit under the advice block, where the hairline
+   separates it from the sentence above. Standing on its own under a heading it
+   has nothing to separate from, so the rule comes off. */
+.advice__facts--solo { border-top: 0; padding-top: 4px; }
+
+.ph--back { padding-left: 2px; padding-right: 2px; border-bottom: 0; }
+.ph--back h1 { font-size: 21px; letter-spacing: -0.01em; }
+.ph--back .num { color: var(--ink-3); font-size: 15px; }
+.back { margin-left: auto; font-size: 12.5px; color: var(--ink-3); }
+.back:hover { color: var(--ink-1); }
+
+/* The share of the run's wall clock, as a bar rather than a percentage: the
+   question it answers is "which node ate the run", and a reader compares five
+   lengths faster than five numbers. It is drawn in ink and not in the accent -
+   the accent belongs to the rail's button (DESIGN.md) - and the widths do not
+   add up to the full column on purpose: what is missing is the scheduling
+   between supersteps, and a bar normalised to fill would hide it. */
+td.share { width: 22%; min-width: 90px; }
+td.share span {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ink-3);
+  /* A step too short to draw is still a step that ran, so it keeps a stub
+     rather than vanishing into an empty cell. */
+  width: max(3px, var(--w, 0%));
+  opacity: 0.55;
+}
+tr:hover td.share span { opacity: 0.85; }
 
 /* ---------- forms ---------- */
 

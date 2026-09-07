@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {# One run, node by node (ADR 0022). The `runs` table above answers "what did
+     this cost"; this page answers the two questions that follow it - which node
+     took the time, and which node took the money - and it is the only screen in
+     the app that shows the pipeline as a pipeline.
+
+     It borrows the vocabulary of `/runs` rather than inventing one: the facts
+     strip is the shape of `advice__facts`, the steps sit in the page's own
+     table, and colour appears only on a failure. A run detail page that looked
+     like a different product would be a second design for the same machine.
+
+     One choice in it is open and provisional: how a step's span is drawn. The
+     bar is the first answer, not the settled one - what it is drawn from is
+     `run_steps`, and that does not change whichever way the round goes. #}
+  <section class="ph ph--back">
+    <h1>{{ t.run_heading }} <span class="num">{{ run.id[:8] }}</span></h1>
+    <a class="back" href="/runs?lang={{ language }}">{{ t.back_to_runs }}</a>
+  </section>
+
+  <section class="advice__facts advice__facts--solo">
+    <div>
+      <p class="unit__h">{{ t.col_time }}</p>
+      <p class="advice__n num">{{ run.started_at|stamp }}</p>
+      <p class="advice__s{% if run.status in ('error', 'partial') %} bad{% endif %}">
+        {{ t['status_' + run.status] }} · <span lang="en">{{ run.kind }}</span>
+      </p>
+    </div>
+    <div>
+      <p class="unit__h">{{ t.col_duration }}</p>
+      <p class="advice__n num">{{ run.duration_seconds|duration }}</p>
+      <p class="advice__s">{{ t.fact_stories }} {{ run.n_summarized }}</p>
+    </div>
+    <div>
+      <p class="unit__h">{{ t.col_cost }}</p>
+      <p class="advice__n num">{{ run.est_cost_usd|money }}</p>
+      <p class="advice__s">{{ t.fact_tokens }} {{ '{:,}'.format(tokens) }}</p>
+    </div>
+    {% if models %}
+    {# Which models wrote this bulletin. ADR 0020 made that a choice made at the
+       press and priced on screen, but nothing afterwards said which choice was
+       taken - `runs` has no column for it, and this is the first page that can
+       answer. The two lines align by position: the tier on top, the job it did
+       under it. #}
+    <div>
+      <p class="unit__h">{{ t.fact_models }}</p>
+      <p class="advice__n num">{{ models|map(attribute=1)|join(' · ') }}</p>
+      <p class="advice__s">{{ models|map(attribute=0)|join(' · ') }}</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    {# No table at all when there is nothing in it. Six empty column headings
+       over a sentence explaining that there are no steps is a table pretending
+       to have failed to load, rather than a run that predates the record. #}
+    {% if steps %}
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>{{ t.col_step }}</th><th>{{ t.col_flow }}</th>
+            <th>{{ t.col_duration }}</th><th>{{ t.col_share }}</th>
+            <th>{{ t.col_cost }}</th><th>{{ t.col_note }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in steps %}
+          {% set s = row.step %}
+          <tr>
+            <td class="strong">{{ t['step_' + s.node] if ('step_' + s.node) in t else s.node }}</td>
+            {# The two counts are read through the node's own sentence: "in" and
+               "out" are different quantities at every node, and one pair of
+               column headings would have been wrong at five of the six. #}
+            <td>
+              {%- if s.n_in is not none -%}
+                {{ t['flow_' + s.node].format(a=s.n_in, b=s.n_out) if ('flow_' + s.node) in t
+                   else '%s → %s'|format(s.n_in, s.n_out) }}
+              {%- else -%}—{%- endif -%}
+            </td>
+            <td class="num">{{ s.duration_seconds|duration }}</td>
+            {# The bar is the run's wall clock, not the sum of the steps, so the
+               row widths deliberately do not add up to full: what is missing is
+               the scheduling between supersteps, and it is worth seeing. #}
+            <td class="share"><span style="--w: {{ (row.share * 100)|round(1) }}%"></span></td>
+            <td class="num">{{ s.est_cost_usd|money if s.est_cost_usd else '—' }}</td>
+            <td class="raw{% if s.status == 'error' %} bad{% endif %}">{{ s.detail or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="pb">{{ t.no_steps }}</p>
+    {% endif %}
+  </section>
+
+  {% if run.error %}
+  <section class="panel">
+    <div class="ph"><h2>{{ t.status_error }}</h2></div>
+    <ul class="pb fails">
+      {% for line in run.error.splitlines() %}<li class="raw">{{ line }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+{% endblock %}

@@ -26,6 +26,7 @@ from ainews.pipeline.graph import build_graph, checkpoint_path
 from ainews.pipeline.llm import resolve_model
 from ainews.pipeline.nodes.collect import collect_articles
 from ainews.pipeline.state import PipelineState, RunMode
+from ainews.pipeline.steps import step
 
 log = logging.getLogger(__name__)
 
@@ -83,8 +84,18 @@ async def run_collect(settings: Settings | None = None) -> str:
     settings = settings or get_settings()
     run_id = await _open_run("collect", settings.digest_language)
     try:
-        async with session_scope() as session:
-            stats = await collect_articles(session, settings)
+        # A collect run is one node, so it gets one `run_steps` row (ADR 0022).
+        # It never enters the graph, so the row is written here rather than by an
+        # adapter - without it the run detail page would show a run with no
+        # steps, which reads as a bug rather than as a poll.
+        async with step(run_id, "collect") as marker:
+            async with session_scope() as session:
+                stats = await collect_articles(session, settings)
+            marker.counts(stats.n_seen, stats.n_new)
+            marker.note(f"{stats.n_sources} source(s), {stats.n_not_modified} unchanged")
+            if stats.errors:
+                marker.status = "partial"
+                marker.note("; ".join(stats.errors))
         async with session_scope() as session:
             run = await session.get(Run, run_id)
             run.finished_at = utcnow()

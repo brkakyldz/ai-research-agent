@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {# A 404 that stays inside the shell. A run id reaches this page from a link in
+     the table or from someone's history, and both deserve the rail and the way
+     back rather than the framework's bare page. #}
+  <section class="ph ph--back">
+    <h1>{{ t.run_heading }}</h1>
+    <a class="back" href="/runs?lang={{ language }}">{{ t.back_to_runs }}</a>
+  </section>
+  <section class="panel"><p class="pb">{{ t.run_missing }}</p></section>
+{% endblock %}
