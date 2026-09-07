@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 
-{# Two columns on a wide screen: the day, and what the day was about. The
-   reading column keeps its measure; the side column takes the width that was
-   going to be empty either way. #}
-{% block main_mod %} main--split{% endblock %}
+{# The digest is the one page with a day, so it is the one page that fills the
+   right rail. The rail is a column of the shell, not a card beside the feed:
+   the modifier here is what gives the grid its third column, and the aside is
+   placed in it from `base.html` rather than from inside the reading (ADR
+   0021). #}
+{% block app_mod %} app--side{% endblock %}
 
 {% block content %}
   <div class="stack">
@@ -60,7 +62,9 @@
 
     {% endif %}
   </div>
+{% endblock %}
 
+{% block side %}
   {# The side column is the day read sideways: the note a person would write,
      what the day was about, how heavy it was, how big it was against the week -
      and, last and smallest, whether the machine that made it is well.

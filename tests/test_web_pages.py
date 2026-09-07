@@ -923,7 +923,7 @@ def test_the_bar_spans_the_shell_and_carries_the_brand(client: TestClient, diges
     inside `.app` - so this asserts the order rather than a class name.
     """
     body = client.get("/").text
-    app = body.split('<div class="app">', 1)[1]
+    app = body.split('<div class="app', 1)[1]
     bar = app.index('<header class="top-bar"')
     rail = app.index('<aside class="rail"')
     assert bar < rail, "the bar is a row of the shell, above the rail"
@@ -931,6 +931,27 @@ def test_the_bar_spans_the_shell_and_carries_the_brand(client: TestClient, diges
     head, rest = app.split('<aside class="rail"', 1)
     assert 'class="bar__brand"' in head, "the brand is the bar's first cell"
     assert 'class="brand"' not in rest.split("</aside>", 1)[0], "and not the rail's head"
+
+
+def test_the_right_rail_is_a_column_of_the_shell_not_a_card_in_the_reading(
+    client: TestClient, digest: Run
+) -> None:
+    """Berke, 2026-09-07: the right bar is not a separate structure, it is joined.
+
+    It used to be the last child of the digest's content block, inside `<main>`,
+    which is what made it a card floating in the reading with the bar's controls
+    parked above it and unrelated to it. It is a grid item of `.app` now, a
+    sibling of the reading, and the one page that fills it says so by giving the
+    shell its third column.
+    """
+    body = client.get("/").text
+    assert '<div class="app app--side">' in body
+    assert body.index("</main>") < body.index('<aside class="side"'), "outside the reading"
+
+    for path in ("/runs", "/sources", "/search"):
+        plain = client.get(path).text
+        assert "app--side" not in plain, f"{path} has no day to report on"
+        assert 'class="side"' not in plain
 
 
 def test_the_rail_can_be_put_away_and_says_so(client: TestClient, digest: Run) -> None:
@@ -968,16 +989,25 @@ def test_every_rail_link_keeps_a_name_a_pointer_can_find(client: TestClient, dig
         assert "title=" in link, f"no hover name on {link.strip()[:60]}"
 
 
-def test_the_theme_switch_is_written_twice_and_drawn_once(client: TestClient) -> None:
-    """A regression on source order, not on markup.
+def test_the_two_switches_are_one_group_at_the_head_of_the_right_rail(
+    client: TestClient, digest: Run
+) -> None:
+    """The theme and the language are the same kind of control - a thing you set
+    once - and until 2026-09-07 they sat at opposite corners of the window: the
+    language top right, the theme at the foot of the rail (ADR 0013). They share
+    the bar's last cell now, which is also the head of the right rail.
 
-    `.seg--narrow { display: none }` sat ABOVE `.seg { display: grid }`, and the
-    two selectors weigh the same - so the later one won and the bar's copy of
-    the theme switch was drawn on every wide window alongside the rail's. The
-    markup was right the whole time; the stylesheet was reading bottom-up.
+    The theme switch is written once as a result. It used to be rendered twice
+    and drawn once, because the rail's foot disappears on a phone and the bar
+    had to carry a spare - and that pattern cost a real bug: a `display: none`
+    placed above the rule it was overriding drew both on every wide window.
     """
-    css = client.get("/static/theme.css").text
-    assert css.index(".seg {") < css.index(".seg--narrow { display: none; }")
+    body = client.get("/").text
+    assert body.count("seg seg--theme") == 1, "one render, at every width"
+    cell = body.split('class="bar__side"', 1)[1].split("</div>", 3)
+    assert "seg--lang" in "".join(cell[:3]) and "seg--theme" in "".join(cell[:3])
+    rail = body.split('<aside class="rail"', 1)[1].split("</aside>", 1)[0]
+    assert "seg--theme" not in rail, "the rail's foot gave it up"
 
 
 def test_the_bar_spells_the_bulletins_date_out(client: TestClient, digest: Run) -> None:

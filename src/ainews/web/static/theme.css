@@ -148,12 +148,16 @@
      Every page is `--measure` wide, whether or not it draws a side column, so
      the content's right edge never moves between pages. */
   --measure: 1460px;
-  --side-w: 324px;
-  --split-gap: 32px;
-  /* Where the side column starts and stops: the sticky bar's height plus the
-     main's top padding. It is derived from `--bar-h` rather than measured off
-     a screenshot, so the two cannot drift. */
-  --side-top: calc(var(--bar-h) + 22px);
+  /* The right rail. It grew 16px on 2026-09-07 to hold the two switches side by
+     side at the head of it - the one measurement in this file taken off what
+     has to fit rather than off a proportion. */
+  --side-w: 340px;
+  /* The reading, and it is now a width rather than a subtraction. It was
+     `--measure` less the side column less the gap between them, which was the
+     right number while the side column was a card inside the content; the
+     column is one of the shell's own now and the reading no longer shares a
+     box with it. The value is what that subtraction came to. */
+  --read: 1104px;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur: 170ms;
 }
@@ -302,24 +306,41 @@ svg { display: block; }
 
 /* ---------- shell ---------- */
 
-/* Two rows, not one: the bar spans both columns and the rail hangs under its
-   left cell. Before 2026-09-07 the bar was the first child of the content
-   column, which made the window's top edge two bands that only looked like one
-   - the rail's own header ended at 264px, the bar's hairline began there, and
-   the reader's controls belonged to the content rather than to the shell
-   (ADR 0021). One grid, and the bar is a row of it. */
+/* Two rows, and two or three columns: the bar spans them all and the rails hang
+   under its outer cells. Before 2026-09-07 the bar was the first child of the
+   content column, which made the window's top edge two bands that only looked
+   like one - the rail's own header ended at 264px, the bar's hairline began
+   there, and the reader's controls belonged to the content rather than to the
+   shell (ADR 0021). One grid, and the bar is a row of it.
+
+   The cells are placed rather than left to auto-flow, because the third column
+   is conditional in two directions: only the digest fills it, and below 1240px
+   it stops being a column at all and becomes a band under the reading. That is
+   a different cell, not a narrower one, and auto-flow cannot say so. */
 .app {
   display: grid;
-  grid-template-columns: var(--rail) 1fr;
+  grid-template-columns: var(--rail) minmax(0, 1fr);
   /* `minmax`, not a flat track: below 1024px the bar becomes a flex row that is
      allowed to wrap, and a fixed track would let it overflow onto the reading
      rather than push it down. */
   grid-template-rows: minmax(var(--bar-h), auto) 1fr;
   min-height: 100vh;
+  transition: grid-template-columns var(--dur) var(--ease);
 }
-.col { min-width: 0; }   /* without this a wide table stretches the grid column */
+.top-bar { grid-column: 1 / -1; grid-row: 1; }
+.rail    { grid-column: 1; grid-row: 2; }
+/* `min-width: 0`, or a wide table stretches the track it sits in. */
+.col     { grid-column: 2; grid-row: 2; min-width: 0; }
 
-.app { transition: grid-template-columns var(--dur) var(--ease); }
+/* The digest is the one page with a day, so it is the one page with a right
+   rail. Everything else runs two columns and the bar's last cell shrinks to
+   the switches it holds. */
+.app--side { grid-template-columns: var(--rail) minmax(0, 1fr) var(--side-w); }
+.app--side .side { grid-column: 3; grid-row: 2; }
+/* The bar's last track is the rail's width on the page that has one, which is
+   what makes the two read as one column rather than as a control group that
+   happens to sit above a panel. */
+.app--side .top-bar { grid-template-columns: var(--rail) minmax(min-content, 1fr) minmax(0, 1fr) var(--side-w); }
 
 /* ---------- left rail: navigation, and nothing else ---------- */
 
@@ -515,14 +536,11 @@ svg { display: block; }
     padding: 1px 5px;
   }
 
-  /* The foot keeps the run link and the theme; the sentence under them is the
-     one thing here that cannot be said in 52px. The switch turns on its side
-     rather than leaving with it. */
+  /* The foot keeps the run link; the sentence under it is the one thing here
+     that cannot be said in 60px. */
   :root[data-rail="off"] .rail { padding: 14px 8px; }
   :root[data-rail="off"] .rail__foot { padding: 12px 0 2px; }
   :root[data-rail="off"] .rail__next { display: none; }
-  :root[data-rail="off"] .rail__foot .seg--theme { grid-template-columns: 1fr; }
-  :root[data-rail="off"] .rail__foot .seg > * { padding: 5px 6px; font-size: 11.5px; }
 }
 
 /* ---------- top bar: the reader's controls, and nothing else ---------- */
@@ -535,23 +553,30 @@ svg { display: block; }
    not move sideways when the page name changes length or the run status
    appears. Three equal `1fr` columns after the rail are what hold it still.
 
-   The two outer ones are floored at `min-content` and the middle one is not,
-   which is the whole of how this row decides what gives. Written as
+   The title's track and the last cell are floored at `min-content` and the
+   middle one is not, which is the whole of how this row decides what gives. Written as
    `minmax(0, 1fr)` on the sides and a flat `520px` in the middle - which is
    what it was until the date arrived - the sides were free to shrink under
    their own contents and the middle was not: on a 1320px window "6 Eylül 2026"
    was cut off mid-year while the search box held 520px it did not need. The
    floor says the title and the controls are not allowed to be clipped, and the
    cap on the box rather than on the track says the search is the one that
-   gives. It reaches 520px on any window wide enough to spare it. */
+   gives. It reaches 520px on any window wide enough to spare it.
+
+   The last cell is `auto` rather than a fourth `1fr`: on the digest it is
+   overridden to the right rail's width, and on every other page it should be
+   exactly the switches it holds. A flexible track would make it neither. */
 .top-bar {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: var(--rail) minmax(min-content, 1fr) minmax(0, 1fr) minmax(min-content, 1fr);
+  grid-template-columns: var(--rail) minmax(min-content, 1fr) minmax(0, 1fr) minmax(min-content, auto);
   align-items: center;
   gap: 16px;
-  /* No left padding: the first column is the rail's, and it carries its own. */
-  padding: 0 22px 0 0;
+  /* No padding of its own: the first and last columns are the rails' and they
+     carry theirs, so the bar reaches both edges of the window exactly as the
+     columns under it do. Anything here would offset one of them by that much
+     and the joint would show. */
+  padding: 0;
   height: var(--bar-h);
   border-bottom: 1px solid var(--line-soft);
   position: sticky;
@@ -646,16 +671,35 @@ svg { display: block; }
   border-radius: 999px;
   padding: 1px 8px;
 }
-/* No `min-width: 0`, for the same reason `.bar__id` has none: its track is
+/* The bar's last cell, and on the digest it is the head of the right rail: the
+   same width, the same ground, no gap between them, so the switches read as the
+   top of that column rather than as two controls parked above it. Berke's
+   2026-09-07 note is exactly this - the right bar is not a separate structure,
+   it is joined. On the four pages with no right rail the cell shrinks to its
+   contents and gives the ground up with it: the ground is what says "this is a
+   column", and on those pages there is no column. What does not move is the
+   switches, which end at the same place on every page.
+
+   No `min-width: 0`, for the same reason `.bar__id` has none: its track is
    floored at this cell's `min-content` and a zeroed minimum would erase the
-   floor. These are controls, and a control clipped to fit is a control that
-   cannot be pressed. */
-.bar-right {
+   floor. These are controls, and a control clipped to fit cannot be pressed. */
+.bar__side {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  height: 100%;
+  padding: 0 16px;
 }
+.app--side .bar__side {
+  justify-content: space-between;
+  background: var(--rail-bg);
+}
+/* Both switches share this cell, and at 340px they share it tightly - five
+   slots of a word each. The step comes off the slot padding rather than off the
+   type: ADR 0016 put a floor under the shell's sizes, and 12.5px is where these
+   already sat. */
+.bar__side .seg > * { padding: 6px 9px; }
 
 .btn {
   border: 1px solid var(--panel-line);
@@ -680,7 +724,7 @@ svg { display: block; }
 .btn--pri:hover { background: var(--pri-bg-hover); color: var(--pri-ink); }
 .btn[disabled] { opacity: .55; cursor: default; }
 /* The run log's link, drawn only where the rail has no foot to hold it - the
-   same "written twice, drawn once" rule as `.seg--narrow`. */
+   same "written twice, drawn once" rule the theme switch used to follow. */
 .nav--narrow { display: none !important; }
 
 /* The one field on the page, and the middle of the bar. It draws no shadow:
@@ -739,10 +783,13 @@ kbd {
   flex: none;
 }
 
-/* The theme switch is rendered twice and only ever drawn once: in the rail on
-   a wide window, in the bar below 860px where the rail has become a five-slot
-   navigation bar and dropped its foot. Two renders of one control beat a
-   preference that disappears on a phone. */
+/* One switch, one render. It used to be written twice and drawn once - the
+   rail's foot on a wide window, the bar below 860px where the rail becomes a
+   navigation bar and drops its foot - and that pattern cost a real bug: the
+   rule hiding the bar's copy sat above `.seg { display: grid }` and the two
+   weigh the same, so the later won and both were drawn on every wide window.
+   The theme moved into the bar for good on 2026-09-07 and the second render
+   went with it (ADR 0021). */
 .seg {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -767,16 +814,10 @@ kbd {
   box-shadow: 0 1px 2px var(--seg-on-shadow);
 }
 .seg--theme { grid-template-columns: repeat(3, 1fr); }
-/* The bar's copy of the theme switch, hidden above 860px where the rail's foot
-   is drawing it. This declaration has to come *after* `.seg { display: grid }`,
-   not before: the two selectors weigh the same, so source order is the whole
-   rule, and while it sat above `.seg` the switch was drawn twice on every wide
-   window - once in the rail and once in the bar - which is exactly the thing
-   "written twice, drawn once" was meant to prevent. */
-.seg--narrow { display: none; }
-/* In the rail the track sits on a ground one step darker than the page, so it
-   needs an edge of its own to read as a control rather than as a shadow. */
-.rail__foot .seg { box-shadow: inset 0 0 0 1px var(--line-soft); }
+/* On the digest the track sits on the rail's ground, one step off the page, so
+   it needs an edge of its own to read as a control rather than as a shadow.
+   On the pages where the cell is transparent the page behind it does that. */
+.app--side .bar__side .seg { box-shadow: inset 0 0 0 1px var(--line-soft); }
 /* Two languages, named in themselves, so a reader scanning for their own
    language finds the word they would have written. */
 .seg--lang > * { font-weight: 500; }
@@ -810,6 +851,7 @@ kbd {
   flex-direction: column;
   gap: 16px;
   max-width: var(--measure);
+  margin: 0 auto;
 }
 
 /* The reading column has no container. Until 2026-09-06 the whole feed sat in
@@ -830,13 +872,16 @@ kbd {
    The width is the digest's own reading column, which is what this rule always
    claimed to be and was not: it was a flat 740px against the digest's 1116, so
    the same story rows were a quarter narrower on `/search` than on `/` and the
-   700px left over read as a side column that had gone missing. It is now the
-   subtraction it describes - the measure, less the column the split page puts
-   there. Change `--measure` and the two stay equal. */
-.main:not(.main--split) .feed-col,
-.main:not(.main--split) > .brief {
-  max-width: calc(var(--measure) - var(--side-w) - var(--split-gap));
-}
+   700px left over read as a side column that had gone missing.
+
+   It applies on every page now, the digest included. It used to be written as
+   `:not(.main--split)` because on the digest the side column was inside the
+   reading and imposed the cap by taking the width; the column is one of the
+   shell's own since 2026-09-07 and imposes nothing, so the cap has to be said
+   out loud there too or the feed would run the width of the track on a wide
+   window. */
+.feed-col,
+.main > .brief { max-width: var(--read); }
 .panel {
   background: var(--panel);
   border: 1px solid var(--panel-line);
@@ -918,15 +963,8 @@ kbd {
 
 /* ---------- the side column ---------- */
 
-/* Two columns on a wide screen. The reading column keeps its measure and the
-   side column takes the width that was going to be empty anyway. Every figure
-   in it comes off `runs` and `sources` - see `queries.recent_activity`. */
-.main--split {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--side-w);
-  gap: var(--split-gap);
-  align-items: start;
-}
+/* Every figure in the right rail comes off `runs` and `sources` - see
+   `queries.recent_activity`. */
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
 /* The side column scrolls itself. Sticky alone pins the box at `top` and
@@ -946,14 +984,24 @@ kbd {
    `scrollbar-gutter: stable` keeps the lane reserved whether or not the column
    overflows, so the cards do not change width between a long day and a short
    one. The scrollbar lands on the column's right edge, in line with the feed's. */
-/* It is a bar, and since 2026-09-06 it looks like one. Taking the containers
+/* It is a rail, and since 2026-09-07 it is drawn as one. Taking the containers
    off the feed (ADR 0013) took them off this column too, which left five
    headings and a run of small figures floating on the page with nothing saying
-   where the reading stopped and the instruments started - Berke read it as part
-   of the screen rather than as a bar beside it. It gets one ground, not five:
-   a single surface around the whole column, the way the rail is one surface
-   around all of its links. The units inside keep their 26px and their labels
-   and gain nothing, so this adds exactly one box to the page and not six.
+   where the reading stopped and the instruments started; ADR 0014 answered that
+   with one ground around the whole column, as a card - a fill, a radius, a
+   shadow, floating inside the reading with the bar's controls sitting above it
+   and unrelated to it.
+
+   It is the shell's third column now, on the shell's own ground, running to
+   both edges of the window and up into the bar's last cell (ADR 0021). Berke's
+   note on 2026-09-07: the right bar is not a separate structure, it is joined.
+   A card cannot be joined to anything - a radius is a statement that the thing
+   ends here - and the argument for the ground was never that this is a card,
+   it was that a column of instruments beside a column of prose has to be told
+   apart from it. A rail does that and says what it is as well.
+
+   The units inside keep their 26px and their labels and gain nothing, so this
+   is still exactly one surface and not six.
 
    `padding-right` is short of `padding-left` by the width of the reserved
    scrollbar lane, so the content still sits centred in the box. */
@@ -962,8 +1010,8 @@ kbd {
   flex-direction: column;
   gap: 26px;
   position: sticky;
-  top: var(--side-top);
-  max-height: calc(100vh - var(--side-top) - 18px);
+  top: var(--bar-h);
+  height: calc(100vh - var(--bar-h));
   overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
@@ -972,10 +1020,7 @@ kbd {
      showed a cut bar and nothing saying it could be scrolled. The chart bar is
      the tone that is legible on its own, which is what a thumb has to be. */
   scrollbar-color: var(--chart-bar) transparent;
-  background: var(--panel);
-  border: 1px solid var(--panel-line);
-  border-radius: var(--r);
-  box-shadow: var(--shadow);
+  background: var(--rail-bg);
   padding: 20px 12px 22px 20px;
 }
 
@@ -1097,26 +1142,35 @@ kbd {
    scroll box with its stickiness: in the flow it is the page's to scroll, and a
    scroller nested in the thing already scrolling is a trap, not a convenience. */
 @media (max-width: 1240px) {
-  /* One column, and it takes a measure rather than the window: the cap the
-     side column used to impose has to come from somewhere once it is gone. */
-  .main--split { grid-template-columns: minmax(0, 1fr); max-width: 920px; }
-  /* It also gives up its surface. Below the feed it is not a bar beside the
+  /* The right rail stops being a column and becomes the last band of the page.
+     It is a different cell, not a narrower one - row three of the grid, under
+     the reading, in the reading's own track - so it is placed rather than left
+     to reflow. The bar's last cell shrinks back to the switches it holds. */
+  .app--side { grid-template-columns: var(--rail) minmax(0, 1fr); }
+  .app--side .side { grid-column: 2; grid-row: 3; }
+  .app--side .bar__side { justify-content: flex-end; }
+  /* One measure, and it takes it rather than the window: the cap the rail used
+     to impose beside the reading has to come from somewhere once it is no
+     longer beside it. */
+  .main { max-width: 920px; }
+  .feed-col, .main > .brief { max-width: none; }
+  /* It also gives up its ground. Below the feed it is not a rail beside the
      reading, it is the last section of the page, and a fill would make it the
      only box in a column of prose - the exact thing ADR 0013 removed. A rule
-     above it is enough where a whole edge was needed beside it. */
+     above it is enough where a whole column was needed beside it. */
   .side {
     position: static;
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 28px 40px;
-    max-height: none;
+    height: auto;
     overflow: visible;
     background: none;
-    border: 0;
     border-top: 1px solid var(--line-soft);
-    border-radius: 0;
-    box-shadow: none;
-    padding: 22px 0 0;
+    padding: 22px 22px 64px;
+    max-width: 920px;
+    margin: 0 auto;
+    width: 100%;
   }
   .unit--foot { margin-top: 0; }
 }
@@ -1619,7 +1673,6 @@ td.strong { color: var(--ink-0); }
 @media (max-width: 1180px) {
   :root { --rail: 220px; }
   .brand__s { display: none; }
-  .main--split { gap: 28px; }
 }
 
 /* 2. The bar stops being four columns. The search box cannot be centred on a
@@ -1637,17 +1690,19 @@ td.strong { color: var(--ink-0); }
   .bar__id { flex: none; }
   .bar__date { display: none; }
   .search { flex: 1; min-width: 160px; }
-  .bar-right { flex: none; }
+  .bar__side { flex: none; }
 }
 
 /* 3. The rail becomes a bottom bar. It is navigation only by then, which is
       exactly what a phone wants within reach of a thumb; the brand and the
       next-run line are the two things that do not survive the move, and
-      neither is something the reader acts on. The theme switch does survive,
-      because it is a preference and not a report - it is the second render of
-      it, the one the bar carries and hides above this width. */
+      neither is something the reader acts on. The theme switch is unaffected:
+      it has lived in the bar since 2026-09-07, so it is already where a phone
+      would have needed it to be. */
 @media (max-width: 860px) {
-  .app { grid-template-columns: 1fr; }
+  .app, .app--side { grid-template-columns: minmax(0, 1fr); }
+  .col { grid-column: 1; }
+  .app--side .side { grid-column: 1; }
   .rail {
     position: fixed;
     inset: auto 0 0 0;
@@ -1666,7 +1721,11 @@ td.strong { color: var(--ink-0); }
   .bar__brand { width: auto; flex: none; padding: 0 0 0 14px; background: none; }
   .brand__w, .rail-tog { display: none; }
   .rail__foot, .nav__g { display: none; }
-  .seg--narrow { display: grid; }
+  /* Neither end of the bar sits over a column here - the left rail is a bar at
+     the foot of the window and the right one is a band at the end of the page -
+     so neither keeps the ground that said which column it belonged to. */
+  .bar__side, .app--side .bar__side { padding: 0; background: none; }
+  .app--side .bar__side .seg { box-shadow: none; }
   .nav--narrow { display: flex !important; }
   .nav--go { display: none; }
   .nav { flex-direction: row; width: 100%; gap: 0; }
@@ -1700,7 +1759,7 @@ td.strong { color: var(--ink-0); }
   /* The bar pads itself here, so the brand cell stops doing it twice. */
   .bar__brand { padding-left: 0; }
   /* Its own row, and allowed to shrink into it. The `flex-wrap` here was
-     written at some point and had never once fired: `.bar-right` takes
+     written at some point and had never once fired: `.bar__side` takes
      `flex: none` at 1024px, which is `flex-shrink: 0`, so on a 375px phone the
      row stayed 398px wide and the window scrolled sideways instead - the one
      thing the responsive rules are supposed to guarantee never happens. The
@@ -1708,7 +1767,7 @@ td.strong { color: var(--ink-0); }
      bar's copy is labelled `çalıştır` rather than `yenile` and 23px over
      became 37. Left-aligned rather than right, because on its own line it is a
      row of controls and not the end of the bar. */
-  .bar-right {
+  .bar__side {
     flex: 1 1 100%;
     flex-wrap: wrap;
     justify-content: flex-start;

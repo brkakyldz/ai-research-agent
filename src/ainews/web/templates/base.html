@@ -1,17 +1,22 @@
-{# The shell every page wears: one bar across the top, a rail under its left
-   end, and the reading beside it.
+{# The shell every page wears: one bar across the top, and two rails hanging
+   under its two ends with the reading between them.
 
-   Until 2026-09-07 the bar started where the rail stopped, so the window's top
-   edge was two bands that happened to be the same height: the brand sat in the
-   rail's own scroll box, the bar's hairline began 264px in, and the reader's
-   controls were a strip belonging to the content column rather than to the
-   application. The bar now spans the window and the rail hangs beneath it. The
-   brand is the bar's first cell and it is exactly the rail's width, so the one
-   vertical line in the shell - the rail's edge - runs from the top of the
-   window to the bottom of it without a jog (ADR 0021).
+   Until 2026-09-07 the bar started where the left rail stopped, so the window's
+   top edge was two bands that happened to be the same height: the brand sat in
+   the rail's own scroll box, the bar's hairline began 264px in, and the
+   reader's controls were a strip belonging to the content column rather than to
+   the application. The bar spans the window now, and its first and last cells
+   are exactly the widths of the two columns beneath them, on the same ground -
+   so each rail is one surface from the top of the window to the bottom, and the
+   bar is the head of both rather than a strip laid over them (ADR 0021).
 
-   The rail is navigation and nothing else, plus the one preference that is not
-   about the content - the theme. It is grouped rather than flat, because five
+   The right rail is the day read sideways and it is only on the digest, which
+   is the one page that has a day. A page that leaves it empty sets no
+   `app_mod` and the grid is two columns instead of three; the bar's last cell
+   is then the width of the switches it holds and nothing follows it down.
+
+   The left rail is navigation and nothing else. It is grouped rather than flat,
+   because five
    links in one column read as five errands; three labelled groups say what kind
    of errand each one is - what today holds, where to go looking, and what the
    machine has already done. The icons are drawn beside the words, never instead
@@ -22,16 +27,16 @@
 
    The rail's foot holds the way in to the run log, drawn in the accent because
    it is the only page in the rail the reader opens in order to do something,
-   with when that is worth doing underneath it and the theme switch below.
+   and when that is worth doing underneath it.
 
-   The bar is four cells and it is laid out as four: the brand over the rail,
-   what page this is and when its bulletin was made, the search box, and on the
-   right the language and the status of a run in flight. Language stays in the
-   bar because it changes what the page says; the theme only changes how it
-   looks, so it went to the rail with the other thing you set once. The run
-   button lived here until 2026-09-06 and is now on `/runs` alone: it is the one
-   control in the app that spends money and in the bar it was drawn at the size
-   of a preference, in the row of preferences.
+   The bar is four cells and it is laid out as four: the brand over the left
+   rail, what page this is and when its bulletin was made, the search box, and
+   over the right rail the two switches and the status of a run in flight. Both
+   switches, since 2026-09-07: they are the same kind of control - a thing you
+   set once - and they had been sitting at opposite corners of the window. The
+   run button lived here until 2026-09-06 and is now on `/runs` alone: it is the
+   one control in the app that spends money and in the bar it was drawn at the
+   size of a preference, in the row of preferences.
 
    `data-theme` is only written when the reader has actually chosen one:
    without it `color-scheme: light dark` follows the operating system, which
@@ -97,7 +102,7 @@
 </div>
 {% endmacro %}
 
-<div class="app">
+<div class="app{% block app_mod %}{% endblock %}">
 
   <header class="top-bar" id="bar">
     {# The bar's first cell, and it is the rail's width on purpose: the brand
@@ -167,7 +172,7 @@
       <span class="keys" aria-hidden="true"><kbd>/</kbd><kbd id="kbd-k">⌘K</kbd></span>
     </form>
 
-    <div class="bar-right">
+    <div class="bar__side">
       <span id="run-status" class="raw" role="status"></span>
 
       {# Two slots, not one link. A control that draws only the state you are
@@ -182,10 +187,17 @@
         <a href="{{ language_urls.en }}" lang="en" hreflang="en" {% if language == 'en' %}aria-current="true"{% endif %}>{{ t.lang_en }}</a>
       </div>
 
-      {# The theme lives in the rail, which becomes a five-slot navigation bar
-         at 860px and drops its foot. Below that width this is the switch, and
-         above it this one is the hidden of the two. #}
-      {{ theme_switch('seg--narrow') }}
+      {# The theme joined it here on 2026-09-07. It sat at the foot of the rail
+         from 2026-09-06 (ADR 0013) on the argument that it is a thing you set
+         once, like the rail's own shape - and that argument put the two
+         switches at opposite corners of the window, one at the top right and
+         one at the bottom left, when they are the same kind of control and are
+         reached in the same breath. They are one group now, at the head of the
+         column they share the ground with. It is also the end of a pattern:
+         the switch used to be written twice and drawn once, because the rail's
+         foot disappears on a phone and the bar had to carry a second copy. One
+         render, every width. #}
+      {{ theme_switch() }}
     </div>
     <div class="prog"></div>
   </header>
@@ -240,15 +252,19 @@
           <span class="raw">{{ foot|trim }}</span>
         </p>
       </nav>
-      {{ theme_switch() }}
     </div>
   </aside>
 
   <div class="col">
-    <main class="main{% block main_mod %}{% endblock %}" id="main">
+    <main class="main" id="main">
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  {# The right rail, and it is a column of the shell rather than a card inside
+     the reading. Only the digest fills it; a page that leaves it empty sets no
+     `app_mod` and the grid has two columns instead of three. #}
+  {% block side %}{% endblock %}
 
 </div>
 
