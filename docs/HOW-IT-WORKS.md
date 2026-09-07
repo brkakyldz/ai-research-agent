@@ -1,18 +1,29 @@
 # How it works
 
-A walkthrough of the whole system, from a feed being polled to a story being read
-on the page. It is a narrative, not a reference: every value it mentions lives in
-the code, and the code is the authority. `PLAN.md` holds the scope, `DESIGN.md`
-holds why the page looks like it does, and `docs/decisions/` holds the fifteen
-choices that would be expensive to undo.
+Everything about this project in one file: what it believes, how it is built,
+what happens between a feed being polled and a story being read, and how it
+knows whether any of it is any good.
+
+It is a narrative, not a reference. Every value it mentions lives in the code,
+and the code is the authority — where this document and a line of Python
+disagree, the Python is right and this file is stale. `PLAN.md` holds the
+original scope, `DESIGN.md` holds why the page looks like it does, and
+`docs/decisions/` holds the twenty-four choices that would be expensive to undo.
+
+**Part I — the idea** is the philosophy: what the thing is for, and the handful
+of beliefs every decision below falls out of. **Part II — the machine** is the
+walkthrough. **Part III — whether it is any good** is testing and evaluation.
+**Part IV — the record** is the decision list and what is deliberately missing.
 
 ---
+
+# Part I — The idea
 
 ## 1. What the thing is
 
 One process. It polls sixteen RSS feeds, throws away the same story told five
-times, summarises what is left with an LLM, ranks the day in a single pass, and
-serves the result as one page. It runs on one machine, in one container, for
+times, summarises what is left with an LLM, ranks the whole day in a single pass,
+and serves the result as one page. It runs on one machine, in one container, for
 about $2.50 a month.
 
 There is exactly one thing on a clock: the feed poll, every three hours, which
@@ -20,106 +31,248 @@ costs nothing. The digest — the part that spends money — is started by a per
 pressing a button (ADR 0015). The page's job is to tell them when that is worth
 doing.
 
+![Architecture](architecture.png)
+
 ```
                  ┌──────────── FastAPI, one uvicorn worker ─────────────┐
                  │  APScheduler: collect */3h — nothing else on a clock │
                  │  POST /runs/start  ← the button a person presses     │
                  └───────────────────────┬─────────────────────────────-┘
-                                         │  run_digest(language, mode)
+                                         │  run_digest(language, mode, models)
                                          ▼
   16 RSS feeds ─► collect ─► dedupe ─► enrich ─► [Send ×N] summarize ─► rank ─► persist
                                          │
                                          ▼
-                  SQLite (WAL + FTS5): sources · articles · summaries · runs
+       SQLite (WAL + FTS5): sources · articles · summaries · runs · run_steps · verdicts
                                          │
                                          ▼
-                 Jinja + HTMX:  /   /archive   /sources   /runs   /search
+          Jinja + HTMX:  /   /archive   /sources   /runs   /runs/<id>   /search
 ```
+
+## 2. The seven beliefs
+
+Nothing in Part II is arbitrary. Each of these produced decisions that show up
+in the code, and each one is stated here so a later change can be checked against
+it rather than against taste.
+
+### 2.1 It is an instrument, not a product
+
+It is opened once in the morning, read for a few minutes, and closed. Nobody has
+to be persuaded of anything, so there is no hero, no atmosphere, no scroll
+animation and no marketing surface anywhere in it. `DESIGN.md`'s method is one
+question asked of every element — *what is your job, and does the content
+already do it?* — and the list of things deleted by that question is longer than
+the list of things that survived it.
+
+The strongest form of this is the ranking. A digest normally puts a number or a
+badge beside each story; here the headline's size and ink step come from the
+importance score, so the page dims from top to bottom and the reader learns where
+to stop from the shape of it. An order is already an order — the numbers 01–15
+were deleted for saying it twice.
+
+### 2.2 Money is a design material, not an implementation detail
+
+The budget was under $10 a month and the measured bill is $2.50. That constraint
+is visible in the architecture, not just in the invoice:
+
+- Enrichment is **three tiers, cheapest first**, and the paid tier only runs for
+  an item that is still empty after the two free ones.
+- The Tavily credit cap is a **database table**, not a counter in memory, because
+  a process that restarts twice a day would otherwise reset its own budget twice
+  a day.
+- Ranking is **one call over the whole day** rather than a comparison per pair.
+- The price per million tokens is drawn **under the button, before the press**,
+  because the tiers differ by up to fifty times and a surprise belongs on screen
+  rather than in a billing dashboard next month (ADR 0020).
+- The digest is **not on a clock at all** (ADR 0015). The one thing that runs
+  unattended is the thing that is free.
+
+What the constraint did *not* buy is a cheap pre-filter. Every collected article
+is summarised, because at $0.00085 an article a title-only filter deciding in
+advance what deserves reading would save four cents and hide the story the day
+was actually about (ADR 0001).
+
+### 2.3 Degrade, never fail
+
+A digest is a hundred small jobs and some of them will fail. The rule everywhere
+is that a failure is contained at the smallest unit that can hold it and the run
+still ships:
+
+| The unit | What its failure costs |
+|---|---|
+| One feed | That source's row is marked; the other fifteen are polled |
+| One article's summarize call | An entry in `errors`; ninety-nine summaries still ship |
+| The rank call | Fallback ordering by importance, then source weight; the editor's note says so |
+| Tavily | An empty string and a thinner summary |
+| The WAL pragma | A warning, and the rollback journal |
+| Bookkeeping (`run_steps`, tracing) | Swallowed and logged — a paid run is never killed by its own instrumentation |
+
+`partial` is a real run status and not a soft failure: one feed 404ed, three
+articles would not summarise, and the other ninety-seven are still a bulletin.
+
+### 2.4 The machine has to be able to explain itself
+
+The `runs` row always said what a run cost. It never said *where* that went, so
+the two questions a person actually asks of a slow or expensive run — which node
+ate the two minutes, which node ate the eleven cents — had no answer short of
+reading the log. `run_steps` answers both, one row per node, and `/runs/<id>`
+reads it back (ADR 0022).
+
+The same belief is why a duplicate article is **marked and never deleted** — a
+wrong merge stays inspectable instead of becoming an article nobody can explain
+the absence of — and why a run that crashed is closed as `error` rather than left
+saying `running` forever.
+
+### 2.5 Nothing the model says is taken on trust
+
+Output quality is a number a command regenerates, never a claim in a document.
+Four layers, cheapest first: deterministic checks over recorded fixtures that run
+offline in `pytest`, the reader's own *doğru · yanlış* on every story, a sampled
+grounding judge one model tier above the pipeline, and a rank-stability probe.
+The reader's labels are the ground truth; the judge is what gets calibrated
+against them, not the other way round (ADR 0019).
+
+Two consequences worth stating. The measured rank stability is τ 0.47 and 0.50 —
+under the 0.6 that would trigger a change — and **the ranker has not been changed
+yet**, because two runs is two measurements and the trigger asks for it across
+runs. And the evaluation layer is a fifth layer that the pipeline and the web
+layer never import: deleting `src/ainews/evals/` would break one CLI subcommand
+and nothing else (ADR 0023).
+
+### 2.6 Show, do not spend
+
+The app is cloned and run by one person and never deployed. That frame decides
+what belongs in the interface: the interface may **show** anything — what a run
+cost, which model wrote it, how long each node took, how many summaries carry a
+verdict — and it has exactly **one control that spends money**, which is the
+press on `/runs`.
+
+That is why the evaluation, which is genuinely interesting to look at, is a
+terminal command and not a second button (ADR 0023). A second paid press would
+have doubled the ways to be surprised by a bill in exchange for saving one
+`uv run`.
+
+### 2.7 A value lives in one place, and a decision lives next to what it changed
+
+Colours and scale live in the mockup and then in `theme.css` — never restated in
+a document. A read query lives in `web/queries.py` and never in a route, because
+all five pages want the same few shapes and a query written twice is a query that
+disagrees with itself later. Model names live in `pipeline/pricing.py`, which is
+the price table and the menu at once. The environment is read in exactly one
+module, `config.py`.
+
+And a decision is a comment on the line it changed, not a paragraph collected
+into a design document. `DESIGN.md` and this file carry *why*; the code carries
+*where*.
+
+## 3. How the project keeps its record
+
+Four kinds of writing, with a rule each, because the failure mode of a personal
+project is a pile of documents that quietly contradict the code.
+
+| | Rule |
+|---|---|
+| **ADRs** (`docs/decisions/`) | One per expensive-to-reverse choice. A later decision that contradicts an earlier one sets that one's status to *superseded* and says which part — never edits it. Nine of the twenty-four supersede something. |
+| **Research** (`reports/research/`) | Dated and immutable. A report is what was believed on that date; a correction is a newer report that references the old one. |
+| **`PLAN.md`** | The original scope, kept unedited. The four places the build contradicted it are ADRs, not edits. |
+| **`DESIGN.md`** | Rationale only — no token list, no component catalogue, no scale table. |
+
+The repo is written in English — documents, comments, docstrings, commit
+messages — while the conversation that produced it happens in Turkish. It is a
+portfolio piece and it reads in one language. The interface is the exception: it
+speaks both, and every visible string lives in `web/i18n.py` in two dictionaries
+so that the two can be diffed against each other.
 
 ---
 
-## 2. The layers, and what each one is not allowed to do
+# Part II — The machine
+
+## 4. The layers, and what each one is not allowed to do
 
 | Layer | Files | Rule it lives by |
 |---|---|---|
 | Configuration | `src/ainews/config.py` | The only module that reads the environment. Nothing else touches `os.environ`. |
 | Sources | `src/ainews/sources/` | Talks to the outside world: HTTP, feed parsing, extraction, Tavily. Knows nothing about the graph. |
-| Persistence | `src/ainews/db/` | Five tables plus an FTS5 index. Owns the connection pragmas. |
-| Pipeline | `src/ainews/pipeline/` | The LangGraph nodes and the two entry points that open and close a run row. |
+| Persistence | `src/ainews/db/` | Seven tables plus an FTS5 index. Owns the connection pragmas. |
+| Pipeline | `src/ainews/pipeline/` | The LangGraph nodes, the two entry points that open and close a run row, the price table, and the step recorder. |
 | Scheduling | `src/ainews/scheduler.py` | One interval job, in-process. |
 | Web | `src/ainews/web/` | Routes, read queries, view helpers, templates. Never writes a summary. |
 | CLI | `src/ainews/cli.py` | Calls the same functions the button and the poll call. No second implementation. |
 | Evaluation | `src/ainews/evals/` | Reads the database and calls the pipeline's node functions; never imported by the pipeline or the web layer. Spends money only behind `ainews eval judge` / `rank-stability`, never in `pytest`. |
 
-The dependency direction is one-way: web and CLI both call into pipeline, pipeline
-calls into sources and db, and nothing calls back up. `pipeline/nodes/summarize.py`
-never imports anything from `web/`, which is why the CLI can run a digest with no
-HTTP server anywhere in the process.
+The dependency direction is one-way: web and CLI both call into pipeline,
+pipeline calls into sources and db, and nothing calls back up.
+`pipeline/nodes/summarize.py` never imports anything from `web/`, which is why
+the CLI can run a digest with no HTTP server anywhere in the process.
 
----
-
-## 3. Configuration
+## 5. Configuration
 
 `Settings` (`src/ainews/config.py:23`) is a `pydantic-settings` model read from
 the dotenv file once and cached with `lru_cache`. Every knob an operator is meant
-to touch is a field on it, and every field has a bound where a bound is meaningful
-— `digest_top_n` is `ge=1, le=100`, `dedupe_score_threshold` is `0..100`. A typo
-in the environment fails at startup with a validation error naming the field,
-rather than at 03:00 as a division by zero.
+to touch is a field on it, and every field has a bound where a bound is
+meaningful — `digest_top_n` is `ge=1, le=100`, `dedupe_score_threshold` is
+`0..100`. A typo in the environment fails at startup with a validation error
+naming the field, rather than at 03:00 as a division by zero.
 
 Two details worth naming:
 
-- **`_blank_placeholders`** (`config.py:74`). The shipped template contains
+- **`_blank_placeholders`** (`config.py:92`). The shipped template contains
   `sk-proj-xxxx…`. A key that still holds `xxxx` is treated as unset, so a fresh
   clone that copied the template but never edited it reports "no key" instead of
   authenticating with a placeholder and getting a 401 four nodes deep.
-- **`sqlite_path`** (`config.py:91`). Derives the filesystem path from
+- **`sqlite_path`** (`config.py:107`). Derives the filesystem path from
   `DATABASE_URL`, which is what WAL setup, the health probe and the CLI's
   "database ready at …" line all print.
 
-`openai_model_summarize` is its own knob deliberately (ADR 0001): if Turkish
-quality ever disappoints, only the summarize node moves up a tier and ranking
-stays on the cheap model.
+The three `OPENAI_MODEL*` fields are **defaults, not settings** (ADR 0020):
+which model runs is an argument to the work, chosen in the confirmation on
+`/runs` or with the CLI's `--model-*` flags, and these say what a press that
+names nothing falls back to. `openai_model_summarize` is its own knob for the
+reason ADR 0001 gives: if Turkish quality ever disappoints, only the summarize
+node moves up a tier and ranking stays on the cheap model.
 
----
+## 6. The data model
 
-## 4. The data model
+Seven real tables in `src/ainews/db/models.py`, plus a virtual one.
 
-Seven real tables in `src/ainews/db/models.py`, plus a virtual one. Two of the
-seven belong to the evaluation layer and are described in §14: `verdicts`, the
-reader's call on a summary, and `eval_results`, what the judge and the rank
-probe measured and what it cost.
-
-**`sources`** (`models.py:49`) — what to poll. Beyond name and URL it carries
+**`sources`** (`models.py:53`) — what to poll. Beyond name and URL it carries
 `etag` and `modified`, the conditional-GET tokens from the last successful fetch;
 `consecutive_failures`, which is what auto-disables a rotted feed; and `weight`
 (0.5–2.0), an editorial figure that does two jobs — it breaks ranking ties and it
 decides which thin articles are worth a Tavily credit.
 
-**`articles`** (`models.py:81`) — one item from one feed. `url_canonical` is
+**`articles`** (`models.py:85`) — one item from one feed. `url_canonical` is
 `unique`, and that uniqueness *is* the first layer of deduplication. `dup_of` is a
 self-referencing FK recording a fuzzy-duplicate decision; a duplicate is marked,
-never deleted, so a wrong merge stays inspectable instead of becoming an article
-nobody can explain the absence of.
+never deleted.
 
-**`runs`** (`models.py:112`) — one execution. The id is a uuid hex string and
+**`runs`** (`models.py:116`) — one execution. The id is a uuid hex string and
 doubles as the LangGraph checkpointer's `thread_id`, so a crashed run can be
 resumed by name. It carries the counts, the token totals, the estimated cost, the
-editor's note and the error text. `status` is one of `running | ok | partial |
-error`, and `partial` is a real outcome, not a soft failure: one feed 404ed or
-three articles would not summarise, and the other ninety-seven are still a digest.
+editor's note and the error text. `status` is one of
+`running | ok | partial | error`.
 
-**`summaries`** (`models.py:153`) — the LLM's read of one article, in one
+**`run_steps`** (`models.py:157`) — one row per graph node per run: the two
+timestamps, the counts in and out, the model, the tokens, the estimated cost, a
+status and a note. This is what `/runs/<id>` reads (ADR 0022, and §9 below).
+
+**`summaries`** (`models.py:215`) — the LLM's read of one article, in one
 language, for one run. `importance` is 1–5 and check-constrained. `rank` is set
 only for the items that made the digest's top N; everything else keeps its
 importance and remains reachable below the fold and in search. The unique
 constraint `(article_id, run_id, language)` is what forces the deduplication in
-`persist` described in §6.7.
+`persist` described in §7.7.
 
-**`daily_counters`** (`models.py:186`) — the durable half of the Tavily credit
-cap. It is a table rather than a module-level integer for one reason: a process
-that restarts twice a day would otherwise reset its own budget twice a day and
-spend a month's free credits in a week.
+**`verdicts`** (`models.py:248`) — the reader's own call on one summary, `ok` or
+`wrong`, with an optional free-text reason. One row per summary; a later verdict
+overwrites the earlier one rather than accumulating a history nobody reads.
+
+**`eval_results`** (`models.py:273`) — one measurement that cost money: a judged
+summary or a rank probe, with its own tokens and cost, so `ainews eval report`
+can total evaluation spend beside product spend.
+
+**`daily_counters`** (`models.py:305`) — the durable half of the Tavily credit
+cap, as described in §2.2.
 
 **`summaries_fts`** — an FTS5 virtual table created in `db/schema.py:21` with
 `content=''` (contentless: the text lives once, in `summaries`, and the index
@@ -129,7 +282,10 @@ SQLAlchemy has no vocabulary for, which is why it is raw SQL applied by the same
 idempotent `init_db()` (`schema.py:54`) that creates the tables.
 
 There is no Alembic (ADR 0005). The schema is created idempotently at every
-start; adding migrations later is `alembic init` plus one autogenerate.
+start; adding migrations later is `alembic init` plus one autogenerate. The
+practical consequence is real and named in the README: `create_all` adds tables,
+not columns, so a new *column* today means deleting `data/app.db` and
+re-collecting.
 
 ### Connection setup
 
@@ -147,9 +303,9 @@ without WAL a reading page merely blocks behind a writing digest, which for one
 reader is a pause and not a failure. `docker-compose.yml` uses a named volume for
 exactly this reason.
 
----
+## 7. Collection and the digest graph
 
-## 5. Collection — the cheap half
+### 7.1 collect — the cheap half
 
 `collect_articles` (`pipeline/nodes/collect.py:122`) is the single implementation
 of "what does collection mean". It is called from two places: the three-hourly
@@ -207,11 +363,9 @@ restarts, which it would not if this were an upsert. `BLOCKED_HOSTS`
 the UI — both are firehoses of "title plus someone else's link", and hnrss.org
 alone serves a dozen query variants of one feed.
 
----
+### 7.2 The graph, and the one interesting edge
 
-## 6. The digest graph
-
-`build_graph()` (`pipeline/graph.py:132`):
+`build_graph()` (`pipeline/graph.py:185`):
 
 ```
 START → collect → dedupe → enrich → [Send × N] summarize → rank → persist → END
@@ -219,12 +373,11 @@ START → collect → dedupe → enrich → [Send × N] summarize → rank → p
 
 Only one edge is interesting, and it is `enrich → summarize`.
 
-### 6.1 State design
-
-`PipelineState` (`pipeline/state.py:102`) carries **ids, not bodies**. LangGraph
-writes a checkpoint after every superstep, so anything in state is serialised once
-per step per branch; a hundred article bodies in there would turn a cheap run into
-a slow one. Bodies stay in SQLite and the graph passes primary keys.
+**State design.** `PipelineState` (`pipeline/state.py:102`) carries **ids, not
+bodies**. LangGraph writes a checkpoint after every superstep, so anything in
+state is serialised once per step per branch; a hundred article bodies in there
+would turn a cheap run into a slow one. Bodies stay in SQLite and the graph
+passes primary keys.
 
 Two fields are reducer fields — `summaries` and `errors`, both
 `Annotated[list[...], operator.add]` (`state.py:114`). That is the only reason a
@@ -235,12 +388,10 @@ and `RankedDigest` are used with `with_structured_output`, so a malformed answer
 fails as a validation error at the node that produced it rather than as a
 `KeyError` three nodes later.
 
-### 6.2 collect
+Every node in `graph.py` is a thin adapter around a function in `nodes/`, and
+every adapter is wrapped in `step()` — §9.
 
-`collect_node` (`graph.py:47`) calls the same `collect_articles` the scheduler
-calls, and returns `n_collected`, `n_new` and any per-source errors.
-
-### 6.3 dedupe
+### 7.3 dedupe
 
 `dedupe_candidates` (`pipeline/nodes/dedupe.py:102`) does the half the URL index
 cannot: the same story written up separately by five outlets — "OpenAI releases
@@ -265,7 +416,7 @@ inside the age horizon. That is what makes "run now" idempotent-in-cost: pressin
 the button twice in a row summarises nothing the second time, so the page can
 advise without ever having to refuse.
 
-### 6.4 enrich
+### 7.4 enrich
 
 `enrich_articles` (`pipeline/nodes/enrich.py:48`) gives thin articles a body, in
 three tiers, cheapest first, each running only when the one before came back
@@ -296,16 +447,19 @@ Ordering is the whole design here. Enrichment is the only step that can spend
 money outside the LLM, and by the time tier 3 is reached most articles no longer
 need it.
 
-### 6.5 summarize — the fan-out
+### 7.5 summarize — the fan-out
 
-`fan_out_summaries` (`graph.py:72`) is a conditional edge that returns a list of
+`fan_out_summaries` (`graph.py:97`) is a conditional edge that returns a list of
 `Send` objects, one per surviving candidate — LangGraph's map-reduce. A hundred
 independent branches run in a single superstep, each writing into a state key with
 an `operator.add` reducer. With no candidates it returns the string `"persist"`
 instead, so an empty day still closes its run row rather than hanging.
 
-Two limits have to be raised for this to work at all, both set in
-`runner.py:128`:
+The chosen model rides **on every `Send`** rather than being read inside the node:
+the branches are the run, and a run has to be summarised by one model even if the
+environment changes halfway through it.
+
+Two limits have to be raised for this to work at all, both set in `runner.py`:
 
 - `recursion_limit` counts supersteps and defaults to 25. A `Send` fan-out is one
   superstep however wide it is, so the real depth here is six — but the limit is
@@ -332,7 +486,7 @@ The model is called with `with_structured_output(ArticleSummary, include_raw=Tru
 can read `usage_metadata` off the raw response — without the raw message there is
 no honest way to cost a run.
 
-### 6.6 rank — one call over the whole day
+### 7.6 rank — one call over the whole day
 
 The importance scores from summarize were each assigned in isolation: one article,
 no idea what else happened that day. Five separate 4s are common and mean nothing
@@ -357,10 +511,19 @@ the model answered with whatever length it liked. A number of words is a
 constraint it actually honours (`state.py:66`).
 
 The ranking call's tokens ride back on a synthetic payload with `article_id = -1`
-(`graph.py:109`), so `persist` can add them to the run's total without a second
-state channel.
+(`graph.py:156`), so `persist` can add them to the run's total without a second
+state channel — and `persist` filters that carrier out before counting summaries.
 
-### 6.7 persist
+**What `rank` is for, exactly.** Since 2026-09-08 it selects and no longer sorts:
+`rank` decides *which* stories make the digest, and `importance` decides the order
+they are read in. They are two different measurements and they disagree
+constantly, so a real day came out p4, p3, p3, p2, p3 — and on a page whose only
+ranking indicator is the size of the headline, a size that goes down and back up
+reads as no order at all. ADR 0024 has the whole story; a regression test seeds a
+run whose rank order is the exact reverse of its importance order and asserts the
+page comes out 5, 4, 3, 2.
+
+### 7.7 persist
 
 `persist_run` (`pipeline/nodes/persist.py:35`) is where a run becomes something
 the dashboard can read a week later. It writes one `Summary` row per article with
@@ -374,39 +537,91 @@ The unique index on `(article_id, run_id, language)` would then abort the whole
 commit and lose every summary in the run.
 
 Cost is computed here from the token counts each node carried back, priced against
-the table in `llm.py:23`. The prices are checked into the repo on purpose: a cost
-the dashboard shows has to be reproducible, and a figure fetched at runtime is
-not. An unknown model is priced as the most expensive one we know — a surprise in
-the billing dashboard is worse than a pessimistic number in ours. The figure is an
+`pipeline/pricing.py`. The prices are checked into the repo on purpose: a cost the
+dashboard shows has to be reproducible, and a figure fetched at runtime is not. An
+unknown model is priced as the most expensive one we know — a surprise in the
+billing dashboard is worse than a pessimistic number in ours. The figure is an
 estimate and is labelled as one; prompt caching makes the real bill lower.
 
-### 6.8 The two entry points
+### 7.8 The two entry points
 
 `pipeline/runner.py` holds the only two ways work starts.
 
-`run_collect` (`runner.py:80`) — the three-hourly poll. No LLM, no cost, no
-digest.
+`run_collect` — the three-hourly poll. No LLM, no cost, no digest.
 
-`run_digest` (`runner.py:101`) — the full graph, with checkpoints written to
-`checkpoints.db`, a *separate* file from `app.db` (`graph.py:15`). They are
-machine state with a different lifecycle: deleting checkpoints costs nothing,
-deleting `app.db` costs the archive.
+`run_digest` — the full graph, with checkpoints written to `checkpoints.db`, a
+*separate* file from `app.db` (`graph.py:43`). They are machine state with a
+different lifecycle: deleting checkpoints costs nothing, deleting `app.db` costs
+the archive.
 
 Both open a run row before the work and close it afterwards, **including on
-failure** (`_fail_run`, `runner.py:70`). A run that crashed and left
-`status='running'` forever would be the one thing the `/runs` page could not
-explain.
+failure** (`_fail_run`). A run that crashed and left `status='running'` forever
+would be the one thing the `/runs` page could not explain.
 
-**Concurrency** is one module-level claim: `_digest_lock` plus `_digest_running`
-(`runner.py:41`). SQLite has one writer (ADR 0003) and everything shares one
-process (ADR 0004), so that is the whole concurrency story — but only if every
-path takes it. It lives in the runner rather than the web layer because the CLI
-never goes through a route, and two digests over the same candidates means paying
-the model twice for one day.
+**Concurrency** is one module-level claim: `_digest_lock` plus `_digest_running`.
+SQLite has one writer (ADR 0003) and everything shares one process (ADR 0004), so
+that is the whole concurrency story — but only if every path takes it. It lives in
+the runner rather than the web layer because the CLI never goes through a route,
+and two digests over the same candidates means paying the model twice for one day.
 
----
+## 8. Which model runs, and where that is decided
 
-## 7. Scheduling — and why there is almost none of it
+ADR 0020 made the model an argument to the work rather than a line in a file that
+needs a restart. Three layers, in this order:
+
+1. **The press.** `GET /runs/confirm` swaps the button for a question carrying a
+   model for the summariser (`?ms=`), a model for the ranker (`?mr=`) and the
+   bulletin's output language (`?out=`), with the price per million tokens for the
+   pair drawn under them. Only the *answer* is the `POST`.
+2. **The CLI.** `--model-summarize` / `--model-rank`, with `argparse` choices
+   built from `PRICES`.
+3. **The environment.** `OPENAI_MODEL*` — the fallback when neither of the above
+   names one.
+
+Two knobs and not one, because the summariser is the ninety-odd calls and the
+language risk while the ranker is one call over the whole day: the case for moving
+them is not the same case. An unknown name falls back to the configured default
+rather than erroring. `pipeline/pricing.py` is the single source for the menu, the
+CLI choices and the arithmetic at once, and imports nothing but the standard
+library — `ainews sources` should not pay 1.3 seconds of `langchain_openai` to
+render a help string.
+
+Nothing afterwards used to say which choice was taken; `/runs/<id>` now reads it
+off the step rows and prints the tier over the job it did.
+
+## 9. What a run writes about itself
+
+`pipeline/steps.py` writes one `run_steps` row per node, and four properties of it
+are deliberate (ADR 0022):
+
+- **The nodes are untouched.** Every call into the module is in `graph.py`'s thin
+  adapters, or in `runner.py` for the collect poll, which never enters the graph.
+  Nothing under `nodes/` knows it is being watched — the same line ADR 0019 draws
+  around the evaluation layer and ADR 0018 draws around tracing.
+- **The counts are named by the node, not inferred.** "In" and "out" mean
+  different things at every node — articles seen and kept, candidates in and
+  survivors out — so each adapter states its own two numbers and the page labels
+  them per node. One pair of column headings would have been wrong at five of six.
+- **A failed node still leaves a row.** The context manager writes on the way out
+  whether the body returned or raised, so a run that died at `rank` shows four
+  finished steps and a fifth carrying the exception.
+- **A note is a key and its numbers, not a sentence.** A node records
+  `note_key("dedupe", dropped=n)`; the web layer writes the sentence in the
+  reader's language via `i18n.note_text`. Raw machine output — a feed's error
+  text, an exception's `repr` — goes through `note()` instead and stays verbatim
+  in the monospaced face, which is ADR 0011 rather than an exception to it.
+
+The fan-out is the one node that cannot time itself — it is a hundred concurrent
+branches and none of them knows when the first started or the last finished — so
+its span is measured from the outside, from the moment `enrich` returned to the
+moment `rank` began. `record_fan_out` also prices its tokens with the *same*
+fallback `persist_run` uses, because a step row that costs nothing under a run row
+that charges for the tokens is a page that contradicts itself.
+
+Nothing here may raise into the pipeline. A bookkeeping insert that can kill a
+paid run is worse than no bookkeeping.
+
+## 10. Scheduling — and why there is almost none of it
 
 `build_scheduler` (`scheduler.py:44`) registers exactly one job: the feed poll, on
 an `IntervalTrigger` of `COLLECT_INTERVAL_HOURS`. It runs inside the API process
@@ -428,15 +643,13 @@ night.
 `DIGEST_SUGGEST_AFTER_HOURS` — an interval the page counts down from, advice
 rather than a trigger.
 
----
-
-## 8. The dashboard
+## 11. The dashboard
 
 FastAPI + Jinja + HTMX, no Node toolchain (ADR 0002), no Tailwind (ADR 0006), and
 no third-party assets at all — fonts and `htmx.min.js` are served from `/static`,
 and there is a test that asserts it.
 
-### 8.1 Application lifecycle
+### 11.1 Application lifecycle
 
 `lifespan` (`web/app.py:34`) creates the schema, seeds the feed list, and starts
 the scheduler; on the way out it shuts the scheduler down, folds the WAL back into
@@ -445,24 +658,27 @@ runs on *every* start, not just the first, so a feed added to `feeds.yaml` in a
 later version reaches an existing installation — safe precisely because the sync
 is additive.
 
-### 8.2 Routes
+### 11.2 Routes
 
 | Route | Does |
 |---|---|
-| `GET /` | Today's digest: the brief, a topic filter, the ranked top N, an expander for everything else summarised. |
+| `GET /` | Today's bulletin: the brief, the topic filter and impact spread, the ranked top N, an expander for everything else summarised. |
 | `GET /archive` | Past digest runs, one selected. |
 | `GET /search` | FTS5 over every summary ever written. |
 | `GET /sources` | Feed list, with enable/disable and add. |
-| `GET /runs` | The advice block, the run log, failures, spend. |
+| `GET /runs` | The advice block and the press, spend, the week's counts, the run log. |
+| `GET /runs/action`, `GET /runs/confirm` | The two halves of the in-page confirmation — the button swaps itself for a question and back. |
 | `POST /runs/start` | The only thing that starts a digest in the running app. |
 | `GET /runs/status` | HTMX poll while a run is in flight. |
+| `GET /runs/{id}` | One run, node by node. |
+| `POST /verdict` | The reader's *doğru · yanlış* on one summary, saved in place. |
 | `POST /sources/toggle`, `POST /sources/add` | Form posts, 303 back to `/sources`. |
 | `GET /health` | Database reachable, keys present (never their values). |
 
-### 8.3 The button, end to end
+### 11.3 The button, end to end
 
-`start_run` (`web/routes/runs.py:95`) refuses for exactly two reasons: no API key,
-or a run already in flight. Then:
+`start_run` (`web/routes/runs.py:255`) refuses for exactly two reasons: no API
+key, or a run already in flight. Then:
 
 1. **Claim before creating the task.** `create_task` only schedules; a second
    press arriving before the task's first line would find the claim free and start
@@ -471,19 +687,19 @@ or a run already in flight. Then:
    waits that long times out somewhere in between. The route returns "working"
    immediately.
 3. **Hold a reference to the task.** The event loop keeps only a weak reference,
-   so a fire-and-forget digest can be garbage-collected mid-run;
-   `_tasks` (`runs.py:46`) is what stops that.
+   so a fire-and-forget digest can be garbage-collected mid-run; `_tasks`
+   (`runs.py:72`) is what stops that.
 4. **The response is itself the poller.** It returns a `<span>` carrying
    `hx-get="/runs/status" hx-trigger="every 3s"`, which swaps itself every three
-   seconds until `run_status` (`runs.py:124`) sees the run is over and returns a
-   fragment that reloads the page.
+   seconds until `run_status` sees the run is over and returns a fragment that
+   reloads the page.
 
 `_guarded` releases the claim in a `finally`, so it is held for exactly as long as
 the run lasts however it ends.
 
-### 8.4 The advice
+### 11.4 The advice
 
-`build_advice` (`web/views.py:310`) is the replacement for the clock. It produces
+`build_advice` (`web/views.py:444`) is the replacement for the clock. It produces
 one of five states:
 
 | State | Meaning | Button |
@@ -497,16 +713,15 @@ one of five states:
 It **advises and never refuses**: the only two things that actually stop a press
 are facts about the machine, not opinions about timing.
 
-The anchor is `last_success_at`, not the last finished run
-(`web/queries.py:241`). A digest that ended in an error produced no bulletin, so
-it must not push the next suggestion a day into the future — a failed run is
-something you are told about and then asked to repeat, not something that counts
-as done. `run_history` (`queries.py:263`) does three one-row lookups down the
-`started_at` index rather than one pass over recent runs, because "the last
-successful digest" can be arbitrarily far back and a week of failures would fall
-outside any window a single query picked.
+The anchor is `last_success_at`, not the last finished run. A digest that ended in
+an error produced no bulletin, so it must not push the next suggestion a day into
+the future — a failed run is something you are told about and then asked to
+repeat, not something that counts as done. `run_history` (`queries.py:234`) does
+three one-row lookups down the `started_at` index rather than one pass over recent
+runs, because "the last successful digest" can be arbitrarily far back and a week
+of failures would fall outside any window a single query picked.
 
-`format_gap` (`views.py:249`) says a span in the units a person would use, coarser
+`format_gap` (`views.py:383`) says a span in the units a person would use, coarser
 the further out it is. The countdown script in `runs.html` reproduces those
 branches exactly — one rule drawn twice, because the server has to render a first
 frame that JavaScript then keeps ticking. The *words* are not drawn twice: both
@@ -514,48 +729,47 @@ copies read them off `i18n`, which is also why "3h 25m" closes up in English and
 "3 sa 25 dk" does not in Turkish — that space is `u_sep`, a translated string like
 any other.
 
-The advice object is built once in `shell_context` (`views.py:390`) and read by
+The advice object is built once in `shell_context` (`views.py:524`) and read by
 two places, the rail's foot on every page and the block at the head of `/runs`, so
 the two can never disagree.
 
-### 8.5 Read queries
+### 11.5 Read queries
 
-`web/queries.py` holds every read, apart from the routes, because all five pages
+`web/queries.py` holds every read, apart from the routes, because all the pages
 want the same few shapes and a query written twice is a query that disagrees with
 itself later.
 
-- `latest_digest_run` (`queries.py:34`) is **not** language-scoped, and neither
+- `latest_digest_run` (`queries.py:38`) is **not** language-scoped, and neither
   are `digest_runs` or `search_stories`. It was until 2026-09-06, which made the
-  bar's TR/EN switch a content filter: with one Turkish bulletin in the
-  database, `?lang=en` answered "No digest yet". The switch translates the
-  interface and nothing else now (ADR 0017); the page draws the latest bulletin
-  whatever language it holds, and the bar names that language when it is not the
-  page's.
-- `stories_for_run` returns ranked items in the ranker's order, then the rest by
-  importance — the same ordering the page's typography expresses, so a reader
-  scanning downward sees the ink fade monotonically.
-- `topic_pulse` (`queries.py:175`) is the side column's themes list. `share` is
-  the percentage of the run's stories carrying a tag, because a count alone does
-  not say whether six is most of the day or a corner of it. `rising` is the only
-  derived claim on the page and is deliberately dull: at least twice today **and**
-  at least half again its own average across the previous week's digests. With no
-  prior run, nothing rises — an empty week must not make every topic look like a
-  trend.
-- `search_stories` (`queries.py:315`) goes through FTS5. `_fts_query` quotes every
+  bar's TR/EN switch a content filter: with one Turkish bulletin in the database,
+  `?lang=en` answered "No digest yet". The switch translates the interface and
+  nothing else now (ADR 0017); the page draws the latest bulletin whatever
+  language it holds, and the bar names that language when it is not the page's.
+- `stories_for_run` (`queries.py:88`) returns the run's stories heaviest first —
+  importance leads the sort and `rank` only breaks its ties (§7.6). `ranked_only`
+  is the top-N filter.
+- `search_stories` (`queries.py:289`) goes through FTS5. `_fts_query` quotes every
   token and appends `*`, which does two jobs: it stops FTS5 treating `AND`, `-` or
   `"` as operators and erroring on an ordinary search, and it makes Turkish
   suffixes stop mattering — "model" then finds "modeli" and "modelleri", which is
   the whole difference between a search box that works in Turkish and one that
-  does not.
-- `recent_activity` (`queries.py:383`) buckets a month of runs by the reader's
+  does not. Results are newest-first: a search has no day to be heavy about.
+- `recent_activity` (`queries.py:364`) buckets a week of runs by the reader's
   *local* calendar day in Python rather than with a `GROUP BY`, because the bucket
   is a local date and SQLite would need to be told the offset — a rule that then
   disagrees with `to_local` the first time the timezone setting changes.
+- `verdict_progress` (`queries.py:447`) is how many summaries carry a verdict out
+  of how many exist. It is on `/runs` because it is the one evaluation number the
+  interface can actually move.
+- `steps_for_run` (`queries.py:468`) reads the node rows for `/runs/<id>` and
+  computes each step's share of the run's wall clock. The shares deliberately do
+  not add to 100%: what is missing is the scheduling between supersteps, and it is
+  worth seeing.
 
 Three counting rules were fixed on 2026-09-06 and are worth stating, because each
 was a number on the page promising something the link behind it did not deliver:
 
-- `count_ranked` (`views.py:203`) counts rows. It used to be
+- `count_ranked` (`views.py:337`) counts rows. It used to be
   `min(n_summarized, digest_top_n)` — a guess, and wrong on a day the ranker
   returns fewer than the cap. On 2026-09-05 a run summarised 136 and ranked 11,
   and the page drew eleven stories under a badge reading 15.
@@ -563,15 +777,20 @@ was a number on the page promising something the link behind it did not deliver:
   showing. Counted over every summary while labelling a filter that narrows the
   ranked fifteen, it said `agents 27` on a page of fifteen and returned four when
   pressed.
-- `topic_pulse` passes the same flag into its *history* query, so today's ranked
-  count is compared against last week's ranked count. Like against like, or the
-  comparison is not one.
+- The same flag went into the history comparison behind the *rising* mark, so
+  today's ranked count was compared against last week's ranked count. Like against
+  like, or the comparison is not one. (That mark is gone with the side column —
+  ADR 0024.)
 
-### 8.6 Language and theme
+### 11.6 Language and theme
 
-`web/i18n.py` is two dictionaries of about 120 strings each. Two dictionaries beat
+`web/i18n.py` is two dictionaries of about 130 strings each. Two dictionaries beat
 a translation framework at this size, and a missing key is a `KeyError` in a
 template render rather than a silent English fallback nobody notices.
+
+Since ADR 0016 the capitals live in the dictionary rather than in a
+`text-transform`, so a label drawn without its class still reads as a written
+word, and every UI string in both languages is sentence case, units excepted.
 
 Both language and theme resolve by the same three-step rule: an explicit query
 parameter wins, then the cookie it set, then the default. The query parameter is
@@ -585,66 +804,49 @@ Both controls draw every slot and mark the current one, rather than showing only
 the state you would switch to — `english` on a Turkish page reads as plausibly
 either.
 
-### 8.7 The page itself
+The one preference that is not a cookie is the collapsed rail: it is
+`localStorage`, applied by a blocking script in the head, because it changes the
+grid and must be right in the first painted frame.
 
-The design rationale is `DESIGN.md` and ADRs 0008–0015; the short version:
+### 11.7 The page itself
 
-- **A console shell.** A left rail that is navigation and nothing else, with a
-  count under each link so "is there anything new" is answered without a click,
-  and its foot carrying the run button, what it does and when it is next worth
-  doing. A sticky bar holding only the reader's own controls.
-- **No panel around the feed.** Rows sit on the page, separated by air and a
-  hairline (ADR 0013).
+The design rationale is `DESIGN.md` and ADRs 0008–0024; the short version:
+
+- **A console shell.** One bar across the top of the window, and a left rail under
+  its first cell on the same ground, so the rail is one surface from the top of
+  the window to the bottom (ADR 0021). The rail is navigation and nothing else,
+  with a count under each link so "is there anything new" is answered without a
+  click; its foot carries `çalışmalar` in the accent with the countdown under it.
+  The bar holds only the reader's own controls: the page name and the bulletin's
+  date, search, the two switches.
+- **Two columns, on every page.** The third column of instruments beside the
+  reading was tried in four shapes over three days and removed on 2026-09-08 (ADR
+  0024): two of its five units were already written elsewhere on the same screen.
+  The brief is a band above the reading, the impact spread is drawn at the end of
+  the topic filter row, the week moved to `/runs`. The reading is centred in the
+  page's measure rather than pinned left.
+- **A card per story.** The `.panel` recipe exactly — one frame per story, which
+  is the count ADR 0013 argued for and did not get when it left the boundary
+  between two stories on a hairline weaker than the plate inside each one (ADR
+  0021).
 - **Ranking is carried by the typography.** Headline size and ink step come from
-  the importance score, so `p1`–`p5` on the `<li>` is doing the work a badge would
-  otherwise do. Below a score of 3 an item collapses to its headline: the reader
-  is scanning by then, and a summary they will not read is a summary in the way of
-  the next headline they will.
+  the importance score, so `p1`–`p5` on the `<li>` does the work a badge would
+  otherwise do. Below a score of 3 an item drops its prose — but keeps its foot
+  line, because that line carries the reader's verdict and hiding it starved the
+  evaluation of exactly the labels it runs on.
 - **The story block never reorders.** Source and age, headline, summary, *why it
   matters* on its own inset plate, topics, source link — the same six things in
   the same order on every item, which is what separates this from a feed reader.
-- **The impact meter** is three bars and a word (`impact_band`, `views.py:102`).
+- **The impact meter** is three bars and a word (`impact_band`, `views.py:227`).
   Five bars with no legend was a shape nobody had been told how to read; three
   bands and a name is a scale. The band is computed in the template from data, the
-  colours live in `theme.css` on their own tokens — never `--alarm` reused
-  (ADR 0012).
+  colours live in `theme.css` on their own tokens — never `--alarm` reused (ADR
+  0012).
 - **`lang="en"` on source names** is load-bearing, not decoration. The page is
   `lang="tr"` and a Turkish locale maps `i` to `İ`, so any uppercasing renders
   "OpenAI" as "OPENAİ".
 
----
-
-## 9. Running it
-
-```bash
-cp env.example.template .env    # then put OPENAI_API_KEY in it
-docker compose up --build
-```
-
-Then <http://localhost:8000> and press **çalıştır / run now**. Without Docker:
-
-```bash
-uv sync
-uv run ainews init            # create the database, seed the feeds
-uv run ainews collect         # poll the feeds — no LLM, no cost
-uv run ainews digest          # the full pipeline
-uv run ainews sources         # what is polled and what it last said
-uv run ainews serve           # the dashboard on HOST:PORT
-```
-
-The CLI calls exactly the functions the poll and the button call. `serve` is
-handled outside `dispatch` because `uvicorn.run` owns its own event loop and must
-not be started from inside one (`cli.py:65`).
-
-To read the database off the container:
-
-```bash
-docker cp ainews:/app/data/app.db .
-```
-
----
-
-## 10. Failure modes, and what each one degrades to
+## 12. Failure modes, and what each one degrades to
 
 | What breaks | What happens |
 |---|---|
@@ -656,30 +858,42 @@ docker cp ainews:/app/data/app.db .
 | One article's summarize call fails | An entry in `errors`; the other ninety-nine ship. Run status is `partial`. |
 | The rank call fails | Fallback ordering by importance then source weight; the note says so. |
 | The model returns nonsense positions | Out-of-range and repeated ordinals are dropped; empty result falls back. |
-| A run crashes | `_fail_run` closes the row as `error`, and the failed run does not reset the countdown. |
+| A step row cannot be written | Swallowed and logged; the paid run finishes. |
+| A run crashes | `_fail_run` closes the row as `error`, the failed step carries the exception, and the failed run does not reset the countdown. |
 | WAL cannot be enabled | Warning naming the cause, and the app runs on the rollback journal. |
 | No `OPENAI_API_KEY` | The button is dead and says why; collection still runs. |
 | A second press mid-run | Refused, not queued — and a second run later costs nothing for stories already summarised. |
 
----
-
-## 11. Cost
+## 13. Cost
 
 `gpt-5.6-luna` at $0.20 / $1.20 per million tokens (ADR 0001), one summarize call
 per new story with the body capped at 5000 characters, plus one rank call over the
 day. Measured at roughly **$2.50 a month** against a $10 budget. Tavily's free
 tier is 1,000 credits a month and the daily cap defaults to 30.
 
-Every run row carries its own token counts and estimated cost, and `/runs` totals
-them for today, the last 7 days and the last 30.
+Two real runs:
+
+| | Articles | Tokens (in / out) | Cost | Time |
+|---|---|---|---|---|
+| First run (a week's backlog) | 136 | 191,960 / 64,126 | $0.115 | 85s |
+| A three-hour delta | 21 | 30,600 / 8,200 | $0.017 | 43s |
+
+Every run row carries its own token counts and estimated cost, `/runs` totals them
+for today, the last 7 days and the last 30, and `/runs/<id>` breaks one run down by
+node.
 
 ---
 
-## 12. Tests
+# Part III — Whether it is any good
+
+## 14. Tests
 
 `pytest` with `asyncio_mode = "auto"`, against an in-memory or temporary SQLite
-database. They cover failure modes rather than the happy path, and the names read
-as claims:
+database: **361 tests**, offline, in about twenty seconds — a fake model and
+`respx` for HTTP, so a full fan-out, rank and persist is exercised with no network
+and no spend.
+
+They cover failure modes rather than the happy path, and the names read as claims:
 
 - `test_a_source_disables_itself_after_repeated_failures`
 - `test_archive_entries_older_than_the_horizon_are_skipped`
@@ -698,88 +912,135 @@ as claims:
 - `test_search_matches_a_turkish_suffix`
 - `test_the_page_loads_no_third_party_assets`
 
-The graph tests run the whole pipeline against a fake model, so a full fan-out,
-rank and persist is exercised with no network and no spend.
+Twelve of the 361 are `xfail(strict=True)` — bounds asserted over a fixture that
+was recorded *before* the fix that would satisfy them landed, with the reason
+beside each mark, so the mark comes off loudly rather than quietly passing.
 
----
-
-## 13. The decisions, in one list
-
-| ADR | Decision |
-|---|---|
-| 0001 | `gpt-5.6-luna` for every LLM node |
-| 0002 | FastAPI + Jinja + HTMX, no Node toolchain |
-| 0003 | SQLite in WAL mode, FTS5 for search |
-| 0004 | APScheduler in-process, one uvicorn worker *(partially superseded by 0015)* |
-| 0005 | No migration tool in v1; idempotent schema at startup |
-| 0006 | No Tailwind; the CSS is the mockup's, hand-written |
-| 0007 | The container's database is on a named volume |
-| 0008 | A console shell, and a light theme beside the dark one |
-| 0009 | The editorial story block; shell split into navigation, controls, record |
-| 0010 | The activity column, and a blue secondary colour |
-| 0011 | Two faces for small text; the brief moves into the side column |
-| 0012 | The impact meter takes the third colour; *why it matters* becomes a plate |
-| 0013 | The page stops being a dashboard *(partially superseded by 0014)* |
-| 0014 | No lead story, and a side column that looks like a bar |
-| 0015 | The digest is started by a person, and the page advises when |
-| 0016 | The shell stops whispering: nothing under 12px, sentence case in `i18n.py` |
-| 0017 | The switch translates the interface; the press chooses the bulletin's language |
-| 0019 | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth |
-
----
-
-## 14. Evaluation
+## 15. Evaluation
 
 Everything above produces output; nothing above says whether it is any good.
-`docs/PLAN-EVALS.md` is the plan and ADR 0019 the shape; this section is the
-mechanism.
+`docs/PLAN-EVALS.md` is the plan and ADR 0019 the shape; this is the mechanism.
+
+![How the evaluation works](eval-architecture.png)
 
 **Four layers, cheapest first.**
 
-1. **Deterministic checks over stored rows** (`evals/checks.py`) - pure
-   functions, rows in and numbers out: word budgets and the sentence histogram,
-   numerals in the summary that the article body did not contain (after a
-   Turkish/English normaliser, so "12,9 milyar" meets "$12.9 billion"), the tag
-   vocabulary's singleton share, the importance spread, how far the ranker's
-   order departs from the free importance-then-weight order, importance-5
-   stories with no ranked story in their dedupe cluster, and the editor's-note
-   shape. `ainews eval record --run <id>` writes a run to
-   `tests/fixtures/runs/<date>_<lang>.json` - deterministic, one story per line,
-   numerals taken from the text the model was shown, **never the article body**
-   (the repository is public) - and `tests/test_evals_checks.py` asserts bounds
-   over every fixture, offline. A fixture recorded before a fix landed is marked
-   `xfail(strict=True)` with the reason beside it, so the mark comes off loudly.
-2. **The reader's verdict** (`verdicts`, `POST /verdict`, `_story_foot.html`) -
+1. **Deterministic checks over stored rows** (`evals/checks.py`) — pure functions,
+   rows in and numbers out: word budgets and the sentence histogram, numerals in
+   the summary that the article body did not contain (after a Turkish/English
+   normaliser, so "12,9 milyar" meets "$12.9 billion"), the tag vocabulary's
+   singleton share, the importance spread, how far the ranker's order departs from
+   the free importance-then-weight order, importance-5 stories with no ranked story
+   in their dedupe cluster, and the editor's-note shape. `ainews eval record --run
+   <id>` writes a run to `tests/fixtures/runs/<date>_<lang>.json` — deterministic,
+   one story per line, numerals taken from the text the model was shown, **never
+   the article body** (the repository is public) — and `tests/test_evals_checks.py`
+   asserts bounds over every fixture, offline. Re-recording a fixture is a reviewed
+   diff, the same way a prompt is.
+2. **The reader's verdict** (`verdicts`, `POST /verdict`, `_story_foot.html`) —
    two words under every story, *Doğru · Yanlış*, saved in place by HTMX with an
-   optional one-line reason when it is wrong. Binary, not a scale: a person can
-   say "wrong" in one click and cannot honestly say "3". These labels are the
-   ground truth everything below is calibrated against. They are drawn under
-   the pointer, not at rest (V3 of `mockups/v4/variants-verdict.html`); a story
-   already judged keeps them, and a screen that cannot hover gets them always.
-3. **The sampled grounding judge** (`evals/judge.py`, `ainews eval judge`) -
-   `gpt-5.6-terra` at temperature 0 reads the body the summariser read and
-   answers one binary question: does the summary state anything as fact the
-   text does not support? The why-it-matters line is the editor's inference and
-   is failed only for an invented fact, not for drawing a conclusion. Twelve
-   summaries a run, seeded; cost estimated from body length and refused above
-   `--max-cost` before the first call; one `eval_results` row per judgement.
-   `--labelled` judges every summary that carries a verdict and prints TPR and
-   TNR separately, never one accuracy figure.
-4. **The rank-stability probe** (`evals/stability.py`,
-   `ainews eval rank-stability`) - shuffles the candidate table three ways,
-   calls `rank_summaries` for each, reports mean pairwise Kendall τ and top-N
-   Jaccard. A call that fell back to importance order is counted, not read as
-   stability.
+   optional one-line reason when it is wrong. Binary, not a scale: a person can say
+   "wrong" in one click and cannot honestly say "3". These labels are the ground
+   truth everything below is calibrated against. They are drawn under the pointer,
+   not at rest; a story already judged keeps them, and a screen that cannot hover
+   gets them always.
+3. **The sampled grounding judge** (`evals/judge.py`, `ainews eval judge`) —
+   `gpt-5.6-terra` at temperature 0 reads the body the summariser read and answers
+   one binary question: does the summary state anything as fact the text does not
+   support? The why-it-matters line is the editor's inference and is failed only
+   for an invented fact, not for drawing a conclusion. Twelve summaries a run,
+   seeded; cost estimated from body length and refused above `--max-cost` before
+   the first call; one `eval_results` row per judgement. `--labelled` judges every
+   summary that carries a verdict and prints **TPR and TNR separately, never one
+   accuracy figure** — the classes are unbalanced, and a single number would hide
+   the only failure worth catching.
+4. **The rank-stability probe** (`evals/stability.py`, `ainews eval
+   rank-stability`) — shuffles the candidate table three ways, calls
+   `rank_summaries` for each, reports mean pairwise Kendall τ and top-N Jaccard. A
+   call that fell back to importance order records `passed = None`: τ over a
+   deterministic fallback measures nothing.
 
-`ainews eval report` runs the checks over the live database, reads the verdicts
-and the judge and probe rows, and appends one dated section to `docs/evals.md`
-with every number beside the function that produced it. A section is never
-edited.
+`ainews eval report` runs the checks over the live database, reads the verdicts and
+the judge and probe rows, and appends one dated section to `docs/evals.md` with
+every number beside the function that produced it. A section is never edited.
 
-**Measured on the first run (2026-09-04, 91 stories, see `docs/evals.md`):**
-4.4% of summaries over the 55-word budget, two ungrounded figures (one the
-probe had already found by hand), 67.6% tag singletons, ranker/fallback overlap
-6 of 11, one importance-5 story left unrepresented by the same-day source purge,
-and a rank-stability τ of **0.47** with top-N Jaccard 0.53 - under the 0.6 that
-E5 names as the trigger for permutation self-consistency in production. One run
-is one measurement; the trigger asks for it across runs.
+**Measured on the first run** (2026-09-04, 91 stories): 4.4% of summaries over the
+55-word budget, two ungrounded figures, 67.6% tag singletons, ranker/fallback
+overlap 6 of 11, one importance-5 story left unrepresented, and a rank-stability
+τ of **0.47** with top-N Jaccard 0.53 — under the 0.6 that E5 names as the trigger
+for permutation self-consistency in production. The second run measured 0.50. One
+run is one measurement; the trigger asks for it across runs, which is why nothing
+in the ranker has moved yet.
+
+## 16. Looking inside one call
+
+The digest stores what the model produced, not what it was given. When a summary
+is wrong, that difference is the whole question: a prompt that was fine and a
+model that drifted needs a different fix from an extractor that handed the model a
+cookie banner.
+
+Tracing makes the call itself visible — the exact prompt, the raw response, the
+duration and the token count, with the graph's nodes around them. It is off by
+default and is not part of the product (ADR 0018):
+
+```bash
+docker compose --profile dev up -d      # Phoenix on :6006, with PHOENIX_ENABLED=true
+```
+
+`observability.py` is the whole of the app's knowledge of it, and it fails open:
+without the optional dependency group, or without the flag, the app is unchanged.
+
+---
+
+# Part IV — The record
+
+## 17. The decisions
+
+Nine of these supersede an earlier one in whole or in part. That is the point of
+the folder: the reversal is written down beside the thing it reversed, and the
+original reasoning survives so the current design can be read as an argument
+rather than as a preference.
+
+| ADR | Decision | Status |
+|---|---|---|
+| 0001 | `gpt-5.6-luna` for every LLM node | accepted |
+| 0002 | FastAPI + Jinja + HTMX, no Node toolchain | accepted |
+| 0003 | SQLite in WAL mode, FTS5 for search | accepted |
+| 0004 | APScheduler in-process, one uvicorn worker | the digest job superseded by 0015; the structure stands |
+| 0005 | No migration tool in v1; idempotent schema at startup | accepted |
+| 0006 | No Tailwind; the CSS is the mockup's, hand-written | accepted |
+| 0007 | The container's database is on a named volume | accepted |
+| 0008 | A console shell, and a light theme beside the dark one | accepted |
+| 0009 | The editorial story block; shell split into navigation, controls, record | accepted |
+| 0010 | The activity column, and a blue secondary colour | the column superseded by 0024; the blue stands |
+| 0011 | Two faces for small text; the brief moves into the side column | the label's size superseded by 0016; the brief by 0024 |
+| 0012 | The impact meter takes the third colour; *why it matters* becomes a plate | accepted |
+| 0013 | The page stops being a dashboard | partly superseded by 0014, 0021, 0024 |
+| 0014 | No lead story, and a side column that looks like a bar | partly superseded by 0021 and 0024 |
+| 0015 | The digest is started by a person, and the page advises when | accepted |
+| 0016 | The shell stops whispering: nothing under 12px, sentence case in `i18n.py` | accepted |
+| 0017 | The switch translates the interface; the press chooses the bulletin's language | accepted |
+| 0018 | Per-call tracing in a local Phoenix, behind a dev profile | accepted |
+| 0019 | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth | accepted |
+| 0020 | The model is chosen at the press; the environment is only the default | accepted |
+| 0021 | One bar across two rails, a rail that can be put away, a card per story | the third column superseded by 0024 |
+| 0022 | A run is recorded node by node, and the graph is a page | accepted |
+| 0023 | The app does not start an evaluation; the eval layer keeps its one caller | accepted |
+| 0024 | The reading page drops its right rail; the brief goes above it, the spread joins the topic row | accepted |
+
+## 18. What is not built, and why
+
+| Not built | Why not |
+|---|---|
+| E-mail or Telegram delivery | The tool is opened, not pushed. Delivery would put a bulletin somewhere nobody chose to look, and it is the second half of a cadence this project deliberately does not have. |
+| Both languages in one run | Two bulletins is twice the model calls for a reader who reads one of them. |
+| arXiv and paper feeds | ~300 items a day would dominate ranking; important papers reach the digest through Hugging Face, Simon Willison and the outlets anyway. |
+| Embedding-based clustering | `token_set_ratio` at 85 is measured and cheap. E5 says what evidence would change this: golden duplicate pairs failing on new outlets, and then it gets its own ADR. |
+| Auth, multi-user, a cloud deploy | One reader, one machine. Everything in Part I falls out of that. |
+| A second button that spends money | ADR 0023. The evaluation is a terminal command precisely because it is interesting enough to want on screen. |
+| Per-source sparklines | Tried against the data and refused: there is no series behind them worth a chart. |
+
+**Still open**, in the sense that a measurement rather than an opinion will settle
+it: the ranker's stability (τ 0.47 and 0.50 across two runs, and the trigger wants
+a third), and the judge's calibration (four reader labels on record, and about
+sixty are needed before its TPR and TNR mean anything).
