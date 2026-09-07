@@ -753,7 +753,9 @@ mechanism.
    two words under every story, *Doğru · Yanlış*, saved in place by HTMX with an
    optional one-line reason when it is wrong. Binary, not a scale: a person can
    say "wrong" in one click and cannot honestly say "3". These labels are the
-   ground truth everything below is calibrated against.
+   ground truth everything below is calibrated against. They are drawn under
+   the pointer, not at rest (V3 of `mockups/v4/variants-verdict.html`); a story
+   already judged keeps them, and a screen that cannot hover gets them always.
 3. **The sampled grounding judge** (`evals/judge.py`, `ainews eval judge`) -
    `gpt-5.6-terra` at temperature 0 reads the body the summariser read and
    answers one binary question: does the summary state anything as fact the
@@ -781,4 +783,3 @@ probe had already found by hand), 67.6% tag singletons, ranker/fallback overlap
 and a rank-stability τ of **0.47** with top-N Jaccard 0.53 - under the 0.6 that
 E5 names as the trigger for permutation self-consistency in production. One run
 is one measurement; the trigger asks for it across runs.
-

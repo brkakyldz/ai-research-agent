@@ -1407,12 +1407,29 @@ kbd {
 /* The reader's verdict: two words on the foot line, the chips' face and size,
    the chosen one in full ink with a check after it. It is drawn beside the
    reader's other actions rather than on the meta line, which belongs to the
-   machine (source, age, impact), and it is not hover-only, which would hide
-   the one control on the page a person is asked to use. Placement is V1 of
-   mockups/v4/variants-verdict.html - provisional until Berke picks (E2.1).
-   No fill, no colour: --accent's three jobs are taken (DESIGN.md), and a
-   verdict is the reader's own note, not a state of the machine. */
-.vd { margin-left: auto; display: inline-flex; align-items: center; font-size: 12px; }
+   machine (source, age, impact). No fill, no colour: --accent's three jobs are
+   taken (DESIGN.md), and a verdict is the reader's own note, not a state of
+   the machine.
+
+   V3 of mockups/v4/variants-verdict.html, picked 2026-09-07 (E2.1): the same
+   place as V1, but not drawn until the pointer is on the story. The page is
+   read far more often than it is judged, and two words repeated under fifteen
+   stories are two words the reader has to skip fifteen times. The card is
+   already the hover unit - `.go` brightens on it three rules up - so this
+   costs no new interaction, only a new consequence: a control nobody can see
+   is a control nobody presses, and E3's calibration is starved of labels
+   before it starts. Three rules pay that back. It stays drawn once the story
+   carries a verdict (`.vd--on`, set in `_story_foot.html`), so the reader's
+   own marks are never hidden from him; `:focus-within` draws it for a keyboard
+   that has tabbed into it, which opacity alone would leave focused and
+   invisible; and a pointer that cannot hover gets it drawn always, because
+   `.item:hover` never fires on a touch screen and there is no second way in. */
+.vd {
+  margin-left: auto; display: inline-flex; align-items: center; font-size: 12px;
+  opacity: 0; transition: opacity var(--dur) var(--ease);
+}
+.item:hover .vd, .vd:focus-within, .vd--on { opacity: 1; }
+@media (hover: none) { .vd { opacity: 1; } }
 .vd button {
   background: none; border: 0; padding: 4px 2px; font: inherit; font-weight: 500;
   color: var(--ink-3); cursor: pointer; transition: color var(--dur) var(--ease);

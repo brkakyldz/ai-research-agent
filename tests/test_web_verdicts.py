@@ -143,6 +143,30 @@ def test_the_page_renders_the_saved_state_after_a_reload(
     assert body.count('class="vd-note"') == 1, "only the wrong one grows a note row"
 
 
+def test_a_story_the_reader_has_judged_keeps_its_words_at_rest(
+    client: TestClient, summaries: list[int]
+) -> None:
+    """V3 hides the control until the pointer arrives - but never a saved mark.
+
+    The reveal is CSS, so the only half of it a test can reach is the class the
+    server writes. Without it a reader who marked a story wrong would come back
+    to a page that shows no sign of it until he happens to hover the same card
+    again, which is the reader's own record hidden from him.
+    """
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "wrong"})
+    body = client.get("/").text
+    assert body.count('class="vd vd--on"') == 1
+    assert body.count('class="vd"') == 1, "the unjudged story stays hover-only"
+
+
+def test_the_fragment_swapped_in_after_a_press_carries_the_mark(
+    client: TestClient, summaries: list[int]
+) -> None:
+    """HTMX replaces the foot, not the page: the class has to come back with it."""
+    text = client.post("/verdict", data={"summary_id": summaries[0], "verdict": "ok"}).text
+    assert 'class="vd vd--on"' in text
+
+
 def test_wrong_opens_the_note_row_and_ok_closes_it(
     client: TestClient, summaries: list[int]
 ) -> None:

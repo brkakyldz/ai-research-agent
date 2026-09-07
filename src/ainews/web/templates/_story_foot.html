@@ -8,10 +8,13 @@
    shape as `_run_action.html`: the page never reloads under a reader who is
    halfway down it.
 
-   Placement is V1 of `mockups/v4/variants-verdict.html` - on the reader's own
-   line, beside the other things the reader does, leaving the meta line to the
-   machine. Provisional until Berke picks; the other two placements change
-   which template the control is drawn in, not how it works. #}
+   Placement is V3 of `mockups/v4/variants-verdict.html`, picked 2026-09-07
+   (E2.1) - the reader's own line, beside the other things the reader does,
+   leaving the meta line to the machine, and drawn only under the pointer. The
+   `vd--on` class is the half of that the server can know: a story already
+   carrying a verdict keeps its two words visible at rest. Everything else
+   about the reveal is three rules in `theme.css`, which is where it belongs -
+   the control does not change, only when it is painted. #}
 <div class="item__f" id="foot-{{ story.id }}">
   {% if story.tags %}
   {# Three, not all of them: the tag row is orientation, and a story
@@ -30,7 +33,7 @@
   {# Two words, the chips' face and size, the chosen one in full ink with a
      check after it. No fill and no colour: the accent's jobs are taken, and a
      verdict is the reader's own note, not a state of the machine. #}
-  <span class="vd" role="group">
+  <span class="vd{% if story.verdict %} vd--on{% endif %}" role="group">
     {%- for value in ('ok', 'wrong') %}
     <button type="button"
             {# Both states are written, not just the pressed one: a toggle that

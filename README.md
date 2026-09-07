@@ -223,7 +223,7 @@ failed run. `DESIGN.md` lists everything that was deleted and why.
 
 ```bash
 uv sync
-uv run pytest          # 358 tests, no API key needed, no network calls
+uv run pytest          # 360 tests, no API key needed, no network calls
 uv run ruff check .
 uv run pre-commit install
 ```
