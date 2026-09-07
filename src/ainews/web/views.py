@@ -39,6 +39,7 @@ def get_templates() -> Jinja2Templates:
     templates.env.filters["stamp"] = stamp_filter
     templates.env.filters["money"] = format_money
     templates.env.filters["duration"] = format_duration
+    templates.env.filters["number"] = number_filter
     templates.env.filters["band"] = impact_band
     templates.env.filters["paragraphs"] = split_paragraphs
     return templates
@@ -146,6 +147,21 @@ def stamp_filter(context, value: datetime | None) -> str:
     return format_stamp(value, context.get("language", "en"))
 
 
+@pass_context
+def number_filter(context, value: int | None) -> str:
+    """`|number` in a template: a count grouped in the page's own notation.
+
+    The separator is a string in `i18n` for the same reason `u_sep` is - notation
+    is a language's habit, not a rule to be hard-coded in a formatter - but this
+    one carries more than a space. "." and "," are each other's decimal point
+    between these two languages, so a token count grouped the English way does
+    not read as foreign on a Turkish page, it reads as a different number:
+    "50,521" is fifty-and-a-half.
+    """
+    sep = strings(context.get("language", "en")).get("n_sep", ",")
+    return f"{value or 0:,}".replace(",", sep)
+
+
 def format_money(value: float | None) -> str:
     return f"${value or 0:.3f}"
 
@@ -155,6 +171,34 @@ def format_duration(seconds: float | None) -> str:
         return "—"
     minutes, rest = divmod(int(seconds), 60)
     return f"{minutes}:{rest:02d}"
+
+
+def format_step_duration(t: dict[str, str], seconds: float | None) -> str:
+    """One node's span, at a node's scale.
+
+    `format_duration` is a run's clock and reads `0:41`. A step is often under a
+    second, and four of the six nodes in a digest are: on that scale the run's
+    format collapses `0.4s` and `0.3s` and `24.6s`'s neighbours all to `0:00`,
+    which was visible the first time the page was drawn against a real run and
+    invisible in the mockup, where the numbers were typed by hand.
+
+    So: seconds with one decimal under a minute, the run's own shape above it.
+    A step too fast to have a first decimal still gets one rather than a zero -
+    `< 0.1s` is a measurement, `0.0s` reads as a step that did not happen.
+
+    The units and the decimal point come from `t`, which is why this takes the
+    strings dict and is not a Jinja filter: Turkish writes 24,6 and English
+    24.6, and the same three characters printed in both languages would be a
+    different number in one of them.
+    """
+    if seconds is None:
+        return "—"
+    if seconds < 60:
+        if seconds < 0.05:
+            return f"< 0{t['d_sep']}1{t['u_sep']}{t['u_sec']}"
+        return f"{seconds:.1f}".replace(".", t["d_sep"]) + t["u_sep"] + t["u_sec"]
+    minutes, rest = divmod(int(seconds), 60)
+    return f"{minutes}{t['u_sep']}{t['u_min']}{t['u_sep']}{rest}{t['u_sep']}{t['u_sec']}"
 
 
 BLANK_LINE = re.compile(r"\n\s*\n")

@@ -11,9 +11,11 @@
      table, and colour appears only on a failure. A run detail page that looked
      like a different product would be a second design for the same machine.
 
-     One choice in it is open and provisional: how a step's span is drawn. The
-     bar is the first answer, not the settled one - what it is drawn from is
-     `run_steps`, and that does not change whichever way the round goes. #}
+     How a step's span is drawn was the one open choice, settled by the round in
+     `mockups/v5/variants-run-steps.html`: the duration and the share are one
+     column, the bar drawn to the share with the number on top of it. Two
+     columns saying the same size cost a sixth column on a table that was
+     already overflowing at the note. #}
   <section class="ph ph--back">
     <h1>{{ t.run_heading }} <span class="num">{{ run.id[:8] }}</span></h1>
     <a class="back" href="/runs?lang={{ language }}">{{ t.back_to_runs }}</a>
@@ -35,7 +37,7 @@
     <div>
       <p class="unit__h">{{ t.col_cost }}</p>
       <p class="advice__n num">{{ run.est_cost_usd|money }}</p>
-      <p class="advice__s">{{ t.fact_tokens }} {{ '{:,}'.format(tokens) }}</p>
+      <p class="advice__s">{{ t.fact_tokens }} {{ tokens|number }}</p>
     </div>
     {% if models %}
     {# Which models wrote this bulletin. ADR 0020 made that a choice made at the
@@ -52,7 +54,7 @@
   </section>
 
   <section class="panel">
-    {# No table at all when there is nothing in it. Six empty column headings
+    {# No table at all when there is nothing in it. Five empty column headings
        over a sentence explaining that there are no steps is a table pretending
        to have failed to load, rather than a run that predates the record. #}
     {% if steps %}
@@ -61,7 +63,7 @@
         <thead>
           <tr>
             <th>{{ t.col_step }}</th><th>{{ t.col_flow }}</th>
-            <th>{{ t.col_duration }}</th><th>{{ t.col_share }}</th>
+            <th>{{ t.col_duration }}</th>
             <th>{{ t.col_cost }}</th><th>{{ t.col_note }}</th>
           </tr>
         </thead>
@@ -79,11 +81,13 @@
                    else '%s → %s'|format(s.n_in, s.n_out) }}
               {%- else -%}—{%- endif -%}
             </td>
-            <td class="num">{{ s.duration_seconds|duration }}</td>
-            {# The bar is the run's wall clock, not the sum of the steps, so the
-               row widths deliberately do not add up to full: what is missing is
-               the scheduling between supersteps, and it is worth seeing. #}
-            <td class="share"><span style="--w: {{ (row.share * 100)|round(1) }}%"></span></td>
+            {# One column, one magnitude. The bar's denominator is the run's
+               wall clock and not the sum of the steps, so the widths
+               deliberately do not add up to full: what is missing is the
+               scheduling between supersteps, and it is worth seeing. #}
+            <td class="span num">
+              <span class="span__t"><i style="--w: {{ (row.share * 100)|round(1) }}%"></i><b>{{ row.span }}</b></span>
+            </td>
             <td class="num">{{ s.est_cost_usd|money if s.est_cost_usd else '—' }}</td>
             {# Written by the route, from a key the node recorded and the
                numbers with it: the last English string on a Turkish page used

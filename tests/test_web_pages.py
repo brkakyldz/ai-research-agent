@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import jinja2
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -20,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from ainews.config import Settings
 from ainews.db import Article, Run, Source, Summary
 from ainews.web.app import create_app
-from ainews.web.i18n import LANGUAGE_COOKIE, THEME_COOKIE
+from ainews.web.i18n import LANGUAGE_COOKIE, STRINGS, THEME_COOKIE, strings
 from ainews.web.views import MONTHS, format_stamp, split_paragraphs
 
 TITLES = [
@@ -1037,3 +1038,29 @@ def test_the_why_plate_is_never_the_surface_it_is_inset_into(client: TestClient)
     plate, panel = token("plate"), token("panel")
     assert plate[0] != panel[0], "the plate vanishes into the card in the light theme"
     assert plate[1] != panel[1], "the plate vanishes into the card in the dark theme"
+
+
+# -- the two dictionaries ------------------------------------------------------
+
+
+def test_the_two_dictionaries_hold_the_same_words() -> None:
+    """One language gaining a string and the other not is the whole failure mode
+    of keeping two dictionaries by hand, and it is invisible on screen: the page
+    that is missing the key renders the label blank."""
+    assert set(STRINGS["tr"]) == set(STRINGS["en"])
+
+
+def test_a_missing_interface_string_is_loud() -> None:
+    """`i18n.py` opens by saying a missing key is loud rather than a silent
+    fallback nobody notices. It was not: Jinja swallows `LookupError` on both
+    `t.foo` and `t["foo"]` and renders `Undefined` as the empty string, so a
+    dropped key was a blank label in one language with nothing in the log."""
+    t = strings("tr")
+    template = jinja2.Environment().from_string("[{{ t.nope }}][{{ t['nope'] }}]")
+
+    with pytest.raises(jinja2.UndefinedError, match="nope"):
+        template.render(t=t)
+
+    # The lookups that want a quiet miss ask instead of catching, and keep it.
+    assert t.get("nope") is None
+    assert "nope" not in t

@@ -180,3 +180,59 @@ def test_the_fragment_follows_the_interface_language(
         "/verdict?lang=en", data={"summary_id": summaries[0], "verdict": "wrong"}
     ).text
     assert "Wrong" in text and "What did it get wrong?" in text
+
+
+# -- the counter on /runs (U1) ------------------------------------------------
+
+
+def test_the_runs_page_says_how_many_summaries_carry_a_verdict(
+    client: TestClient, summaries: list[int]
+) -> None:
+    """The number is the point of the step, so the page has to state it before
+    anything is labelled: "0 / 2" is the sentence that says the count exists."""
+    body = client.get("/runs?lang=tr").text
+
+    assert "Karar verilen" in body
+    assert "0<small> / 2</small>" in body
+
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "ok"})
+    assert "1<small> / 2</small>" in client.get("/runs?lang=tr").text
+
+
+def test_the_counter_states_a_number_and_nothing_else(
+    client: TestClient, summaries: list[int]
+) -> None:
+    """No target, no bar, no reminder. The calibration half of PLAN-EVALS is
+    parked behind this count; that is the tool's problem and not a debt the
+    reader owes it, and this test is what keeps the next pass from adding one."""
+    body = client.get("/runs?lang=en").text
+
+    assert "With a verdict" in body
+    assert "100" not in body.split("With a verdict", 1)[1][:400]
+    assert "progress" not in body
+
+
+async def test_a_database_with_no_summaries_still_renders_the_counter(
+    client: TestClient, session: AsyncSession
+) -> None:
+    """`verdict_progress` counts and never divides, so an empty database is a
+    row of zeroes rather than the page that would have had to guard a fraction."""
+    from ainews.web import queries
+
+    progress = await queries.verdict_progress(session)
+    assert (progress.labelled, progress.wrong, progress.total, progress.ok) == (0, 0, 0, 0)
+    assert "0<small> / 0</small>" in client.get("/runs?lang=en").text
+
+
+async def test_the_counter_tells_the_two_labels_apart(
+    client: TestClient, summaries: list[int], session: AsyncSession
+) -> None:
+    """`wrong` is the class the judge's TPR has no denominator without, so it is
+    counted separately even though V1 draws only the total (PLAN-EVALS E5)."""
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "ok"})
+    client.post("/verdict", data={"summary_id": summaries[1], "verdict": "wrong", "note": "yok"})
+
+    from ainews.web import queries
+
+    progress = await queries.verdict_progress(session)
+    assert (progress.labelled, progress.wrong, progress.ok) == (2, 1, 1)

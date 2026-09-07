@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, get_settings
@@ -488,6 +488,53 @@ async def recent_activity(session: AsyncSession, n_days: int = 7) -> Activity:
             )
         ).scalar_one(),
     )
+
+
+@dataclass(slots=True)
+class VerdictProgress:
+    """How many summaries carry the reader's own call on them.
+
+    The only eval number the interface can move. Everything else in
+    `PLAN-EVALS.md` is produced by spending money at a terminal; a label is
+    produced by a person reading a story and pressing a word, and nothing in the
+    app had ever mentioned that the count exists.
+
+    It matters because the calibration half of the evaluation plan is parked
+    behind it. `judge.calibrate` computes TPR against `wrong` labels and TNR
+    against `ok` ones; `judge_labelled` refuses to trust a class under thirty,
+    and E5 gates the judge-prompt rewrite on 100. With three labels and no
+    `wrong` among them, TPR has no denominator at all.
+
+    Read straight off `verdicts` and `summaries` - two tables `db/models.py`
+    owns and the web layer already reads. Nothing from `evals/` is imported,
+    which is ADR 0019 §2: a recorded measurement is not a measurement being
+    made.
+    """
+
+    labelled: int
+    wrong: int
+    total: int
+
+    @property
+    def ok(self) -> int:
+        return self.labelled - self.wrong
+
+
+async def verdict_progress(session: AsyncSession) -> VerdictProgress:
+    """One row of counts. Never divides, so an empty database is not a case."""
+    labelled, wrong = (
+        await session.execute(
+            select(
+                func.count(Verdict.id),
+                func.count(case((Verdict.verdict == "wrong", 1))),
+            )
+        )
+    ).one()
+    # Every summary that has ever been written, not just today's: a reader
+    # labelling an archived story is doing exactly the work the judge needs, and
+    # a denominator that shrank overnight would be a number that goes backwards.
+    total = (await session.execute(select(func.count(Summary.id)))).scalar_one()
+    return VerdictProgress(labelled=labelled, wrong=wrong, total=total)
 
 
 async def run_by_id(session: AsyncSession, run_id: str) -> Run | None:

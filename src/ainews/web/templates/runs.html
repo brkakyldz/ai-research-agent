@@ -92,6 +92,17 @@
       <p class="unit__h">{{ t.cost_month }}</p>
       <p class="totals__n num">{{ activity.cost_month|money }}</p>
     </div>
+    {# The one evaluation number the interface can move, and the only one it
+       ever could: a label exists because a person read a story and pressed a
+       word. It is here and not on the digest because ADR 0013 keeps the
+       reading page for the reading - and it states a count and stops. No
+       target, no bar, no reminder: the calibration half of PLAN-EVALS is
+       parked behind this number, and that is the tool's problem rather than a
+       debt the reader owes it. #}
+    <div>
+      <p class="unit__h">{{ t.verdicts_labelled }}</p>
+      <p class="totals__n num">{{ verdicts.labelled }}<small> / {{ verdicts.total }}</small></p>
+    </div>
   </section>
 
   <section class="panel">

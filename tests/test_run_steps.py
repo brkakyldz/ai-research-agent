@@ -329,6 +329,21 @@ async def test_a_node_the_dictionary_no_longer_knows_still_renders(
     assert "triage" in response.text
 
 
+async def test_a_token_count_is_grouped_in_the_pages_own_notation(
+    client: TestClient, session: AsyncSession, settings: Settings
+) -> None:
+    """Turkish groups thousands with "." and English with ",", and the two are
+    each other's decimal point. A count grouped the English way on a Turkish
+    page does not read as foreign, it reads as a different number: "50,521"
+    is fifty-and-a-half."""
+    run = Run(kind="manual", language="tr", finished_at=utcnow(), tokens_in=50_000, tokens_out=521)
+    session.add(run)
+    await session.commit()
+
+    assert "50.521" in client.get(f"/runs/{run.id}?lang=tr").text
+    assert "50,521" in client.get(f"/runs/{run.id}?lang=en").text
+
+
 def test_an_unknown_run_is_a_404_inside_the_shell(client: TestClient) -> None:
     response = client.get("/runs/deadbeef?lang=en")
     assert response.status_code == 404
@@ -358,3 +373,9 @@ def test_a_note_falls_back_to_what_was_stored() -> None:
     assert note_text(t, '{"k":"nothing_here","n":1}') == '{"k":"nothing_here","n":1}'
     assert note_text(t, '{"k":"dedupe","wrong":1}') == '{"k":"dedupe","wrong":1}'
     assert note_text(t, "{not json") == "{not json"
+    # "Numbers that do not fit the sentence" has two halves that raise different
+    # exceptions: a named field the object does not carry is the `KeyError`
+    # above, a positional field in the string is an `IndexError`. A dictionary
+    # written with `{}` instead of `{n}` must fall back like everything else.
+    positional = dict(t, note_probe="{} of {}")
+    assert note_text(positional, '{"k":"probe","n":1}') == '{"k":"probe","n":1}'

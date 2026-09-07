@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from typing import Final
 
+from jinja2 import UndefinedError
+
 from ainews.config import Language, get_settings
 
 LANGUAGE_COOKIE: Final = "digest_lang"
@@ -91,6 +93,16 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         # The space between a number and its unit is a language's own habit, so
         # it is a string here rather than a rule in two formatters.
         "u_sep": " ",
+        # Thousands, for the same reason and with more at stake: Turkish groups
+        # with "." and English with ",", and the two are each other's decimal
+        # point - so the wrong one does not merely look foreign, it reads as a
+        # different number. "50,521 token" is fifty-and-a-half to a Turkish eye.
+        "n_sep": ".",
+        # And the decimal point, which is the same two characters swapped. A
+        # step that took 24.6 seconds is "24,6 sn" here and "24.6s" in English;
+        # printing one form in both would be a different number in one of them.
+        "d_sep": ",",
+        "u_sec": "sn",
         "u_min": "dk",
         "u_hour": "sa",
         "u_day": "gün",
@@ -138,6 +150,10 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "verdict_note": "Neyi yanlış yaptı? (isteğe bağlı)",
         "verdict_save": "Kaydet",
         "verdict_saved": "Kaydedildi",
+        # How many summaries carry one, on `/runs` beside the spend. A count and
+        # not a call: the label names the thing, and the figure is a fraction
+        # because "3" on its own says nothing without the 118 under it.
+        "verdicts_labelled": "Karar verilen",
         "more_topics": "Daha fazla",
         "topics": "Konular",
         "skip_to_content": "İçeriğe geç",
@@ -190,7 +206,6 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "no_steps": "Bu çalışma adım kaydından önce yapıldı; kırılımı yok.",
         "col_step": "Adım",
         "col_flow": "Akış",
-        "col_share": "Pay",
         "col_note": "Not",
         "fact_tokens": "Token",
         "fact_models": "Modeller",
@@ -277,6 +292,9 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "late_by": "{t} ago",
         "u_moment": "under a minute",
         "u_sep": "",
+        "n_sep": ",",
+        "d_sep": ".",
+        "u_sec": "s",
         "u_min": "m",
         "u_hour": "h",
         "u_day": "d",
@@ -321,6 +339,7 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "verdict_note": "What did it get wrong? (optional)",
         "verdict_save": "Save",
         "verdict_saved": "Saved",
+        "verdicts_labelled": "With a verdict",
         "more_topics": "More",
         "topics": "Topics",
         "skip_to_content": "Skip to content",
@@ -364,7 +383,6 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "no_steps": "This run predates step recording; there is no breakdown.",
         "col_step": "Step",
         "col_flow": "Flow",
-        "col_share": "Share",
         "col_note": "Note",
         "fact_tokens": "Tokens",
         "fact_models": "Models",
@@ -430,8 +448,30 @@ def resolve_theme(query: str | None, cookie: str | None) -> str:
     return "system"
 
 
-def strings(language: Language) -> dict[str, str]:
-    return STRINGS[language]
+class Strings(dict[str, str]):
+    """The page's dictionary, which refuses to be missing a word quietly.
+
+    The paragraph at the top of this file says a missing key is loud. It was
+    not: Jinja catches `LookupError` on both `t.foo` and `t["foo"]` and renders
+    `Undefined` as the empty string, so a key dropped from one dictionary showed
+    up as a blank label in that language only - no traceback, no test failure,
+    nothing in the log. That is worse than the silent English fallback the two
+    dictionaries were chosen over, because an English word at least tells you it
+    is there.
+
+    `UndefinedError` is what makes it loud: it is neither `TypeError` nor
+    `LookupError`, so Jinja lets it through instead of swallowing it, and it
+    names the key. The lookups that *want* a quiet miss say so by asking rather
+    than catching - `in` for the run detail page's fallback to a bare node name,
+    `.get()` in `note_text` - and neither goes through `__missing__`.
+    """
+
+    def __missing__(self, key: str) -> str:
+        raise UndefinedError(f"no interface string named {key!r}")
+
+
+def strings(language: Language) -> Strings:
+    return Strings(STRINGS[language])
 
 
 def note_text(t: dict[str, str], detail: str | None) -> str:
@@ -453,6 +493,15 @@ def note_text(t: dict[str, str], detail: str | None) -> str:
         return detail
     try:
         parts = json.loads(detail)
-        return t["note_" + parts.pop("k")].format(**parts)
-    except (ValueError, KeyError, TypeError, AttributeError):
+        # `.get`, not a subscript: a miss on `t` is now a loud `UndefinedError`
+        # (see `Strings`), and this is the one lookup in the app that wants a
+        # miss to be quiet. Asking rather than catching says so on the line.
+        sentence = t.get("note_" + parts.pop("k"))
+        return sentence.format(**parts) if sentence is not None else detail
+    # `LookupError` covers both halves of "numbers that do not fit the sentence":
+    # a named field the object does not carry raises `KeyError`, a positional
+    # `{}` left in the string raises `IndexError`. Only the first used to be
+    # caught, so one `{}` written into a dictionary would have taken the page
+    # down over its least important cell.
+    except (ValueError, LookupError, TypeError, AttributeError):
         return detail

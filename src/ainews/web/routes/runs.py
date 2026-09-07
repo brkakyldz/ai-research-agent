@@ -54,6 +54,7 @@ from ainews.web.i18n import LANGUAGES, note_text, strings
 from ainews.web.views import (
     build_advice,
     count_enabled_sources,
+    format_step_duration,
     get_templates,
     language_of,
     remember_preferences,
@@ -238,6 +239,11 @@ async def runs_page(
             # execution metrics, which ADR 0009 put on this page and this page
             # alone; the side column had kept a copy.
             "activity": await queries.recent_activity(session),
+            # The one eval number the interface can move, and until now the one
+            # nothing in the interface mentioned. Beside the spend because that
+            # is the strip of figures the machine keeps about itself, and this
+            # page is where those live (ADR 0009, 0013).
+            "verdicts": await queries.verdict_progress(session),
         }
     )
     response = get_templates().TemplateResponse(request, "runs.html", context)
@@ -365,6 +371,10 @@ async def run_detail(
                     # and its numbers, and this is the only layer that knows
                     # which dictionary to read them through.
                     "note": note_text(t, s.detail),
+                    # A node's span at a node's scale, and in the reader's
+                    # notation: `format_duration` is the run's clock and reads
+                    # four of the six nodes in a digest as "0:00".
+                    "span": format_step_duration(t, s.duration_seconds),
                 }
                 for s in steps
             ],

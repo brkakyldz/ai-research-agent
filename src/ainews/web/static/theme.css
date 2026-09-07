@@ -1640,6 +1640,12 @@ kbd {
    three cards. */
 .totals { display: flex; gap: 40px; padding: 2px 2px 4px; flex-wrap: wrap; }
 .totals__n { font-size: 21px; line-height: 1.1; }
+/* The fourth unit is not money, so its figure is a fraction: "3" beside three
+   dollar amounts says nothing without the 118 under it, and the denominator is
+   the context rather than a second figure. It steps down two sizes and one ink
+   for that reason - a 21px "/ 118" would read as two numbers of equal weight.
+   Variants in `mockups/v5/variants-verdict-count.html`; V1 shipped. */
+.totals__n small { font-size: 13px; color: var(--ink-3); }
 
 /* ---------- tables ---------- */
 
@@ -1711,24 +1717,37 @@ tr:hover td.strong a { text-decoration: underline; text-underline-offset: 3px; }
 .back { margin-left: auto; font-size: 12.5px; color: var(--ink-3); }
 .back:hover { color: var(--ink-1); }
 
-/* The share of the run's wall clock, as a bar rather than a percentage: the
-   question it answers is "which node ate the run", and a reader compares five
-   lengths faster than five numbers. It is drawn in ink and not in the accent -
-   the accent belongs to the rail's button (DESIGN.md) - and the widths do not
-   add up to the full column on purpose: what is missing is the scheduling
-   between supersteps, and a bar normalised to fill would hide it. */
-td.share { width: 22%; min-width: 90px; }
-td.share span {
-  display: block;
-  height: 6px;
-  border-radius: 3px;
+/* A step's duration and its share of the run, as one object: the bar is drawn
+   to the share and the number sits on top of it. The question the column
+   answers is "which node ate the run", and a reader compares six lengths faster
+   than six numbers - but the number is the thing being compared, so a bar in a
+   column of its own said the same size twice and cost the table a sixth column.
+   The variants are in `mockups/v5/variants-run-steps.html`; S3 shipped, and
+   what it bought went to the note column, the only one that was overflowing.
+
+   It is drawn in ink and not in the accent - the accent belongs to the rail's
+   button (DESIGN.md) - and the widths do not add up to the full column on
+   purpose: what is missing is the scheduling between supersteps, and a bar
+   normalised to fill would claim the pipeline is busy when it is waiting. */
+td.span { width: 26%; min-width: 150px; padding-right: 20px; }
+.span__t { position: relative; display: block; height: 20px; line-height: 20px; }
+/* The bar starts where the number starts, not at the cell's edge. Left of the
+   text, a step too short to draw was three pixels standing on its own and read
+   as a text cursor; under the first digit the same three pixels read as a
+   highlight. A step that ran keeps a mark either way - vanishing into an empty
+   cell would be the one thing worth avoiding. */
+.span__t i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: max(4px, var(--w, 0%));
+  border-radius: 4px;
   background: var(--ink-3);
-  /* A step too short to draw is still a step that ran, so it keeps a stub
-     rather than vanishing into an empty cell. */
-  width: max(3px, var(--w, 0%));
-  opacity: 0.55;
+  opacity: 0.28;
 }
-tr:hover td.share span { opacity: 0.85; }
+.span__t b { position: relative; padding-left: 6px; font-weight: 400; color: var(--ink-1); }
+tr:hover .span__t i { opacity: 0.42; }
 
 /* ---------- forms ---------- */
 
