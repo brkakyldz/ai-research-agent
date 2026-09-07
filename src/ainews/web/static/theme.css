@@ -342,6 +342,58 @@ svg { display: block; }
    happens to sit above a panel. */
 .app--side .top-bar { grid-template-columns: var(--rail) minmax(min-content, 1fr) minmax(0, 1fr) var(--side-w); }
 
+/* The reading scrolls, the shell does not. Until 2026-09-07 the window was the
+   only scroller on the page: the rails were `position: sticky` inside a
+   document that ran the full height of the feed, so a wheel anywhere - over the
+   navigation, over the instruments, over the bar - moved the stories. Sticky
+   pins a column in place; it does not make it a column of its own. Berke's
+   note: scrolling on the left bar still pulls the news down.
+
+   The shell is exactly the window now and never scrolls. The three cells under
+   the bar are three scrollers, each ending where it is drawn, so a wheel acts
+   on whatever is under the pointer and on nothing else. `overscroll-behavior:
+   contain` is what keeps that true at the ends: without it a column scrolled
+   past its last row hands the rest of the gesture to its parent, which is the
+   same bug arriving one wheel-click later.
+
+   Guarded at 1241px, and the guard is the same one the layout already has.
+   Below it the right rail stops being a column and becomes the last band of the
+   page in row three (see the 1240px block): a locked shell would put that band
+   below the window's edge with nothing able to reach it. Under 1241px the
+   document scrolls, which is what a page laid out as one column wants. */
+@media (min-width: 1241px) {
+  .app {
+    height: 100vh;
+    height: 100dvh;
+    /* `minmax(0, 1fr)`, not `1fr`: a grid item's automatic minimum is its
+       content, and a track floored at the height of the whole feed is a track
+       that overflows the window instead of scrolling inside it. */
+    grid-template-rows: minmax(var(--bar-h), auto) minmax(0, 1fr);
+    overflow: hidden;
+  }
+  /* Each of the three takes the row's full height and its own overflow. The
+     rails keep their `position: sticky` and it costs nothing: with no scrolling
+     ancestor left, sticky computes as relative.
+
+     Written as children of the shell rather than as three bare classes, and
+     that is specificity rather than pedantry: `.side` is given a height and an
+     overflow of its own further down the file, and one class against one class
+     is settled by which came last. These are the shell's own cells; saying so
+     is also what makes the rule win. */
+  .app > .rail, .app > .col, .app > .side { height: 100%; min-height: 0; overscroll-behavior: contain; }
+  .app > .rail, .app > .col { overflow-y: auto; }
+  /* The scrollbar's lane is reserved whether or not the reading overflows, for
+     the reason the right rail reserves its own: a short page and a long one
+     cannot disagree about where the column ends. Same thin thumb in the same
+     tone, so the two scrollers read as one shell rather than as two widgets. */
+  .app > .col {
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--chart-bar) transparent;
+  }
+  .app > .rail { scrollbar-width: thin; scrollbar-color: var(--chart-bar) transparent; }
+}
+
 /* ---------- left rail: navigation, and nothing else ---------- */
 
 .rail {
