@@ -15,6 +15,7 @@ makes a link shareable and a screenshot reproducible.
 
 from __future__ import annotations
 
+import json
 from typing import Final
 
 from ainews.config import Language, get_settings
@@ -206,6 +207,13 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "flow_summarize": "{a} aday → {b} özet",
         "flow_rank": "{a} özet → {b} seçilen",
         "flow_persist": "{a} özet → {b} satır",
+        # A step's note. Recorded by the node as a key and its numbers
+        # (`StepRecord.note_key`) so that the one column of the run detail page
+        # that used to be English is written here like every other label.
+        "note_collect": "{sources} kaynak, {unchanged} değişmemiş",
+        "note_dedupe": "{dropped} tekrar ayıklandı",
+        "note_enrich": "{fetched} indirildi, {tavily} Tavily ile",
+        "note_summarize_silent": "{n}/{of} dal özet üretmedi",
         "col_source": "Kaynak",
         "col_weight": "Ağırlık",
         "col_last": "Son durum",
@@ -373,6 +381,10 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "flow_summarize": "{a} candidates → {b} summaries",
         "flow_rank": "{a} summaries → {b} chosen",
         "flow_persist": "{a} summaries → {b} rows",
+        "note_collect": "{sources} source(s), {unchanged} unchanged",
+        "note_dedupe": "{dropped} restatement(s) dropped",
+        "note_enrich": "{fetched} fetched, {tavily} via Tavily",
+        "note_summarize_silent": "{n} of {of} branches produced no summary",
         "col_source": "Source",
         "col_weight": "Weight",
         "col_last": "Last status",
@@ -420,3 +432,27 @@ def resolve_theme(query: str | None, cookie: str | None) -> str:
 
 def strings(language: Language) -> dict[str, str]:
     return STRINGS[language]
+
+
+def note_text(t: dict[str, str], detail: str | None) -> str:
+    """One step's note, written in the reader's language.
+
+    `run_steps.detail` carries two kinds of thing and the shape tells them
+    apart. A JSON object is a sentence the pipeline recorded as its parts -
+    `{"k": "dedupe", "dropped": 7}` - and it is written out here from
+    `note_<k>`. Anything else is machine output that was never in a language:
+    a feed's error text, an exception's repr. Those are printed verbatim.
+
+    Every failure falls back to printing what was stored. A note is the least
+    important cell on the page, and a run detail that 500s because a key was
+    renamed would be worse than a run detail with one row of JSON in it.
+    """
+    if not detail:
+        return ""
+    if not detail.startswith("{"):
+        return detail
+    try:
+        parts = json.loads(detail)
+        return t["note_" + parts.pop("k")].format(**parts)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return detail

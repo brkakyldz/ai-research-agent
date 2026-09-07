@@ -8,6 +8,7 @@ breakdown: it would be a second set of numbers about the same two minutes.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from ainews.config import Settings
 from ainews.db import Run, RunStep
+from ainews.db.models import utcnow
 from ainews.pipeline import graph as graph_module
 from ainews.pipeline import steps as steps_module
 from ainews.pipeline.nodes import rank as rank_module
@@ -24,6 +26,7 @@ from ainews.pipeline.nodes import summarize as summarize_module
 from ainews.pipeline.state import RankedDigest
 from ainews.pipeline.steps import step
 from ainews.web.app import create_app
+from ainews.web.i18n import note_text, strings
 from test_graph import SUMMARY, FakeLLM, _no_collect, _no_enrich, _seed_articles
 
 INITIAL: dict[str, Any] = {
@@ -170,7 +173,14 @@ async def test_a_partly_failed_fan_out_says_so(
     assert by_node["summarize"].status == "partial"
     assert by_node["summarize"].n_in == 3
     assert by_node["summarize"].n_out == 2
-    assert "1 of 3" in by_node["summarize"].detail
+    # Recorded as a key and its numbers, not as a sentence: the note is written
+    # in the reader's language by `note_text`, and the row has to survive being
+    # read by a Turkish page (ADR 0022, `steps.py`).
+    assert json.loads(by_node["summarize"].detail) == {"k": "summarize_silent", "n": 1, "of": 3}
+    assert note_text(strings("en"), by_node["summarize"].detail) == (
+        "1 of 3 branches produced no summary"
+    )
+    assert note_text(strings("tr"), by_node["summarize"].detail) == "1/3 dal özet üretmedi"
 
 
 async def test_a_run_with_no_candidates_has_no_fan_out_row(
@@ -224,6 +234,29 @@ async def test_bookkeeping_never_kills_the_run(
     assert await _rows(session, run.id) == []
 
 
+async def test_the_fan_out_lookup_never_kills_the_run(
+    session: AsyncSession, settings: Settings, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`record_fan_out` reads two rows before it writes one, and it runs inside
+    `persist_node` ahead of `persist_run`. An unguarded read error there would
+    not lose one row of bookkeeping - it would lose the digest the run paid for,
+    because the node that writes it never gets to run."""
+
+    def explode(*_: object, **__: object) -> None:
+        raise RuntimeError("the disk is gone")
+
+    monkeypatch.setattr(steps_module, "session_scope", explode)
+    run = Run(kind="manual", language="tr")
+    session.add(run)
+    await session.commit()
+
+    await steps_module.record_fan_out(
+        {"run_id": run.id, "candidate_ids": [1, 2, 3], "summaries": []}  # type: ignore[arg-type]
+    )
+
+    assert await _rows(session, run.id) == []
+
+
 # -- the page -----------------------------------------------------------------
 
 
@@ -246,6 +279,15 @@ async def test_the_run_page_reads_each_node_in_its_own_words(
     # the first page that can say which choice was taken, because `runs` has no
     # column for it and `run_steps` does.
     assert "luna" in body and "terra" in body
+    # The note column. Recorded as a key and its numbers, so it is the reader's
+    # language on the page and JSON in the row - the one English string left on
+    # a Turkish page until U0.10.
+    assert "restatement(s) dropped" in body
+    assert '{"k":' not in body
+
+    turkish = client.get(f"/runs/{run.id}?lang=tr").text
+    assert "tekrar ayıklandı" in turkish
+    assert "restatement" not in turkish
 
 
 async def test_the_runs_table_links_into_the_run(
@@ -257,6 +299,34 @@ async def test_the_runs_table_links_into_the_run(
 ) -> None:
     run = await _run_the_graph(session, monkeypatch)
     assert f'href="/runs/{run.id}' in client.get("/runs?lang=en").text
+
+
+async def test_a_node_the_dictionary_no_longer_knows_still_renders(
+    client: TestClient, session: AsyncSession, settings: Settings
+) -> None:
+    """`run_steps` is history: a node renamed later leaves rows behind whose
+    label is gone from `i18n`. The template already falls back to the bare node
+    name; the route builds the models strip from the same dictionary and has to
+    fall back the same way, or an old run is a 500 instead of a record."""
+    run = Run(kind="manual", language="tr", finished_at=utcnow())
+    session.add(run)
+    await session.flush()
+    session.add(
+        RunStep(
+            run_id=run.id,
+            node="triage",
+            status="ok",
+            finished_at=utcnow(),
+            n_in=3,
+            n_out=2,
+            model="gpt-5.6-luna",
+        )
+    )
+    await session.commit()
+
+    response = client.get(f"/runs/{run.id}?lang=en")
+    assert response.status_code == 200
+    assert "triage" in response.text
 
 
 def test_an_unknown_run_is_a_404_inside_the_shell(client: TestClient) -> None:
@@ -272,3 +342,19 @@ def test_the_literal_run_routes_still_win_over_the_id(client: TestClient) -> Non
     as a run if the routes were declared the other way round."""
     for path in ("/runs/status", "/runs/confirm", "/runs/action"):
         assert client.get(f"{path}?lang=en").status_code == 200
+
+
+# The two kinds of thing `detail` carries, told apart by shape rather than by a
+# second column (`steps.py`). A note is a written sentence and gets translated;
+# a traceback and a feed's error text were never in a language, so they are
+# printed as they were stored.
+def test_a_note_falls_back_to_what_was_stored() -> None:
+    t = strings("tr")
+
+    assert note_text(t, None) == ""
+    assert note_text(t, "RuntimeError: upstream 500") == "RuntimeError: upstream 500"
+    # A key nobody translated, and numbers that do not fit the sentence: both
+    # print the row rather than 500ing the page.
+    assert note_text(t, '{"k":"nothing_here","n":1}') == '{"k":"nothing_here","n":1}'
+    assert note_text(t, '{"k":"dedupe","wrong":1}') == '{"k":"dedupe","wrong":1}'
+    assert note_text(t, "{not json") == "{not json"

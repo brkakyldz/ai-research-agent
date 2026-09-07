@@ -6,7 +6,7 @@ run - which node ate the two minutes, which node ate the eleven cents - had no
 answer short of reading the log. `run_steps` answers both, and `/runs/<id>`
 reads it (ADR 0022).
 
-Three properties are deliberate.
+Four properties are deliberate.
 
 **The nodes are untouched.** Every call into this module is in `graph.py`, in the
 thin adapters that already stand between the graph and the node functions, or in
@@ -25,13 +25,29 @@ whether the body returned or raised, so a run that died at `rank` shows four
 finished steps and a fifth carrying the exception. A run whose failure left no
 trace of where it failed would be the one thing this table exists to prevent.
 
+**A note is a key and its numbers, not a sentence.** The first cut wrote
+`f"{n} restatement(s) dropped"` here, which put the one English string on a page
+whose every other word comes from `i18n`. A node now records `note_key("dedupe",
+dropped=n)` and the web layer writes the sentence in the reader's language. The
+price is that a node with something new to say needs a string in two
+dictionaries rather than an f-string, and that is the right price: the
+alternative was an interface that switches to Turkish except for the column
+nobody translated.
+
+Raw machine output is the exception and stays raw - a feed's error text and an
+exception's `repr` are not written in any language, and ADR 0011 already says
+the monospaced face is where machine output lives. `note()` is that door.
+
 Nothing here may raise into the pipeline. A bookkeeping insert that can kill a
 paid run is worse than no bookkeeping - the same judgement ADR 0018 made about
-tracing - so `_write` swallows and logs.
+tracing - so `_write` swallows and logs, and so does `record_fan_out`, which
+reads two rows before it writes one and runs ahead of the node that persists the
+digest.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -77,7 +93,23 @@ class StepRecord:
         self.model, self.tokens_in, self.tokens_out = model, tokens_in, tokens_out
 
     def note(self, text: str) -> None:
+        """Machine output, verbatim: a feed's error, an exception's repr.
+
+        Anything a person wrote goes through `note_key` instead - see the module
+        docstring. This door exists because a Python traceback is not a string
+        that has a Turkish version.
+        """
         self.detail = text[:MAX_DETAIL_CHARS]
+
+    def note_key(self, key: str, **numbers: int) -> None:
+        """A sentence the web layer will write, recorded as its parts.
+
+        Stored as one compact JSON object in the same column, rather than as a
+        second column: `create_all` adds tables and not columns (ADR 0005), and
+        a `detail` that is sometimes structured and sometimes raw is a shape the
+        reader already has to handle - `note()` writes into the same field.
+        """
+        self.detail = json.dumps({"k": key, **numbers}, separators=(",", ":"))[:MAX_DETAIL_CHARS]
 
     @property
     def est_cost_usd(self) -> float:
@@ -132,7 +164,13 @@ async def step(run_id: str, node: str) -> AsyncIterator[StepRecord]:
 
 
 async def record_fan_out(state: PipelineState) -> None:
-    """The summarize node's row, assembled after the fact.
+    """The summarize node's row, assembled after the fact. Never raises.
+
+    Called before `persist_run` writes the digest, so the guard here is not
+    decoration: an unhandled read error would take the whole paid run with it
+    and leave nothing persisted, which is the opposite of what a bookkeeping
+    table is for. `_write` swallows its own insert; this swallows the two
+    lookups that precede it.
 
     The fan-out is the one node that cannot time itself: it is a hundred
     concurrent branches, and none of them knows when the first started or the
@@ -144,6 +182,13 @@ async def record_fan_out(state: PipelineState) -> None:
     Called from `persist_node`, because by then both neighbours have rows and
     the state carries every branch's tokens.
     """
+    try:
+        await _fan_out_row(state)
+    except Exception:
+        log.exception("could not record the fan-out of run %s", state.get("run_id"))
+
+
+async def _fan_out_row(state: PipelineState) -> None:
     run_id = state["run_id"]
     payloads = [s for s in (state.get("summaries") or []) if s["article_id"] != TOKEN_CARRIER_ID]
     n_in = len(state.get("candidate_ids") or [])
@@ -185,5 +230,5 @@ async def record_fan_out(state: PipelineState) -> None:
     )
     if n_out < n_in:
         record.status = "partial"
-        record.note(f"{n_in - n_out} of {n_in} branches produced no summary")
+        record.note_key("summarize_silent", n=n_in - n_out, of=n_in)
     await _write(run_id, "summarize", record, finished_at=ended)

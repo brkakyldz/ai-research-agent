@@ -92,7 +92,7 @@ async def run_collect(settings: Settings | None = None) -> str:
             async with session_scope() as session:
                 stats = await collect_articles(session, settings)
             marker.counts(stats.n_seen, stats.n_new)
-            marker.note(f"{stats.n_sources} source(s), {stats.n_not_modified} unchanged")
+            marker.note_key("collect", sources=stats.n_sources, unchanged=stats.n_not_modified)
             if stats.errors:
                 marker.status = "partial"
                 marker.note("; ".join(stats.errors))

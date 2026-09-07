@@ -85,7 +85,12 @@
                the scheduling between supersteps, and it is worth seeing. #}
             <td class="share"><span style="--w: {{ (row.share * 100)|round(1) }}%"></span></td>
             <td class="num">{{ s.est_cost_usd|money if s.est_cost_usd else '—' }}</td>
-            <td class="raw{% if s.status == 'error' %} bad{% endif %}">{{ s.detail or '' }}</td>
+            {# Written by the route, from a key the node recorded and the
+               numbers with it: the last English string on a Turkish page used
+               to live in this cell. Still the monospaced face - a feed's error
+               text and an exception's repr come through the same column
+               unchanged, because those were never written in a language. #}
+            <td class="raw{% if s.status == 'error' %} bad{% endif %}">{{ row.note }}</td>
           </tr>
           {% endfor %}
         </tbody>

@@ -35,7 +35,7 @@ from ainews.pipeline.nodes.persist import persist_run
 from ainews.pipeline.nodes.rank import rank_summaries
 from ainews.pipeline.nodes.summarize import summarize_article
 from ainews.pipeline.state import PipelineState, SummaryPayload
-from ainews.pipeline.steps import StepRecord, record_fan_out, step
+from ainews.pipeline.steps import TOKEN_CARRIER_ID, StepRecord, record_fan_out, step
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ async def collect_node(state: PipelineState) -> PipelineState:
         async with session_scope() as session:
             stats = await collect_articles(session)
         s.counts(stats.n_seen, stats.n_new)
-        s.note(f"{stats.n_sources} source(s), {stats.n_not_modified} unchanged")
+        s.note_key("collect", sources=stats.n_sources, unchanged=stats.n_not_modified)
         if stats.errors:
             s.status = "partial"
             s.note("; ".join(stats.errors))
@@ -72,7 +72,7 @@ async def dedupe_node(state: PipelineState) -> PipelineState:
         async with session_scope() as session:
             candidate_ids, stats = await dedupe_candidates(session)
         s.counts(stats.n_candidates, len(candidate_ids))
-        s.note(f"{stats.n_duplicates} restatement(s) dropped")
+        s.note_key("dedupe", dropped=stats.n_duplicates)
         return {"candidate_ids": candidate_ids}
 
 
@@ -90,7 +90,7 @@ async def enrich_node(state: PipelineState) -> PipelineState:
         s.counts(stats.n_examined, stats.n_examined - stats.n_still_empty)
         # Tavily is the only paid call in the run that costs credits rather than
         # tokens, so it is a note here rather than a number in the cost column.
-        s.note(f"{stats.n_fetched} fetched, {stats.n_tavily} via Tavily")
+        s.note_key("enrich", fetched=stats.n_fetched, tavily=stats.n_tavily)
         return {}
 
 
@@ -173,7 +173,9 @@ async def persist_node(state: PipelineState) -> PipelineState:
             run = await persist_run(session, state)
         # The carrier payload the rank node rides its tokens back on is not a
         # summary and must not be counted as one.
-        payloads = [p for p in (state.get("summaries") or []) if p["article_id"] != -1]
+        payloads = [
+            p for p in (state.get("summaries") or []) if p["article_id"] != TOKEN_CARRIER_ID
+        ]
         s.counts(len(payloads), run.n_summarized)
         return {}
 

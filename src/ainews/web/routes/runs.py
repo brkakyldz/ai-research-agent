@@ -50,7 +50,7 @@ from ainews.db import Run, db_session
 from ainews.pipeline.llm import model_options, resolve_model
 from ainews.pipeline.runner import digest_in_flight, release_digest, try_claim_digest
 from ainews.web import queries
-from ainews.web.i18n import LANGUAGES, strings
+from ainews.web.i18n import LANGUAGES, note_text, strings
 from ainews.web.views import (
     build_advice,
     count_enabled_sources,
@@ -357,7 +357,15 @@ async def run_detail(
         {
             "run": run,
             "steps": [
-                {"step": s, "share": (s.duration_seconds or 0.0) / span if span else 0.0}
+                {
+                    "step": s,
+                    "share": (s.duration_seconds or 0.0) / span if span else 0.0,
+                    # The note is written here and not in the template because
+                    # the language belongs to the request: a node records a key
+                    # and its numbers, and this is the only layer that knows
+                    # which dictionary to read them through.
+                    "note": note_text(t, s.detail),
+                }
                 for s in steps
             ],
             "tokens": run.tokens_in + run.tokens_out,
@@ -366,7 +374,15 @@ async def run_detail(
             # no column for it - `run_steps` is the first place it is written
             # down. Short names, because the tier is the whole question and the
             # ids differ in exactly that segment.
-            "models": [(t["step_" + s.node], s.model.rsplit("-", 1)[-1]) for s in steps if s.model],
+            # `t.get`, not `t[...]`, for the same reason the template falls back
+            # to the bare node name: `run_steps` is history, so a node renamed
+            # later leaves rows whose label no longer exists, and an old run must
+            # not 500 on a missing translation.
+            "models": [
+                (t.get("step_" + s.node, s.node), s.model.rsplit("-", 1)[-1])
+                for s in steps
+                if s.model
+            ],
         }
     )
     response = get_templates().TemplateResponse(request, "run_detail.html", context)
