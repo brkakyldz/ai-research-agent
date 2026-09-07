@@ -22,16 +22,16 @@ Two sentences shape everything below.
 **Nothing happens on a clock except the part that is free.** The feed poll runs
 every three hours and costs nothing. The digest spends money, so a person starts
 it — the page's job is to say when that is worth doing, and then get out of the
-way ([ADR 0015](docs/decisions/0015-the-digest-is-started-by-a-person.md)).
+way.
 
 **Nothing the model says is taken on trust.** Every summary carries a *doğru ·
 yanlış* under it, those labels are the ground truth a sampled grounding judge is
-calibrated against, and the numbers live in a dated file the commands regenerate
-([ADR 0019](docs/decisions/0019-evaluation-is-a-sibling-command-not-a-test.md)).
+calibrated against, and the numbers live in a dated file the commands
+regenerate.
 
-It is also a portfolio piece, so the parts usually skipped are not: an ADR for
-every expensive choice, tests that cover the failure modes rather than the happy
-path, and a design whose rationale is written next to the line it changed.
+It is also a portfolio piece, so the parts usually skipped are not: tests that
+cover the failure modes rather than the happy path, and a reason written next to
+every line that needed one.
 
 ## How it works
 
@@ -49,8 +49,7 @@ Six nodes, and each one exists because of a specific problem:
 | **persist** | Writes the summaries and closes the run row with tokens, cost and status. |
 
 Every node also writes down what it did — counts in and out, model, tokens, cost,
-duration — so a slow or expensive run can be read step by step at `/runs/<id>`
-([ADR 0022](docs/decisions/0022-a-run-is-recorded-node-by-node.md)).
+duration — so a slow or expensive run can be read step by step at `/runs/<id>`.
 
 The long version, from a feed being polled to a story being read, is
 [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md).
@@ -136,8 +135,7 @@ tier behind a 30-credit daily cap, and in practice rarely gets there, because tw
 cheaper enrichment tiers run first.
 
 That price is the reason every article gets summarised instead of a cheap
-title-only filter deciding in advance what is worth reading
-([ADR 0001](docs/decisions/0001-llm-gpt-5-6-luna.md)).
+title-only filter deciding in advance what is worth reading.
 
 ## Design, in one line
 
@@ -146,8 +144,8 @@ is carried by the typography itself — a headline's size and ink step come from
 the importance score, and below a 3 a story collapses to its headline. Colour is
 rationed and every job is named: the accent for *where am I standing* and for the
 one control that spends money, `--alarm` for a failed run, and three colours on
-the impact meter. [`DESIGN.md`](DESIGN.md) lists everything that was deleted and
-why.
+the impact meter. The reasoning is in
+[`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md#117-the-page-itself).
 
 ## Is it any good?
 
@@ -165,8 +163,7 @@ uv run ainews eval report                       # every number, appended to docs
 The first measurements are in [`docs/evals.md`](docs/evals.md): 4.4% of summaries
 over the word budget, two ungrounded figures, and a rank stability of **τ 0.47
 and 0.50** on the two real runs — both under the 0.6 that triggers a change to
-the ranker, which is why the ranker has not changed yet. The plan behind the
-numbers is [`docs/PLAN-EVALS.md`](docs/PLAN-EVALS.md).
+the ranker, which is why the ranker has not changed yet.
 
 ![How the evaluation works](docs/eval-architecture.png)
 
@@ -174,8 +171,7 @@ numbers is [`docs/PLAN-EVALS.md`](docs/PLAN-EVALS.md).
 
 - **One language per bulletin.** `tr` or `en`, chosen at the press. The switch in
   the bar is the *interface* language and filters nothing; when the bulletin on
-  screen was written in the other one, the bar says so
-  ([ADR 0017](docs/decisions/0017-the-language-switch-stops-choosing-the-content.md)).
+  screen was written in the other one, the bar says so.
 - **Nothing runs while you are away.** A week unopened is a week of collected
   articles and no bulletins; the next press summarises what is still inside the
   seven-day horizon and nothing older.
@@ -188,8 +184,8 @@ numbers is [`docs/PLAN-EVALS.md`](docs/PLAN-EVALS.md).
   disables itself and says so on `/sources`.
 - **Cost is an estimate**, computed from token counts. Prompt caching makes the
   real bill lower.
-- **No auth.** It binds inside the container and publishes to localhost. Do not
-  put it on a network you do not own.
+- **No auth.** It binds inside the container and publishes to loopback only. Do
+  not put it on a network you do not own.
 
 ## Development
 
@@ -216,16 +212,5 @@ Screenshots in this README are regenerated with:
 uv sync --group docs && uv run playwright install chromium
 uv run python scripts/screenshots.py
 ```
-
-## Where the reasoning lives
-
-| | |
-|---|---|
-| [`docs/HOW-IT-WORKS.md`](docs/HOW-IT-WORKS.md) | The whole system explained, technically and philosophically — start here |
-| [`DESIGN.md`](DESIGN.md) | Why the page looks like that, and what was deleted |
-| [`docs/decisions/`](docs/decisions/) | 24 ADRs: every choice that would be expensive to undo, including the ones that reverse an earlier ADR |
-| [`PLAN.md`](PLAN.md) | The original scope and milestones, kept unedited — the four places the build contradicted it are ADRs |
-| [`reports/research/`](reports/research/) | The web research the build was argued from, dated and immutable |
-| [`docs/evals.md`](docs/evals.md) | The measurements, appended and never edited |
 
 MIT licensed — see [`LICENSE`](LICENSE).

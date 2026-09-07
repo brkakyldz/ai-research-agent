@@ -20,3 +20,19 @@ scratch/
 # Agent working instructions and the research-store marker: local, not published.
 CLAUDE.md
 reports/.reports-architecture
+
+# How the project is worked on, rather than what it does: the decision records,
+# the milestone and evaluation plans, the design-round mockups and the research
+# store. All of it stays on disk; none of it is published.
+PLAN.md
+DESIGN.md
+docs/decisions/
+docs/PLAN-EVALS.md
+docs/PLAN-UI-INSTRUMENTS.md
+docs/*.excalidraw
+mockups/
+reports/
+
+# A second env template with the same keys and no placeholders. Nothing points
+# at it; the README names env.example.template.
+env.local.template

@@ -41,7 +41,7 @@ async def latest_digest_run(session: AsyncSession) -> Run | None:
     It used to be "the most recent digest in the page's language", which made
     the shell's TR/EN switch a content filter: a reader on a Turkish page who
     pressed `English` got "no digest yet", because the bulletin sitting in the
-    database was Turkish (Berke, 2026-09-06). The switch translates the buttons
+    database was Turkish. The switch translates the buttons
     and nothing else now, and the language a bulletin was written in is chosen
     where it is paid for - the press on `/runs` (ADR 0017). The bar names the
     bulletin's language when it differs from the page's, so a Turkish shell
@@ -102,8 +102,7 @@ async def stories_for_run(
     order over the run, `importance` is the model's 1-5 score on one story, and
     the two disagree constantly. A real day came out p4, p3, p3, p2, p3, which
     on a page whose only ranking indicator is the size of the headline (ADR
-    0014) reads as no order at all. Berke, 2026-09-08: the stories look randomly
-    arranged.
+    0014) reads as no order at all: the stories read as randomly arranged.
 
     `rank` still decides *which* stories are here - `ranked_only` is the top-N
     filter, and that is the job it was written for. What it no longer does is

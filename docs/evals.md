@@ -3,8 +3,8 @@
 One dated section per `ainews eval report` invocation, appended and never
 edited: a section is what was measured on that date. The functions named beside
 each number live in `src/ainews/evals/`; the bounds the test suite holds them to
-are in `tests/test_evals_checks.py`. What the numbers are for, and what they
-trigger, is `docs/PLAN-EVALS.md` (E4, E5) and ADR 0019.
+are in `tests/test_evals_checks.py`. What the numbers mean and what each one
+triggers is `docs/HOW-IT-WORKS.md` §15.
 
 ## 2026-09-06 10:07 UTC — last 30 days
 

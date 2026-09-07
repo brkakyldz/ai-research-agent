@@ -6,14 +6,16 @@ knows whether any of it is any good.
 
 It is a narrative, not a reference. Every value it mentions lives in the code,
 and the code is the authority — where this document and a line of Python
-disagree, the Python is right and this file is stale. `PLAN.md` holds the
-original scope, `DESIGN.md` holds why the page looks like it does, and
-`docs/decisions/` holds the twenty-four choices that would be expensive to undo.
+disagree, the Python is right and this file is stale. Line references are given
+as `file.py:123` so you can go and check.
 
 **Part I — the idea** is the philosophy: what the thing is for, and the handful
 of beliefs every decision below falls out of. **Part II — the machine** is the
 walkthrough. **Part III — whether it is any good** is testing and evaluation.
-**Part IV — the record** is the decision list and what is deliberately missing.
+**Part IV — the record** is the choice list and what is deliberately missing.
+
+The code cites those choices by number — a comment reading `(ADR 0007)` points
+at line 0007 of the table in §17.
 
 ---
 
@@ -59,8 +61,8 @@ it rather than against taste.
 
 It is opened once in the morning, read for a few minutes, and closed. Nobody has
 to be persuaded of anything, so there is no hero, no atmosphere, no scroll
-animation and no marketing surface anywhere in it. `DESIGN.md`'s method is one
-question asked of every element — *what is your job, and does the content
+animation and no marketing surface anywhere in it. The method behind the page is
+one question asked of every element — *what is your job, and does the content
 already do it?* — and the list of things deleted by that question is longer than
 the list of things that survived it.
 
@@ -154,34 +156,26 @@ have doubled the ways to be surprised by a bill in exchange for saving one
 
 ### 2.7 A value lives in one place, and a decision lives next to what it changed
 
-Colours and scale live in the mockup and then in `theme.css` — never restated in
-a document. A read query lives in `web/queries.py` and never in a route, because
-all five pages want the same few shapes and a query written twice is a query that
-disagrees with itself later. Model names live in `pipeline/pricing.py`, which is
-the price table and the menu at once. The environment is read in exactly one
-module, `config.py`.
+Colours and scale live in `theme.css` and are never restated in a document. A
+read query lives in `web/queries.py` and never in a route, because all the pages
+want the same few shapes and a query written twice is a query that disagrees with
+itself later. Model names live in `pipeline/pricing.py`, which is the price table
+and the menu at once. The environment is read in exactly one module, `config.py`.
 
-And a decision is a comment on the line it changed, not a paragraph collected
-into a design document. `DESIGN.md` and this file carry *why*; the code carries
-*where*.
+And the reason for a line is a comment *on* that line, not a paragraph collected
+into a design document somewhere else. This file carries the shape of the system;
+the code carries why each piece of it is the way it is.
 
-## 3. How the project keeps its record
+## 3. Reading the code
 
-Four kinds of writing, with a rule each, because the failure mode of a personal
-project is a pile of documents that quietly contradict the code.
+Four conventions, worth knowing before opening a file.
 
-| | Rule |
+| | |
 |---|---|
-| **ADRs** (`docs/decisions/`) | One per expensive-to-reverse choice. A later decision that contradicts an earlier one sets that one's status to *superseded* and says which part — never edits it. Nine of the twenty-four supersede something. |
-| **Research** (`reports/research/`) | Dated and immutable. A report is what was believed on that date; a correction is a newer report that references the old one. |
-| **`PLAN.md`** | The original scope, kept unedited. The four places the build contradicted it are ADRs, not edits. |
-| **`DESIGN.md`** | Rationale only — no token list, no component catalogue, no scale table. |
-
-The repo is written in English — documents, comments, docstrings, commit
-messages — while the conversation that produced it happens in Turkish. It is a
-portfolio piece and it reads in one language. The interface is the exception: it
-speaks both, and every visible string lives in `web/i18n.py` in two dictionaries
-so that the two can be diffed against each other.
+| **Comments explain the failing case, not the syntax** | A comment here usually describes what went wrong without the line, with the scenario spelled out. They are long on purpose: the trap is the thing worth writing down, and a reader who already knows the trap can skip a paragraph faster than they can rediscover it. |
+| **Choices are cited by number** | `(ADR 0007)` in a comment means row 0007 of the table in §17. Later rows revise earlier ones where they conflict, and the table says which. |
+| **Tests are named as claims** | `test_a_failing_search_still_costs_its_credit`, not `test_tavily_error`. The suite reads as a list of things the system promises — §14. |
+| **English in the repo, both languages on screen** | Code, comments and documents are English. The interface speaks Turkish and English, and every visible string lives in `web/i18n.py` in two dictionaries so the two can be diffed against each other — a missing key is a `KeyError` at render, not a silent English fallback. |
 
 ---
 
@@ -810,7 +804,7 @@ grid and must be right in the first painted frame.
 
 ### 11.7 The page itself
 
-The design rationale is `DESIGN.md` and ADRs 0008–0024; the short version:
+The reasoning behind the page is choices 0008–0024 in §17; the short version:
 
 - **A console shell.** One bar across the top of the window, and a left rail under
   its first cell on the same ground, so the rail is one surface from the top of
@@ -820,8 +814,8 @@ The design rationale is `DESIGN.md` and ADRs 0008–0024; the short version:
   The bar holds only the reader's own controls: the page name and the bulletin's
   date, search, the two switches.
 - **Two columns, on every page.** The third column of instruments beside the
-  reading was tried in four shapes over three days and removed on 2026-09-08 (ADR
-  0024): two of its five units were already written elsewhere on the same screen.
+  reading was tried in four shapes and then removed (0024): two of its five units
+  were already written elsewhere on the same screen.
   The brief is a band above the reading, the impact spread is drawn at the end of
   the topic filter row, the week moved to `/runs`. The reading is centred in the
   page's measure rather than pinned left.
@@ -919,7 +913,7 @@ beside each mark, so the mark comes off loudly rather than quietly passing.
 ## 15. Evaluation
 
 Everything above produces output; nothing above says whether it is any good.
-`docs/PLAN-EVALS.md` is the plan and ADR 0019 the shape; this is the mechanism.
+Choice 0019 gives it its shape; this section is the mechanism.
 
 ![How the evaluation works](eval-architecture.png)
 
@@ -967,7 +961,7 @@ every number beside the function that produced it. A section is never edited.
 **Measured on the first run** (2026-09-04, 91 stories): 4.4% of summaries over the
 55-word budget, two ungrounded figures, 67.6% tag singletons, ranker/fallback
 overlap 6 of 11, one importance-5 story left unrepresented, and a rank-stability
-τ of **0.47** with top-N Jaccard 0.53 — under the 0.6 that E5 names as the trigger
+τ of **0.47** with top-N Jaccard 0.53 — under the 0.6 that is the trigger
 for permutation self-consistency in production. The second run measured 0.50. One
 run is one measurement; the trigger asks for it across runs, which is why nothing
 in the ranker has moved yet.
@@ -994,39 +988,38 @@ without the optional dependency group, or without the flag, the app is unchanged
 
 # Part IV — The record
 
-## 17. The decisions
+## 17. The choices, numbered
 
-Nine of these supersede an earlier one in whole or in part. That is the point of
-the folder: the reversal is written down beside the thing it reversed, and the
-original reasoning survives so the current design can be read as an argument
-rather than as a preference.
+The comments in the code cite these by number. Nine of them revise an earlier
+one, which is why the third column exists: a comment that says `(ADR 0013)` is
+still true about the line it sits on, and the table says what has moved since.
 
-| ADR | Decision | Status |
+| № | Choice | Since revised? |
 |---|---|---|
-| 0001 | `gpt-5.6-luna` for every LLM node | accepted |
-| 0002 | FastAPI + Jinja + HTMX, no Node toolchain | accepted |
-| 0003 | SQLite in WAL mode, FTS5 for search | accepted |
+| 0001 | `gpt-5.6-luna` for every LLM node | — |
+| 0002 | FastAPI + Jinja + HTMX, no Node toolchain | — |
+| 0003 | SQLite in WAL mode, FTS5 for search | — |
 | 0004 | APScheduler in-process, one uvicorn worker | the digest job superseded by 0015; the structure stands |
-| 0005 | No migration tool in v1; idempotent schema at startup | accepted |
-| 0006 | No Tailwind; the CSS is the mockup's, hand-written | accepted |
-| 0007 | The container's database is on a named volume | accepted |
-| 0008 | A console shell, and a light theme beside the dark one | accepted |
-| 0009 | The editorial story block; shell split into navigation, controls, record | accepted |
+| 0005 | No migration tool in v1; idempotent schema at startup | — |
+| 0006 | No Tailwind; the CSS is hand-written | — |
+| 0007 | The container's database is on a named volume | — |
+| 0008 | A console shell, and a light theme beside the dark one | — |
+| 0009 | The editorial story block; shell split into navigation, controls, record | — |
 | 0010 | The activity column, and a blue secondary colour | the column superseded by 0024; the blue stands |
 | 0011 | Two faces for small text; the brief moves into the side column | the label's size superseded by 0016; the brief by 0024 |
-| 0012 | The impact meter takes the third colour; *why it matters* becomes a plate | accepted |
+| 0012 | The impact meter takes the third colour; *why it matters* becomes a plate | — |
 | 0013 | The page stops being a dashboard | partly superseded by 0014, 0021, 0024 |
 | 0014 | No lead story, and a side column that looks like a bar | partly superseded by 0021 and 0024 |
-| 0015 | The digest is started by a person, and the page advises when | accepted |
-| 0016 | The shell stops whispering: nothing under 12px, sentence case in `i18n.py` | accepted |
-| 0017 | The switch translates the interface; the press chooses the bulletin's language | accepted |
-| 0018 | Per-call tracing in a local Phoenix, behind a dev profile | accepted |
-| 0019 | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth | accepted |
-| 0020 | The model is chosen at the press; the environment is only the default | accepted |
+| 0015 | The digest is started by a person, and the page advises when | — |
+| 0016 | The shell stops whispering: nothing under 12px, sentence case in `i18n.py` | — |
+| 0017 | The switch translates the interface; the press chooses the bulletin's language | — |
+| 0018 | Per-call tracing in a local Phoenix, behind a dev profile | — |
+| 0019 | Evaluation is a sibling command, not a test; the reader's verdict is the ground truth | — |
+| 0020 | The model is chosen at the press; the environment is only the default | — |
 | 0021 | One bar across two rails, a rail that can be put away, a card per story | the third column superseded by 0024 |
-| 0022 | A run is recorded node by node, and the graph is a page | accepted |
-| 0023 | The app does not start an evaluation; the eval layer keeps its one caller | accepted |
-| 0024 | The reading page drops its right rail; the brief goes above it, the spread joins the topic row | accepted |
+| 0022 | A run is recorded node by node, and the graph is a page | — |
+| 0023 | The app does not start an evaluation; the eval layer keeps its one caller | — |
+| 0024 | The reading page drops its right rail; the brief goes above it, the spread joins the topic row | — |
 
 ## 18. What is not built, and why
 
@@ -1035,7 +1028,7 @@ rather than as a preference.
 | E-mail or Telegram delivery | The tool is opened, not pushed. Delivery would put a bulletin somewhere nobody chose to look, and it is the second half of a cadence this project deliberately does not have. |
 | Both languages in one run | Two bulletins is twice the model calls for a reader who reads one of them. |
 | arXiv and paper feeds | ~300 items a day would dominate ranking; important papers reach the digest through Hugging Face, Simon Willison and the outlets anyway. |
-| Embedding-based clustering | `token_set_ratio` at 85 is measured and cheap. E5 says what evidence would change this: golden duplicate pairs failing on new outlets, and then it gets its own ADR. |
+| Embedding-based clustering | `token_set_ratio` at 85 is measured and cheap. What would change it is named in advance: golden duplicate pairs failing on new outlets. |
 | Auth, multi-user, a cloud deploy | One reader, one machine. Everything in Part I falls out of that. |
 | A second button that spends money | ADR 0023. The evaluation is a terminal command precisely because it is interesting enough to want on screen. |
 | Per-source sparklines | Tried against the data and refused: there is no series behind them worth a chart. |

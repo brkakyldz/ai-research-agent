@@ -1,10 +1,9 @@
 /* =========================================================
    AI DIGEST - a daily reading tool, in a console shell
    ---------------------------------------------------------
-   Palette and scale came from mockups/v3/*.html; the editorial
-   story block and the shell's information architecture came
-   from the 2026-09-05 revision. DESIGN.md holds the why,
-   ADR 0008 the shell, ADR 0009 this revision. What is repeated
+   This file is where the palette and the scale live, and they
+   are not restated anywhere else. Choice 0008 is the shell,
+   0009 the editorial story block. What is repeated in a comment
    here is only what a line needs in order to be read.
 
    The page is still a tool, not a landing page: no hero, no
@@ -52,7 +51,7 @@
   --ink-2: light-dark(#545B65, #8F959F);
   --ink-3: light-dark(#646B75, #7C838D);
 
-  /* The secondary colour is a blue (2026-09-05, Berke): the light, slightly
+  /* The secondary colour is a blue: the light, slightly
      cool blue of a ChatGPT call to action, not a cyan and not a violet. Dark
      takes #5A9BFF - 6.3:1 on the panel; light takes the same hue dropped to
      #1A5FD6, which is 5.8:1 on white and 5.0:1 on the page behind it. One hue,
@@ -230,8 +229,8 @@ svg { display: block; }
 /* The section label, third revision and the first one that is not small.
    ADR 0011 took it out of the monospaced face and left it where it was: 11px,
    uppercased, tracked 0.05em. That is still the shape of a caption on a stock
-   chart, and at 11px Inter's 600 loses its stems on a 1x screen - Berke read
-   the whole shell as "kucuk ve ucuz" on 2026-09-06, which is what a page reads
+   chart, and at 11px Inter's 600 loses its stems on a 1x screen - the whole
+   shell read as small and cheap, which is what a page reads
    as when every word around the reading is set below the size type is drawn
    for. It is sentence case now and 12.5px: the capital at the front does the
    job the uppercasing was doing, at the cost of nothing, and the strings gained
@@ -316,7 +315,7 @@ svg { display: block; }
    The cells are placed rather than left to auto-flow. There were three of them
    until 2026-09-08: the digest carried a right rail, and it was conditional in
    two directions - only that page filled it, and below 1240px it stopped being
-   a column at all. Berke took the rail off. Two columns now, on every page, so
+   a column at all. The rail came off. Two columns now, on every page, so
    the bar's last cell is the switches it holds and nothing follows it down. */
 .app {
   display: grid;
@@ -337,8 +336,8 @@ svg { display: block; }
    only scroller on the page: the rails were `position: sticky` inside a
    document that ran the full height of the feed, so a wheel anywhere - over the
    navigation, over the instruments, over the bar - moved the stories. Sticky
-   pins a column in place; it does not make it a column of its own. Berke's
-   note: scrolling on the left bar still pulls the news down.
+   pins a column in place; it does not make it a column of its own. The
+   symptom: scrolling on the left bar still pulled the news down.
 
    The shell is exactly the window now and never scrolls. The two cells under
    the bar are two scrollers, each ending where it is drawn, so a wheel acts on
@@ -718,9 +717,8 @@ svg { display: block; }
 }
 /* The bar's last cell, and on the digest it is the head of the right rail: the
    same width, the same ground, no gap between them, so the switches read as the
-   top of that column rather than as two controls parked above it. Berke's
-   2026-09-07 note is exactly this - the right bar is not a separate structure,
-   it is joined. On the four pages with no right rail the cell shrinks to its
+   top of that column rather than as two controls parked above it - the right
+   bar is not a separate structure, it is joined. On the four pages with no right rail the cell shrinks to its
    contents and gives the ground up with it: the ground is what says "this is a
    column", and on those pages there is no column. What does not move is the
    switches, which end at the same place on every page.
@@ -904,8 +902,8 @@ kbd {
 
 /* On the two pages with no side column the feed would otherwise have the whole
    window - a hundred and ten characters a line, which is not a measure. The cap
-   is on the column, not on the paragraph: Berke's 2026-09-05 objection was to
-   text stopping short of the box drawn around it, and there is no box here to
+   is on the column, not on the paragraph: the objection was to text
+   stopping short of the box drawn around it, and there is no box here to
    stop short of, so the column ends where the reading ends.
 
    The width is the digest's own reading column, which is what this rule always
@@ -922,8 +920,8 @@ kbd {
    Centred, since the rail came off on 2026-09-08. Left-aligned was fine while a
    340px column stood in the space to its right and it is not fine now: on a
    1920px window the reading stopped 356px short of the page's own measure and
-   the whole of the slack piled up on one side, which is Berke's 2026-09-05
-   objection arriving at the scale of the page instead of the paragraph - a side
+   the whole of the slack piled up on one side, which is the same objection
+   arriving at the scale of the page instead of the paragraph - a side
    column that has gone missing. Auto margins on the cross axis of a column flex
    container split the slack in two, so the reading sits in the middle of what
    it has. */
@@ -1078,8 +1076,7 @@ kbd {
    systems on one column: the reader compares the top story to the one under it
    and cannot tell whether it is bigger because it matters more or because it
    happens to be at the top. Position already marks it, and the importance step
-   already sizes it. Berke marked it on 2026-09-06; ADR 0014 supersedes the lead
-   half of ADR 0013. The feed now has no surface in it at all. */
+   already sizes it. Choice 0014 supersedes the lead half of 0013. The feed now has no surface in it at all. */
 
 .item__m { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
 /* The source name keeps its own capitals. It was lowercased, which turned
@@ -1147,8 +1144,8 @@ kbd {
 .item__t a { border-bottom: 1px solid transparent; }
 .item__t a:hover { border-bottom-color: var(--ink-2); }
 /* No measure cap. A paragraph that stops short of the panel it sits in leaves a
-   band of nothing down the right of every row - Berke marked it on 2026-09-05
-   and it is the one thing about this block that reads as a mistake rather than
+   band of nothing down the right of every row, which is the one thing about
+   this block that read as a mistake rather than
    a choice. Two attempts at fixing it from the other end (a 64ch paragraph, then
    a 620px column with the slack pushed into the middle of the page) both moved
    the emptiness somewhere else instead of removing it. The text fills the panel,
@@ -1166,8 +1163,7 @@ kbd {
 /* The plate stays; the box around it does not. The inset hairline made a
    rectangle of the one paragraph on the row that is an argument rather than a
    report, and a rectangle is the shape this whole page is trying to spend less
-   of. What is left is a surface and an ink step, which is what Berke picked on
-   2026-09-05 (A1) with the outline turned off.
+   of. What is left is a surface and an ink step, with the outline turned off.
 
    The hierarchy inside it is inverted from where it started. The label used to
    be the strongest thing in the block and the sentence the palest; the sentence
@@ -1219,9 +1215,9 @@ kbd {
    brightened the link the moment the cursor entered the story - anywhere in it,
    including the headline eight lines above - so the one hover state on the row
    fired for a gesture that had nothing to do with the link, and by the time the
-   reader actually reached it there was no change left to report. Berke,
-   2026-09-08: it lighting up like that is meaningless. A hover state is a
-   promise that this is what the click will hit.
+   reader actually reached it there was no change left to report: lighting up
+   like that is meaningless. A hover state is a promise about where the click
+   will land.
 
    The reader's verdict is not this and stays on `.item:hover`: it is drawn from
    nothing on the card's hover rather than brightened, and being invisible until
@@ -1235,8 +1231,8 @@ kbd {
    taken (DESIGN.md), and a verdict is the reader's own note, not a state of
    the machine.
 
-   V3 of mockups/v4/variants-verdict.html, picked 2026-09-07 (E2.1): the same
-   place as V1, but not drawn until the pointer is on the story. The page is
+   The same place as the first cut, but not drawn until the pointer is on the
+   story. The page is
    read far more often than it is judged, and two words repeated under fifteen
    stories are two words the reader has to skip fifteen times. The card is
    already the hover unit - `.go` brightens on it three rules up - so this
@@ -1300,8 +1296,8 @@ kbd {
    rule was written on 2026-09-06, when a story was a run of text on the page
    and 22px of nothing to its left would have been an indent; ADR 0021 put the
    card back the next day and gave `.item` `20px 22px 18px`, and `13px 0` went
-   on overriding both axes of it. The result is what Berke marked on
-   2026-09-08: on a low story the source name started 0.8px inside the card's
+   on overriding both axes of it. The result: on a low story the source name
+   started 0.8px inside the card's
    own border and the impact meter ended flush against the right one, so the
    one row on the page with no summary to fill it was also the one row whose
    contents sat on the frame. Same 22px as every other card now, and only the
@@ -1546,7 +1542,7 @@ kbd {
    dollar amounts says nothing without the 118 under it, and the denominator is
    the context rather than a second figure. It steps down two sizes and one ink
    for that reason - a 21px "/ 118" would read as two numbers of equal weight.
-   Variants in `mockups/v5/variants-verdict-count.html`; V1 shipped. */
+   Drawn against variants; this one shipped. */
 .totals__n small { font-size: 13px; color: var(--ink-3); }
 
 /* ---------- tables ---------- */
@@ -1624,8 +1620,8 @@ tr:hover td.strong a { text-decoration: underline; text-underline-offset: 3px; }
    answers is "which node ate the run", and a reader compares six lengths faster
    than six numbers - but the number is the thing being compared, so a bar in a
    column of its own said the same size twice and cost the table a sixth column.
-   The variants are in `mockups/v5/variants-run-steps.html`; S3 shipped, and
-   what it bought went to the note column, the only one that was overflowing.
+   Drawn against variants, and what this one bought went to the note column,
+   the only one that was overflowing.
 
    It is drawn in ink and not in the accent - the accent belongs to the rail's
    button (DESIGN.md) - and the widths do not add up to the full column on

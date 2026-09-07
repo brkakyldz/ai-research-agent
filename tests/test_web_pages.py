@@ -118,9 +118,8 @@ async def test_the_feed_is_ordered_by_importance_not_by_rank(
     different measurements - the ranker's order over the whole run against the
     model's 1-5 score on one story - so they disagree constantly, and a real day
     came out p4, p3, p3, p2, p3. On a page whose only ranking indicator is the
-    size of the headline (ADR 0014) that reads as no order at all; Berke marked
-    it the same day. `rank` still chooses which stories are on the page, which
-    is the job it was written for.
+    size of the headline (ADR 0014) that reads as no order at all. `rank` still
+    chooses which stories are on the page, which is the job it was written for.
 
     Seeded so the two orders are exact opposites: the least important story is
     ranked first.
@@ -772,7 +771,7 @@ def test_the_digest_reads_the_note_then_the_topics_then_the_day(
     """The order is the page's argument, and it survived the right rail.
 
     Until 2026-09-08 the brief and the impact spread were units of a column
-    beside the feed. Berke took the column off; the two of them landed in the
+    beside the feed. The column came off; the two of them landed in the
     reading in the order they already had, above the stories rather than
     beside them.
     """
@@ -1012,7 +1011,7 @@ def test_the_bar_spans_the_shell_and_carries_the_brand(client: TestClient, diges
 
 
 def test_the_shell_is_one_rail_and_the_reading(client: TestClient, digest: Run) -> None:
-    """Berke, 2026-09-08: the right rail is not needed any more.
+    """The right rail is not needed any more.
 
     It was a card inside the digest's content block from 2026-09-06, then a
     column of the shell from 2026-09-07 (ADR 0021, on his note that a rail
