@@ -193,11 +193,16 @@ def format_step_duration(t: dict[str, str], seconds: float | None) -> str:
     """
     if seconds is None:
         return "—"
-    if seconds < 60:
-        if seconds < 0.05:
-            return f"< 0{t['d_sep']}1{t['u_sep']}{t['u_sec']}"
-        return f"{seconds:.1f}".replace(".", t["d_sep"]) + t["u_sep"] + t["u_sec"]
-    minutes, rest = divmod(int(seconds), 60)
+    if seconds < 0.05:
+        return f"< 0{t['d_sep']}1{t['u_sep']}{t['u_sec']}"
+    # Branch on what will be printed, not on what was measured. Testing the raw
+    # value and then rounding it put 59.96s in the under-a-minute arm, where one
+    # decimal rounds it to "60,0 sn" - sixty seconds written in the format this
+    # function leaves at sixty, one tick before the same span reads "1 dk 0 sn".
+    tenths = round(seconds, 1)
+    if tenths < 60:
+        return f"{tenths:.1f}".replace(".", t["d_sep"]) + t["u_sep"] + t["u_sec"]
+    minutes, rest = divmod(int(tenths), 60)
     return f"{minutes}{t['u_sep']}{t['u_min']}{t['u_sep']}{rest}{t['u_sep']}{t['u_sec']}"
 
 

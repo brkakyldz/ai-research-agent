@@ -27,6 +27,7 @@ from ainews.pipeline.state import RankedDigest
 from ainews.pipeline.steps import step
 from ainews.web.app import create_app
 from ainews.web.i18n import note_text, strings
+from ainews.web.views import format_step_duration
 from test_graph import SUMMARY, FakeLLM, _no_collect, _no_enrich, _seed_articles
 
 INITIAL: dict[str, Any] = {
@@ -363,6 +364,36 @@ def test_the_literal_run_routes_still_win_over_the_id(client: TestClient) -> Non
 # second column (`steps.py`). A note is a written sentence and gets translated;
 # a traceback and a feed's error text were never in a language, so they are
 # printed as they were stored.
+def test_a_step_is_timed_at_a_steps_scale() -> None:
+    """`format_duration` is the run's clock and reads `0:41`; four of the six
+    nodes in a digest are under a second, and on that scale it collapses them
+    all to `0:00`. The decimal point comes from the dictionary, because "24,6"
+    and "24.6" are the same three characters and a different number."""
+    tr, en = strings("tr"), strings("en")
+
+    assert format_step_duration(tr, None) == "—"
+    # A step too fast to have a first decimal is a measurement, not a step that
+    # did not happen.
+    assert format_step_duration(tr, 0.04) == "< 0,1 sn"
+    assert format_step_duration(tr, 24.6) == "24,6 sn"
+    assert format_step_duration(en, 24.6) == "24.6s"
+
+
+def test_a_step_just_under_a_minute_reads_as_a_minute() -> None:
+    """The arm was chosen on the measured value and the number printed from the
+    rounded one, so 59.96s landed in the under-a-minute arm and one decimal
+    rounded it to "60,0 sn" - sixty seconds in the format this function leaves
+    at sixty, one tick before the same span reads "1 dk 0 sn"."""
+    tr = strings("tr")
+
+    assert format_step_duration(tr, 59.94) == "59,9 sn"
+    assert format_step_duration(tr, 59.96) == "1 dk 0 sn"
+    assert format_step_duration(tr, 60) == "1 dk 0 sn"
+    # Above a minute the seconds are still truncated rather than rounded, which
+    # is what the run's own clock does.
+    assert format_step_duration(tr, 90.7) == "1 dk 30 sn"
+
+
 def test_a_note_falls_back_to_what_was_stored() -> None:
     t = strings("tr")
 
