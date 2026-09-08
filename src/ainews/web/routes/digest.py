@@ -14,10 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ainews.db import Run, Summary, Verdict, db_session
 from ainews.db.models import utcnow
 from ainews.web import queries
+from ainews.web.format import impact_split
 from ainews.web.i18n import strings
 from ainews.web.views import (
     get_templates,
-    impact_split,
     language_of,
     remember_preferences,
     shell_context,

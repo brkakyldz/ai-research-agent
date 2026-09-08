@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from rapidfuzz import fuzz, process
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
@@ -129,6 +129,24 @@ async def select_candidates(
 ) -> list[Article]:
     settings = settings or get_settings()
     return list((await session.execute(_unsummarized(settings))).scalars())
+
+
+async def count_candidates(session: AsyncSession, settings: Settings | None = None) -> int:
+    """How many articles the next press would summarise - `select_candidates`
+    without the rows.
+
+    The confirmation fragment on `/runs` asks this on every render, and every
+    model-slot click re-renders it. It used to be `len(await
+    select_candidates(...))`, which loaded a hundred and thirty `Article`
+    objects, mapped every column of each, and took the length. The order the
+    query carries is the survivor rule and a count does not need it either.
+    """
+    settings = settings or get_settings()
+    return (
+        await session.execute(
+            select(func.count()).select_from(_unsummarized(settings).order_by(None).subquery())
+        )
+    ).scalar_one()
 
 
 async def _reference_titles(

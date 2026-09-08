@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import Run, Source
-from ainews.web.views import build_advice, format_gap
+from ainews.web.format import format_gap
+from ainews.web.views import build_advice
 
 
 async def _run(

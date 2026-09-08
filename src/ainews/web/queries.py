@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, Settings, get_settings
 from ainews.db import Article, EvalResult, Run, RunStep, Source, Summary, Verdict, bulletin_runs
+from ainews.web.format import relative_age, to_local
 
 
 @dataclass(slots=True)
@@ -163,8 +164,6 @@ async def stories_for_run(
     by the model, so it follows the shell even when the stories under it were
     written in the other language.
     """
-    from ainews.web.views import relative_age
-
     query = (
         select(Summary, Article, Source.name, Verdict)
         .join(Article, Article.id == Summary.article_id)
@@ -195,8 +194,6 @@ async def story_for_summary(
     session: AsyncSession, summary_id: int, language: Language
 ) -> Story | None:
     """One story by its summary id - what `POST /verdict` re-renders."""
-    from ainews.web.views import relative_age
-
     row = (
         await session.execute(
             select(Summary, Article, Source.name, Verdict)
@@ -355,8 +352,6 @@ async def search_stories(
     because the digest that covered it was written in the other language is the
     same content filter the shell's switch stopped being (ADR 0017).
     """
-    from ainews.web.views import relative_age
-
     expression = _fts_query(raw_query)
     if not expression:
         return []
@@ -428,8 +423,6 @@ async def recent_activity(session: AsyncSession, n_days: int = 7) -> Activity:
     disagrees with `to_local` the first time the timezone setting changes.
     A month of runs is at most a few hundred rows.
     """
-    from ainews.web.views import to_local
-
     since = datetime.now(UTC) - timedelta(days=30)
     runs = list(
         (
@@ -642,22 +635,6 @@ async def judge_findings(session: AsyncSession, limit: int = 200) -> list[Findin
         if len(findings) == limit:
             break
     return findings
-
-
-async def count_candidates(session: AsyncSession) -> int:
-    """How many articles the next press would summarise, before it is pressed.
-
-    The same selection the dedupe node makes, run read-only for the question on
-    `/runs`. It answers the case ADR 0017's second language slot opened without
-    saying so: a Turkish bulletin at 09:00, `English` picked at 09:10, and a
-    press that summarises the two articles that arrived in between - a paid
-    run that produces a two-story bulletin. The count is what is waiting now;
-    the poll that opens a run can add to it, and dedupe can take from it, so
-    the sentence around it says "waiting", not "will be".
-    """
-    from ainews.pipeline.nodes.dedupe import select_candidates
-
-    return len(await select_candidates(session))
 
 
 async def run_by_id(session: AsyncSession, run_id: str) -> Run | None:

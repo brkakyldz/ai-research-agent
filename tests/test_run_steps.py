@@ -25,8 +25,8 @@ from ainews.pipeline.nodes import rank as rank_module
 from ainews.pipeline.nodes import summarize as summarize_module
 from ainews.pipeline.state import Pick, RankedDigest
 from ainews.pipeline.steps import step
+from ainews.web.format import format_step_duration
 from ainews.web.i18n import note_text, strings
-from ainews.web.views import format_step_duration
 from test_graph import SUMMARY, FakeLLM, _no_collect, _no_enrich, _seed_articles
 
 INITIAL: dict[str, Any] = {

@@ -24,8 +24,9 @@ from ainews.logging_conf import configure_logging
 from ainews.observability import enable_tracing
 from ainews.scheduler import start_scheduler
 from ainews.sources.seed import sync_sources
+from ainews.web.format import build_templates
+from ainews.web.routes import register_routes
 from ainews.web.security import same_origin_only
-from ainews.web.views import build_templates
 
 log = logging.getLogger(__name__)
 
@@ -90,9 +91,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-    from ainews.web.routes import register_routes
-
     register_routes(app)
     return app
 

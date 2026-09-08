@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from ainews.config import Settings, get_settings
 from ainews.db import Article, Run, Source, Summary
 from ainews.web.app import create_app
+from ainews.web.format import MONTHS, format_stamp, split_paragraphs
 from ainews.web.i18n import LANGUAGE_COOKIE, STRINGS, THEME_COOKIE, strings
-from ainews.web.views import MONTHS, format_stamp, split_paragraphs
 
 TITLES = [
     ("OpenAI ucuz bir model duyurdu", 5),
@@ -1322,3 +1322,48 @@ async def test_the_page_draws_the_editors_score_where_the_ranker_gave_one(
 
     assert re.findall(r'class="item p(\d)"', client.get("/").text) == ["5", "4", "2"]
     assert re.findall(r'class="item p(\d)"', client.get("/?all=1").text) == ["5", "4", "3", "2"]
+
+
+# -- the module graph ----------------------------------------------------------
+
+
+def test_the_web_layer_never_reaches_past_the_pipeline_api() -> None:
+    """The three reach-ins finding 4 of the 2026-09-08 audit named.
+
+    A function-level import is what a cycle looks like once it has been worked
+    around rather than removed, so this asserts on the source: nothing under
+    `web/` names a pipeline node or the runner, at the top of a file or inside
+    one. `pipeline/api.py` is the whole surface.
+    """
+    import pathlib
+
+    web = pathlib.Path(__file__).resolve().parents[1] / "src" / "ainews" / "web"
+    offenders = []
+    for path in web.rglob("*.py"):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if "ainews.pipeline.nodes" in line and "import" in line:
+                offenders.append(f"{path.name}:{n}")
+            # `routes/runs.py` keeps one, as the seam a test patches `run_digest`
+            # through; its docstring says so.
+            if "ainews.pipeline.runner" in line and "import" in line and path.name != "runs.py":
+                offenders.append(f"{path.name}:{n}")
+    assert offenders == []
+
+
+def test_queries_and_views_no_longer_import_each_other_inside_functions() -> None:
+    """They did it four times, because the formatting half of `views` was on the
+    wrong side of the line. It is `web/format.py` now and imports neither."""
+    import pathlib
+
+    web = pathlib.Path(__file__).resolve().parents[1] / "src" / "ainews" / "web"
+    inline = [
+        f"{p.name}:{n}"
+        for p in (web / "queries.py", web / "views.py", web / "format.py")
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+        if line.startswith("    ") and " import " in line and "ainews" in line
+    ]
+    assert inline == []
+
+    source = (web / "format.py").read_text(encoding="utf-8")
+    assert "ainews.web.views" not in source
+    assert "ainews.web.queries" not in source

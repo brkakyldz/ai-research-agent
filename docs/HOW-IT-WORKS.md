@@ -7,7 +7,7 @@ knows whether any of it is any good.
 It is a narrative, not a reference. Every value it mentions lives in the code,
 and the code is the authority — where this document and a line of Python
 disagree, the Python is right and this file is stale. Line references are given
-as `file.py:123` so you can go and check.
+as `file.py` so you can go and check.
 
 **Part I — the idea** is the philosophy: what the thing is for, and the handful
 of beliefs every decision below falls out of. **Part II — the machine** is the
@@ -188,9 +188,9 @@ Four conventions, worth knowing before opening a file.
 | Configuration | `src/ainews/config.py` | The only module that reads the environment. Nothing else touches `os.environ`. |
 | Sources | `src/ainews/sources/` | Talks to the outside world: HTTP, feed parsing, extraction, Tavily. Knows nothing about the graph. |
 | Persistence | `src/ainews/db/` | Seven tables plus an FTS5 index. Owns the connection pragmas. |
-| Pipeline | `src/ainews/pipeline/` | The LangGraph nodes, the two entry points that open and close a run row, the price table, and the step recorder. |
+| Pipeline | `src/ainews/pipeline/` | The LangGraph nodes, the two entry points that open and close a run row, the price table, and the step recorder. `pipeline/api.py` is the only part of it the web layer may name. |
 | Scheduling | `src/ainews/scheduler.py` | One interval job, in-process. |
-| Web | `src/ainews/web/` | Routes, read queries, view helpers, templates. Never writes a summary. |
+| Web | `src/ainews/web/` | Routes, read queries, the shell's context, templates. Never writes a summary. `format.py` is pure formatting; `views.py` is what touches a session or a request; `queries.py` is SQL. |
 | CLI | `src/ainews/cli.py` | Calls the same functions the button and the poll call. No second implementation. |
 | Evaluation | `src/ainews/evals/` | Reads the database and calls the pipeline's node functions; never imported by the pipeline or the web layer. Spends money only behind `ainews eval judge` / `rank-stability`, never in `pytest`. |
 
@@ -199,9 +199,25 @@ pipeline calls into sources and db, and nothing calls back up.
 `pipeline/nodes/summarize.py` never imports anything from `web/`, which is why
 the CLI can run a digest with no HTTP server anywhere in the process.
 
+Inside the web layer the direction is one-way too, and until 2026-09-08 it was
+not. `queries` wanted an age string and a local date; `views` wanted the shell's
+counts; so the two imported each other from inside four function bodies rather
+than admit a cycle at the top of a file. There was no cycle to admit — the half
+`queries` wanted is a pure function of its arguments. That half is `format.py`
+now, `views.py` keeps what reads a session or a request, and both import
+downward only.
+
+The web layer's three reach-ins past the pipeline's front door — a route
+importing a collect node, a query importing a dedupe node, the advice block
+importing the runner — go through `pipeline/api.py`, which names the three
+questions the web layer may ask and starts no work by asking them. Twenty-three
+function-level imports became sixteen, and the ones left are the CLI deferring
+a 1.3-second `langchain` import it does not need, plus one seam in
+`routes/runs.py` that a test patches through.
+
 ## 5. Configuration
 
-`Settings` (`src/ainews/config.py:23`) is a `pydantic-settings` model read from
+`Settings` (`src/ainews/config.py`) is a `pydantic-settings` model read from
 the dotenv file once and cached with `lru_cache`. Every knob an operator is meant
 to touch is a field on it, and every field has a bound where a bound is
 meaningful — `digest_top_n` is `ge=1, le=100`, `dedupe_score_threshold` is
@@ -210,11 +226,11 @@ naming the field, rather than at 03:00 as a division by zero.
 
 Two details worth naming:
 
-- **`_blank_placeholders`** (`config.py:92`). The shipped template contains
+- **`_blank_placeholders`** (`config.py`). The shipped template contains
   `sk-proj-xxxx…`. A key that still holds `xxxx` is treated as unset, so a fresh
   clone that copied the template but never edited it reports "no key" instead of
   authenticating with a placeholder and getting a 401 four nodes deep.
-- **`sqlite_path`** (`config.py:107`). Derives the filesystem path from
+- **`sqlite_path`** (`config.py`). Derives the filesystem path from
   `DATABASE_URL`, which is what WAL setup, the health probe and the CLI's
   "database ready at …" line all print.
 
@@ -229,13 +245,13 @@ node moves up a tier and ranking stays on the cheap model.
 
 Seven real tables in `src/ainews/db/models.py`, plus a virtual one.
 
-**`sources`** (`models.py:53`) — what to poll. Beyond name and URL it carries
+**`sources`** (`models.py`) — what to poll. Beyond name and URL it carries
 `etag` and `modified`, the conditional-GET tokens from the last successful fetch;
 `consecutive_failures`, which is what auto-disables a rotted feed; and `weight`
 (0.5–2.0), an editorial figure that does two jobs — it breaks ranking ties and it
 decides which thin articles are worth a Tavily credit.
 
-**`articles`** (`models.py:85`) — one item from one feed. `url_canonical` is
+**`articles`** (`models.py`) — one item from one feed. `url_canonical` is
 `unique`, and that uniqueness *is* the first layer of deduplication. `dup_of` is a
 self-referencing FK recording a fuzzy-duplicate decision; a duplicate is marked,
 never deleted.
@@ -247,7 +263,7 @@ editor's note and the error text. `status` is one of
 `running | ok | partial | error` — and `partial` is a finished run with a note,
 not a failure, which is why only `error` is drawn in the alarm colour.
 
-**`run_steps`** (`models.py:157`) — one row per graph node per run: the two
+**`run_steps`** (`models.py`) — one row per graph node per run: the two
 timestamps, the counts in and out, the model, the tokens, the estimated cost, a
 status and a note. This is what `/runs/<id>` reads (ADR 0022, and §9 below).
 
@@ -264,23 +280,23 @@ the deduplication in `persist` described in §7.7. `editor_importance` was added
 a live archive by `ADDED_COLUMNS` in `db/schema.py` — the one exception to
 "`create_all` adds tables, never columns" (ADR 0005).
 
-**`verdicts`** (`models.py:248`) — the reader's own call on one summary, `ok` or
+**`verdicts`** (`models.py`) — the reader's own call on one summary, `ok` or
 `wrong`, with an optional free-text reason. One row per summary; a later verdict
 overwrites the earlier one rather than accumulating a history nobody reads.
 
-**`eval_results`** (`models.py:273`) — one measurement that cost money: a judged
+**`eval_results`** (`models.py`) — one measurement that cost money: a judged
 summary or a rank probe, with its own tokens and cost, so `ainews eval report`
 can total evaluation spend beside product spend.
 
-**`daily_counters`** (`models.py:305`) — the durable half of the Tavily credit
+**`daily_counters`** (`models.py`) — the durable half of the Tavily credit
 cap, as described in §2.2.
 
-**`summaries_fts`** — an FTS5 virtual table created in `db/schema.py:21` with
+**`summaries_fts`** — an FTS5 virtual table created in `db/schema.py` with
 `content=''` (contentless: the text lives once, in `summaries`, and the index
 stores only terms) plus three triggers that keep it in step on insert, delete and
 update. `rowid` is the summary id, so a hit joins straight back. This is DDL
 SQLAlchemy has no vocabulary for, which is why it is raw SQL applied by the same
-idempotent `init_db()` (`schema.py:54`) that creates the tables.
+idempotent `init_db()` (`schema.py`) that creates the tables.
 
 There is no Alembic (ADR 0005). The schema is created idempotently at every
 start; adding migrations later is `alembic init` plus one autogenerate. The
@@ -290,11 +306,11 @@ re-collecting.
 
 ### Connection setup
 
-`_apply_pragmas` (`db/session.py:33`) runs on every new connection: WAL,
+`_apply_pragmas` (`db/session.py`) runs on every new connection: WAL,
 `synchronous=NORMAL`, `foreign_keys=ON` (SQLite leaves them off by default) and
 `busy_timeout=10000` so the single writer waits rather than raising.
 
-The WAL line is wrapped in its own `try` (`session.py:44`) and this is not
+The WAL line is wrapped in its own `try` (`session.py`) and this is not
 defensive habit. WAL needs a shared-memory file beside the database, and a Windows
 host directory bind-mounted into a Linux container cannot provide one:
 `PRAGMA journal_mode=WAL` raises `disk I/O error` and takes the whole application
@@ -308,26 +324,26 @@ exactly this reason.
 
 ### 7.1 collect — the cheap half
 
-`collect_articles` (`pipeline/nodes/collect.py:122`) is the single implementation
+`collect_articles` (`pipeline/nodes/collect.py`) is the single implementation
 of "what does collection mean". It is called from two places: the three-hourly
 scheduler job, and the first node of the digest graph.
 
-**Conditional GET.** `fetch_feed` (`sources/rss.py:115`) sends the stored `ETag`
+**Conditional GET.** `fetch_feed` (`sources/rss.py`) sends the stored `ETag`
 and `Last-Modified` back as `If-None-Match` / `If-Modified-Since`. feedparser's
 own documentation warns that publishers ban clients that re-download an unchanged
 feed, and this one polls sixteen of them eight times a day, so a `304`
-(`rss.py:138`) costs nothing and is the normal case. Validators are only
+(`rss.py`) costs nothing and is the normal case. Validators are only
 overwritten when the server actually sends them, so a feed that drops its ETag on
 one response does not lose ours.
 
-**The User-Agent.** `rss.py:27` sends a browser string. The Verge and Ars Technica
+**The User-Agent.** `rss.py` sends a browser string. The Verge and Ars Technica
 reject the default Python one outright; that constant is what makes those two
 feeds exist for us.
 
 **Failure is per-source, never per-run.** Feeds are fetched concurrently with
 `asyncio.gather`; a failure marks its own source and increments
 `consecutive_failures`, and at `SOURCE_MAX_FAILURES` the source disables itself
-(`collect.py:66`). That is the only thing standing between a rotted feed and a
+(`collect.py`). That is the only thing standing between a rotted feed and a
 warning line every three hours forever.
 
 Two errors are caught that look like they should not need to be: `httpx.InvalidURL`
@@ -336,13 +352,13 @@ transport runs, for a stored link like `http://[::1`. Uncaught it escapes the
 `gather` and takes the whole run down over one bad row. The same trap is guarded
 in `extract.fetch_article`.
 
-**The age horizon.** `_too_old` (`collect.py:46`) drops entries older than
+**The age horizon.** `_too_old` (`collect.py`) drops entries older than
 `COLLECT_MAX_AGE_DAYS` (7). Several feeds serve their entire archive — OpenAI
 ships 1169 entries, Hugging Face 859 — and without the horizon the first collect
 would summarise years of news at real cost. An item with no date is treated as
 current.
 
-**URL canonicalisation.** `canonical_url` (`sources/urls.py:96`) is the first and
+**URL canonicalisation.** `canonical_url` (`sources/urls.py`) is the first and
 cheapest deduplication layer: `utm_*` and friends stripped, `www.`/`m.`/`amp.`
 hostnames folded, scheme normalised to https, trailing slash and fragment
 dropped. Only *tracking* parameters are removed, from a denylist — a query string
@@ -351,22 +367,22 @@ merge distinct articles. The function never raises: `urlsplit` parses lazily, so
 `javascript:void(0)` — which real feeds do carry — only explodes several lines
 later when `.port` tries to cast `void(0)` to an int.
 
-With `url_canonical` unique across the table (`collect.py:78`), an article
+With `url_canonical` unique across the table (`collect.py`), an article
 syndicated to three feeds is stored once and attributed to whichever feed reached
 us first.
 
-**Seeding.** `sync_sources` (`sources/seed.py:59`) loads `feeds.yaml` into the
+**Seeding.** `sync_sources` (`sources/seed.py`) loads `feeds.yaml` into the
 table on every start, and the sync is one-way and additive: a feed in the file
 that is missing from the table is inserted, and everything else is left as the
 operator left it. A feed disabled in `/sources` therefore stays disabled across
 restarts, which it would not if this were an upsert. `BLOCKED_HOSTS`
-(`seed.py:33`) refuses Hacker News and Reddit at the host level, even by hand in
+(`seed.py`) refuses Hacker News and Reddit at the host level, even by hand in
 the UI — both are firehoses of "title plus someone else's link", and hnrss.org
 alone serves a dozen query variants of one feed.
 
 ### 7.2 The graph, and the one interesting edge
 
-`build_graph()` (`pipeline/graph.py:185`):
+`build_graph()` (`pipeline/graph.py`):
 
 ```
 START → collect → dedupe → enrich → [Send × N] summarize → rank → persist → END
@@ -374,14 +390,14 @@ START → collect → dedupe → enrich → [Send × N] summarize → rank → p
 
 Only one edge is interesting, and it is `enrich → summarize`.
 
-**State design.** `PipelineState` (`pipeline/state.py:102`) carries **ids, not
+**State design.** `PipelineState` (`pipeline/state.py`) carries **ids, not
 bodies**. LangGraph writes a checkpoint after every superstep, so anything in
 state is serialised once per step per branch; a hundred article bodies in there
 would turn a cheap run into a slow one. Bodies stay in SQLite and the graph
 passes primary keys.
 
 Two fields are reducer fields — `summaries` and `errors`, both
-`Annotated[list[...], operator.add]` (`state.py:114`). That is the only reason a
+`Annotated[list[...], operator.add]` (`state.py`). That is the only reason a
 hundred parallel branches can write to one key without clobbering each other.
 
 The LLM's output is a **Pydantic model, not a prompt convention**: `ArticleSummary`
@@ -394,7 +410,7 @@ every adapter is wrapped in `step()` — §9.
 
 ### 7.3 dedupe
 
-`dedupe_candidates` (`pipeline/nodes/dedupe.py:102`) does the half the URL index
+`dedupe_candidates` (`pipeline/nodes/dedupe.py`) does the half the URL index
 cannot: the same story written up separately by five outlets — "OpenAI releases
 GPT-5.6 Luna", "OpenAI ships new cheap model", "GPT-5.6 Luna is here" — is three
 URLs, three rows and one story.
@@ -407,11 +423,11 @@ failure mode here is a headline that adds or drops words rather than misspelling
 them: token set ignores order and duplication and scores on shared vocabulary,
 which is exactly the shape of "OpenAI ships X" versus "X shipped by OpenAI today".
 
-A survivor is appended to the reference set as the loop runs (`dedupe.py:139`), so
+A survivor is appended to the reference set as the loop runs (`dedupe.py`), so
 the third outlet covering a story matches the first rather than sliding through
 because the second was already marked.
 
-`_unsummarized` (`dedupe.py:60`) is where the delta lives. A candidate is an
+`_unsummarized` (`dedupe.py`) is where the delta lives. A candidate is an
 article with no summary in any language in any run, not marked as a duplicate, and
 inside the age horizon. That is what makes "run now" idempotent-in-cost: pressing
 the button twice in a row summarises nothing the second time, so the page can
@@ -428,17 +444,17 @@ source never reached the ranker.
 
 ### 7.4 enrich
 
-`enrich_articles` (`pipeline/nodes/enrich.py:48`) gives thin articles a body, in
+`enrich_articles` (`pipeline/nodes/enrich.py`) gives thin articles a body, in
 three tiers, cheapest first, each running only when the one before came back
 short:
 
 1. **Clean the HTML the feed already sent.** Free. Covers most feeds.
-   `clean_html` (`sources/extract.py:42`) runs trafilatura and falls back to a
+   `clean_html` (`sources/extract.py`) runs trafilatura and falls back to a
    naive tag-strip, because on a two-sentence teaser trafilatura sometimes decides
    there is no article at all and returns nothing — and a teaser is better than an
    empty body.
 2. **Fetch the page and extract it.** Costs a request. `fetch_article`
-   (`extract.py:77`) is synchronous on purpose (trafilatura's own helpers are) and
+   (`extract.py`) is synchronous on purpose (trafilatura's own helpers are) and
    the caller runs it in a thread behind a semaphore of 6, so we are not hammering
    a dozen hosts at once.
 3. **One capped Tavily news search.** Costs a credit, so it is reserved for items
@@ -448,7 +464,7 @@ short:
 `is_usable` draws the line at 400 characters — below that a "body" is a headline
 restated.
 
-The credit cap (`sources/tavily.py:41`) reserves *before* the call, not after:
+The credit cap (`sources/tavily.py`) reserves *before* the call, not after:
 a request that times out still costs its credit, which matches what Tavily bills
 and keeps a failing endpoint from being retried into the monthly allowance. A
 failed search returns `""` and degrades the summary; it never fails the run.
@@ -459,7 +475,7 @@ need it.
 
 ### 7.5 summarize — the fan-out
 
-`fan_out_summaries` (`graph.py:97`) is a conditional edge that returns a list of
+`fan_out_summaries` (`graph.py`) is a conditional edge that returns a list of
 `Send` objects, one per surviving candidate — LangGraph's map-reduce. A hundred
 independent branches run in a single superstep, each writing into a state key with
 an `operator.add` reducer. With no candidates it returns the string `"persist"`
@@ -477,7 +493,7 @@ Two limits have to be raised for this to work at all, both set in `runner.py`:
 - `max_concurrency` is set to `SUMMARIZE_BATCH_SIZE` (10). A hundred simultaneous
   requests collect 429s; throttling is cheaper than retrying.
 
-`summarize_article` (`pipeline/nodes/summarize.py:50`) has three properties that
+`summarize_article` (`pipeline/nodes/summarize.py`) has three properties that
 follow from being a fan-out branch:
 
 - It **reads its article from the database**, not from state, for the checkpoint
@@ -492,7 +508,7 @@ follow from being a fan-out branch:
   are handled.
 
 The model is called with `with_structured_output(ArticleSummary, include_raw=True)`.
-`include_raw` is there specifically so `usage_from_message` (`pipeline/llm.py:56`)
+`include_raw` is there specifically so `usage_from_message` (`pipeline/llm.py`)
 can read `usage_metadata` off the raw response — without the raw message there is
 no honest way to cost a run.
 
@@ -500,7 +516,7 @@ no honest way to cost a run.
 
 The importance scores from summarize were each assigned in isolation: one article,
 no idea what else happened that day. Five separate 4s are common and mean nothing
-relative to each other. `rank_summaries` (`pipeline/nodes/rank.py:58`) is the only
+relative to each other. `rank_summaries` (`pipeline/nodes/rank.py`) is the only
 place with the whole day in view, which is what lets it say "these three are the
 same event" and "this 4 is really today's 5".
 
@@ -576,7 +592,7 @@ estimate and is labelled as one; prompt caching makes the real bill lower.
 `run_collect` — the three-hourly poll. No LLM, no cost, no digest.
 
 `run_digest` — the full graph, with checkpoints written to `checkpoints.db`, a
-*separate* file from `app.db` (`graph.py:43`). They are machine state with a
+*separate* file from `app.db` (`graph.py`). They are machine state with a
 different lifecycle: deleting checkpoints costs nothing, deleting `app.db` costs
 the archive.
 
@@ -669,7 +685,7 @@ paid run is worse than no bookkeeping.
 
 ## 10. Scheduling — and why there is almost none of it
 
-`build_scheduler` (`scheduler.py:44`) registers exactly one job: the feed poll, on
+`build_scheduler` (`scheduler.py`) registers exactly one job: the feed poll, on
 an `IntervalTrigger` of `COLLECT_INTERVAL_HOURS`. It runs inside the API process
 (ADR 0004), which is why `docker-compose` and the Dockerfile both pin a single
 uvicorn worker — a second worker would mean a second scheduler.
@@ -681,7 +697,7 @@ and `max_instances=1` stops a slow poll from being overlapped by the next. The
 misfire grace is 30 minutes — a poll four hours late is still useful; one from
 yesterday is not, because the next cycle covers it.
 
-The job swallows its own exceptions (`scheduler.py:33`): the run row already
+The job swallows its own exceptions (`scheduler.py`): the run row already
 records the failure, and a scheduler that dies on one bad night stops every later
 night.
 
@@ -697,7 +713,7 @@ and there is a test that asserts it.
 
 ### 11.1 Application lifecycle
 
-`lifespan` (`web/app.py:34`) creates the schema, seeds the feed list, and starts
+`lifespan` (`web/app.py`) creates the schema, seeds the feed list, and starts
 the scheduler; on the way out it shuts the scheduler down, folds the WAL back into
 the database file with `wal_checkpoint(TRUNCATE)` and disposes the engine. Seeding
 runs on *every* start, not just the first, so a feed added to `feeds.yaml` in a
@@ -725,7 +741,7 @@ is additive.
 
 ### 11.3 The button, end to end
 
-`start_run` (`web/routes/runs.py:255`) refuses for exactly two reasons: no API
+`start_run` (`web/routes/runs.py`) refuses for exactly two reasons: no API
 key, or a run already in flight. Then:
 
 1. **Claim before creating the task.** `create_task` only schedules; a second
@@ -736,7 +752,7 @@ key, or a run already in flight. Then:
    immediately.
 3. **Hold a reference to the task.** The event loop keeps only a weak reference,
    so a fire-and-forget digest can be garbage-collected mid-run; `_tasks`
-   (`runs.py:72`) is what stops that.
+   (`runs.py`) is what stops that.
 4. **The response is itself the poller.** It returns a `<span>` carrying
    `hx-get="/runs/status" hx-trigger="every 3s"`, which swaps itself every three
    seconds until `run_status` sees the run is over and returns a fragment that
@@ -747,7 +763,7 @@ the run lasts however it ends.
 
 ### 11.4 The advice
 
-`build_advice` (`web/views.py:444`) is the replacement for the clock. It produces
+`build_advice` (`web/views.py`) is the replacement for the clock. It produces
 one of five states:
 
 | State | Meaning | Button |
@@ -764,12 +780,12 @@ are facts about the machine, not opinions about timing.
 The anchor is `last_success_at`, not the last finished run. A digest that ended in
 an error produced no bulletin, so it must not push the next suggestion a day into
 the future — a failed run is something you are told about and then asked to
-repeat, not something that counts as done. `run_history` (`queries.py:234`) does
+repeat, not something that counts as done. `run_history` (`queries.py`) does
 three one-row lookups down the `started_at` index rather than one pass over recent
 runs, because "the last successful digest" can be arbitrarily far back and a week
 of failures would fall outside any window a single query picked.
 
-`format_gap` (`views.py:383`) says a span in the units a person would use, coarser
+`format_gap` (`web/format.py`) says a span in the units a person would use, coarser
 the further out it is. The countdown script in `runs.html` reproduces those
 branches exactly — one rule drawn twice, because the server has to render a first
 frame that JavaScript then keeps ticking. The *words* are not drawn twice: both
@@ -777,7 +793,7 @@ copies read them off `i18n`, which is also why "3h 25m" closes up in English and
 "3 sa 25 dk" does not in Turkish — that space is `u_sep`, a translated string like
 any other.
 
-The advice object is built once in `shell_context` (`views.py:524`) and read by
+The advice object is built once in `shell_context` (`views.py`) and read by
 two places, the rail's foot on every page and the block at the head of `/runs`, so
 the two can never disagree.
 
@@ -809,23 +825,23 @@ itself later.
   one — read off `eval_results` and `verdicts`, which the web layer owns, never
   through `evals/` (ADR 0019 §2). `/runs/verdicts` draws it with the two words
   under each row.
-- `search_stories` (`queries.py:289`) goes through FTS5. `_fts_query` quotes every
+- `search_stories` (`queries.py`) goes through FTS5. `_fts_query` quotes every
   token and appends `*`, which does two jobs: it stops FTS5 treating `AND`, `-` or
   `"` as operators and erroring on an ordinary search, and it makes Turkish
   suffixes stop mattering — "model" then finds "modeli" and "modelleri", which is
   the whole difference between a search box that works in Turkish and one that
   does not. Results are newest-first: a search has no day to be heavy about.
-- `recent_activity` (`queries.py:364`) buckets a week of runs by the reader's
+- `recent_activity` (`queries.py`) buckets a week of runs by the reader's
   *local* calendar day in Python rather than with a `GROUP BY`, because the bucket
   is a local date and SQLite would need to be told the offset — a rule that then
   disagrees with `to_local` the first time the timezone setting changes.
-- `verdict_progress` (`queries.py:447`) is how many summaries carry a verdict out
+- `verdict_progress` (`queries.py`) is how many summaries carry a verdict out
   of how many exist. It is on `/runs` because it is the one evaluation number the
   interface can actually move.
-- `labelled_stories` (`queries.py:481`) is every verdict, newest press first, with
+- `labelled_stories` (`queries.py`) is every verdict, newest press first, with
   enough of the story to place it. Both words and not only `wrong`: the count it
   hangs off states 4 of 118, and the calibration needs both classes.
-- `steps_for_run` (`queries.py:525`) reads the node rows for `/runs/<id>` and
+- `steps_for_run` (`queries.py`) reads the node rows for `/runs/<id>` and
   computes each step's share of the run's wall clock. The shares deliberately do
   not add to 100%: what is missing is the scheduling between supersteps, and it is
   worth seeing.
@@ -833,7 +849,7 @@ itself later.
 Three counting rules were fixed on 2026-09-06 and are worth stating, because each
 was a number on the page promising something the link behind it did not deliver:
 
-- `count_ranked` (`views.py:337`) counts rows. It used to be
+- `count_ranked` (`views.py`) counts rows. It used to be
   `min(n_summarized, digest_top_n)` — a guess, and wrong on a day the ranker
   returns fewer than the cap. On 2026-09-05 a run summarised 136 and ranked 11,
   and the page drew eleven stories under a badge reading 15.
@@ -901,7 +917,7 @@ The reasoning behind the page is choices 0008–0024 in §17; the short version:
 - **The story block never reorders.** Source and age, headline, summary, *why it
   matters* on its own inset plate, topics, source link — the same six things in
   the same order on every item, which is what separates this from a feed reader.
-- **The impact meter** is three bars and a word (`impact_band`, `views.py:227`).
+- **The impact meter** is three bars and a word (`impact_band`, `web/format.py`).
   Five bars with no legend was a shape nobody had been told how to read; three
   bands and a name is a scale. The band is computed in the template from data, the
   colours live in `theme.css` on their own tokens — never `--alarm` reused (ADR

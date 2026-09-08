@@ -46,19 +46,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import bulletin_runs, db_session
+from ainews.pipeline.api import count_candidates, digest_in_flight, resumable_run
 from ainews.pipeline.llm import model_options, resolve_model
-from ainews.pipeline.runner import (
-    digest_in_flight,
-    release_slot,
-    reserve_slot,
-    resumable_run,
-)
+from ainews.pipeline.runner import release_slot, reserve_slot
 from ainews.web import queries
+from ainews.web.format import format_step_duration
 from ainews.web.i18n import LANGUAGES, note_text, strings
 from ainews.web.views import (
     build_advice,
     count_enabled_sources,
-    format_step_duration,
     get_templates,
     language_of,
     remember_preferences,
@@ -170,7 +166,7 @@ async def _action_context(
         "asking": asking,
         "out": out,
         "n_sources": await count_enabled_sources(session),
-        "n_candidates": await queries.count_candidates(session) if asking else None,
+        "n_candidates": await count_candidates(session) if asking else None,
         "resume": await resumable_run(session, settings) if asking else None,
         "last_cost": advice.last.est_cost_usd if advice.last else None,
         "models": options,

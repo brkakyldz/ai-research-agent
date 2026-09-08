@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.db import Source, db_session
+from ainews.pipeline.api import probe_feed
 from ainews.sources.seed import is_blocked
 from ainews.web import queries
 from ainews.web.i18n import strings
@@ -78,8 +79,6 @@ async def add_source(
     lang: str = Form("tr"),
     session: AsyncSession = Depends(db_session),
 ) -> RedirectResponse:
-    from ainews.pipeline.nodes.collect import probe_feed
-
     t = strings(lang if lang in ("tr", "en") else "tr")  # type: ignore[arg-type]
     url = url.strip()
 
