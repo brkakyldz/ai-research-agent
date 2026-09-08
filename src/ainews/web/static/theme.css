@@ -1608,6 +1608,40 @@ td {
   color: var(--ink-2);
 }
 tr:last-child td { box-shadow: none; }
+
+/* The weight column, editable in place. A number field rather than a list of
+   steps: the seed tunes weights in tenths and a select with no matching option
+   submits its first one, which is how a save came to write 0.5 over nine
+   carefully-set weights.
+
+   The chrome comes off and the table's own face goes back on, so a column of
+   sixteen of these reads as a column of numbers with an edge rather than as
+   sixteen widgets. The spinner goes with it - a 0.1 step needs fifteen clicks
+   to cross the range, so it is a control that promises help and gives none.
+
+   Kolonun kendi başlığındaki `kaydet` bağlantısı hepsini birden yazar: ağırlık
+   göreli bir sayı, o yüzden soru "bu kaynak kaç" değil "bu on altı içinde hangisi
+   önde". */
+.wnum {
+  appearance: textfield;
+  width: 4.2em;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  padding: 3px 6px;
+  margin: -3px 0 -3px -6px;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.wnum::-webkit-outer-spin-button,
+.wnum::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.wnum:hover { background: var(--raised); border-color: var(--panel-line); }
+.wnum:focus { outline: none; background: var(--raised); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); color: var(--ink-0); }
+/* The header's save link, which is a word beside a word and must not read as a
+   second column heading. */
+th .lnk { font-family: var(--sans); font-size: 12px; font-weight: 400; margin-left: 8px; color: var(--ink-3); }
 tr:hover td { background: var(--row-hover); color: var(--ink-1); }
 td.strong { color: var(--ink-0); }
 /* The way into a run is the time cell, which therefore has to read as a way in.

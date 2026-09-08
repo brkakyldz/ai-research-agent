@@ -142,9 +142,20 @@ async def resolve_run_id(session: AsyncSession, ref: str) -> str:
     return rows[0]
 
 
-async def _open_run(kind: str, language: str) -> str:
+async def _open_run(
+    kind: str,
+    language: str,
+    model_summarize: str | None = None,
+    model_rank: str | None = None,
+) -> str:
     async with session_scope() as session:
-        run = Run(kind=kind, language=language, status="running")
+        run = Run(
+            kind=kind,
+            language=language,
+            status="running",
+            model_summarize=model_summarize,
+            model_rank=model_rank,
+        )
         session.add(run)
         await session.flush()
         return run.id
@@ -288,7 +299,10 @@ async def _start_digest(
     language = language or settings.digest_language
     model_summarize = resolve_model(model_summarize, settings.openai_model_summarize)
     model_rank = resolve_model(model_rank, settings.openai_model)
-    run_id = await _open_run("digest", language)
+    # The models are on the row from the start, not inferred from `run_steps`
+    # afterwards: a run that fails at `collect` writes no paid step at all, and
+    # what was bought is a fact about the press rather than about what happened.
+    run_id = await _open_run("digest", language, model_summarize, model_rank)
     log.info(
         "run %s starting (language=%s, summarize=%s, rank=%s)",
         run_id,

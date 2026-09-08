@@ -141,8 +141,15 @@ async def record_run(
         "language": run.language,
         "run_started_at": run.started_at.isoformat() if run.started_at else None,
         "run_finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        "model_summarize": models.get("summarize", settings.openai_model_summarize),
-        "model_rank": models.get("rank", settings.openai_model),
+        # The run row first (2026-09-08), the steps for a run written before the
+        # columns existed, and the environment last - which is the order of how
+        # much each one knows about *this* run. The settings' knob is the weakest
+        # of the three and used to be second: a changed `.env` would name a model
+        # the run never saw.
+        "model_summarize": (
+            run.model_summarize or models.get("summarize") or settings.openai_model_summarize
+        ),
+        "model_rank": run.model_rank or models.get("rank") or settings.openai_model,
         "top_n": settings.digest_top_n,
         "editor_note": run.editor_note,
         "stories": stories,

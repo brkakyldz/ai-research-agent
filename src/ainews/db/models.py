@@ -35,7 +35,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
 
-SourceKind = Literal["rss", "tavily"]
+# One value, and it is not an oversight. `tavily` was in this literal and in the
+# CHECK from M0 and nothing ever wrote it: Tavily is an *enrichment* step run over
+# an article whose body a feed served thin (`sources/tavily.py`), not a thing that
+# is polled on a schedule and appears in this table. The column stays because
+# removing it is a table rebuild, which is the operation ADR 0005 says needs
+# Alembic first; what it stops doing is naming a kind of row that has never
+# existed.
+SourceKind = Literal["rss"]
 # Two kinds, because there are two kinds of work: the free feed poll and the run
 # that spends money. There was a third, `manual`, distinguishing a pressed digest
 # from a scheduled one - vestigial since ADR 0015 took the clock off and nothing
@@ -110,7 +117,10 @@ class Source(Base):
     name: Mapped[str] = mapped_column(String(200))
     url: Mapped[str] = mapped_column(String(1000), unique=True)
     kind: Mapped[str] = mapped_column(String(20), default="rss")
-    # Editorial weight, 0.5-2.0: breaks ranking ties and picks enrichment targets.
+    # Editorial weight, 0.5-2.0: breaks ranking ties, decides which thin articles
+    # are worth a Tavily credit, and since ADR 0025 picks the survivor of a
+    # duplicate cluster. Editable on `/sources`; it was documented as a range,
+    # constrained only above zero, and settable nowhere.
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     enabled: Mapped[bool] = mapped_column(default=True)
 
@@ -123,8 +133,12 @@ class Source(Base):
     articles: Mapped[list[Article]] = relationship(back_populates="source")
 
     __table_args__ = (
-        CheckConstraint("kind in ('rss', 'tavily')", name="ck_sources_kind"),
-        CheckConstraint("weight > 0", name="ck_sources_weight"),
+        CheckConstraint("kind in ('rss')", name="ck_sources_kind"),
+        # The range the editor offers and the docstring names, enforced. It was
+        # `weight > 0` alone, so a typo in a form field could set 20.0 and make
+        # one feed outrank every other by an order of magnitude in a tie-break
+        # nobody would think to look at.
+        CheckConstraint("weight >= 0.5 AND weight <= 2.0", name="ck_sources_weight"),
     )
 
 
@@ -184,6 +198,15 @@ class Run(Base):
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
     est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Which models this run was told to use (ADR 0020). Written at the press,
+    # before any node runs, so the row says what was bought even when the run
+    # failed at `collect` and left no `run_steps` to infer it from - which is
+    # what `evals/record.py` had to do, and what made a fixture's model field a
+    # reconstruction rather than a record. Nullable: every run before 2026-09-08
+    # has neither, and those are still read off the steps.
+    model_summarize: Mapped[str | None] = mapped_column(String(60), default=None)
+    model_rank: Mapped[str | None] = mapped_column(String(60), default=None)
 
     editor_note: Mapped[str | None] = mapped_column(Text, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)

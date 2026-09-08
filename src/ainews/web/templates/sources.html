@@ -12,11 +12,24 @@
       </form>
     </div>
 
+    {# The weight column's form, declared outside the table because a form cannot
+       contain another and every row already carries the toggle's. The selects
+       below join it by `form="weights"`, which is what HTML's form attribute is
+       for. One submit for the whole column: weights are relative, so the
+       question is which of these feeds leads, not what this one is worth alone. #}
+    <form id="weights" action="/sources/weights" method="post"></form>
+    <input type="hidden" name="lang" value="{{ language }}" form="weights">
+
     <div class="scroll">
     <table>
       <thead>
         <tr>
-          <th>{{ t.col_source }}</th><th>{{ t.col_weight }}</th><th>{{ t.col_articles }}</th>
+          <th>{{ t.col_source }}</th>
+          {# The save link sits in the header of the column it saves, which is
+             the only place on this page it can stand for sixteen rows at once
+             without being drawn sixteen times. #}
+          <th>{{ t.col_weight }} <button class="lnk" type="submit" form="weights">{{ t.save }}</button></th>
+          <th>{{ t.col_articles }}</th>
           <th>{{ t.col_last }}</th><th>{{ t.col_toggle }}</th>
         </tr>
       </thead>
@@ -26,7 +39,16 @@
           {# A disabled feed stays in the list at a lower ink step rather than
              disappearing: it is still a decision the reader made. #}
           <td lang="en" {% if row.source.enabled %}class="strong"{% endif %}>{{ row.source.name }}</td>
-          <td>{{ '%.1f'|format(row.source.weight) }}</td>
+          {# A number field and not a list of steps. The seed tunes weights in
+             tenths, so any fixed set of options narrower than the column would
+             have no entry for most rows - and a select with no matching option
+             does not refuse the value, it silently submits its first one. #}
+          <td>
+            <input class="wnum" type="number" form="weights"
+                   name="w_{{ row.source.id }}" value="{{ '%.1f'|format(row.source.weight) }}"
+                   min="{{ weight_range[0] }}" max="{{ weight_range[1] }}" step="{{ weight_range[2] }}"
+                   aria-label="{{ t.col_weight }}: {{ row.source.name }}">
+          </td>
           <td>{{ row.n_articles }}</td>
           <td {% if row.source.consecutive_failures %}class="bad"{% endif %}>{{ row.source.last_status or '—' }}</td>
           <td>

@@ -64,6 +64,8 @@ FTS_DDL = [
 # archive both tolerate.
 ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("summaries", "editor_importance", "INTEGER"),  # ADR 0025, 2026-09-08
+    ("runs", "model_summarize", "VARCHAR(60)"),  # 2026-09-08
+    ("runs", "model_rank", "VARCHAR(60)"),  # 2026-09-08
 ]
 
 # The other half of the same amendment: a value the code no longer writes and no
