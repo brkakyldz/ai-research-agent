@@ -112,7 +112,14 @@ class Settings(BaseSettings):
 
     @property
     def sqlite_path(self) -> Path:
-        """Filesystem path behind `database_url`, for WAL setup and backups."""
+        """Filesystem path behind `database_url`.
+
+        Two callers: the WAL pragmas at connection setup, and `checkpoint_path`,
+        which puts the graph's checkpoint file beside it. It said "and backups"
+        until 2026-09-08 and there has never been a backup command; getting the
+        database out of the container is `docker cp`, which `docker-compose.yml`
+        documents where it explains the named volume.
+        """
         _, _, tail = self.database_url.partition(":///")
         return (PROJECT_ROOT / tail).resolve() if tail.startswith("./") else Path(tail)
 

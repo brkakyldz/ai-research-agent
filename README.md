@@ -98,6 +98,7 @@ uv run ainews collect     # poll the feeds; no LLM, no cost
 uv run ainews digest      # the full pipeline
 uv run ainews digest --resume <run>   # finish a failed run from its checkpoint
 uv run ainews sources     # what is being polled and what it last said
+uv run ainews prune --dry-run   # what could be dropped; drop it without the flag
 ```
 
 ## The pages
@@ -201,6 +202,14 @@ right.
   seven-day horizon and nothing older.
 - **One worker, forever.** A second uvicorn worker means a second scheduler, a
   second feed poll, and two writers on a database that has room for one.
+- **It grows, and only one command shrinks it.** A day of news is roughly 140
+  articles, 120 summaries and 200 checkpoint rows — about 200 KB in `app.db` and
+  300 KB in `checkpoints.db`, so around 15 MB a month at one run a day. The
+  archive is the point of the tool and is never removed. `ainews prune` drops the
+  two things nothing can reach: checkpoint threads for runs that cannot be
+  resumed, and articles past the collect horizon that were never summarised.
+  `--dry-run` counts them first. It is a command and not a schedule, for the same
+  reason the digest is (ADR 0015).
 - **No migration tool in v1.** Startup adds a missing nullable column and nothing
   else (ADR 0025); any other schema change after the archive is worth keeping
   means writing an Alembic baseline first.

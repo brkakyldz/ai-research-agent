@@ -73,6 +73,28 @@ async def _digest(
     return 0
 
 
+async def _prune(dry_run: bool) -> int:
+    """Drop what nothing can reach: `pipeline/prune.py` says what that is."""
+    from ainews.pipeline.prune import prune
+    from ainews.pipeline.runner import RunBusy
+
+    await _prepare()
+    try:
+        report = await prune(dry_run=dry_run)
+    except RunBusy as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    verb = "would drop" if report.dry_run else "dropped"
+    print(
+        f"{verb} {report.threads} checkpoint thread(s) "
+        f"({report.checkpoint_rows} rows) and {report.articles} unsummarised article(s)"
+    )
+    if not report.dry_run:
+        print(f"reclaimed {report.total_bytes / 1024:.0f} KiB")
+    print("summaries, runs, verdicts and judge findings are never pruned")
+    return 0
+
+
 async def _sources() -> int:
     from sqlalchemy import select
 
@@ -158,6 +180,15 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     sub.add_parser("sources", help="list the seeded feeds and their last status")
+    pruning = sub.add_parser(
+        "prune",
+        help="drop checkpoint threads and unsummarised articles nothing can reach",
+    )
+    pruning.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="count what would go and delete nothing",
+    )
     sub.add_parser("init", help="create the database and seed the feed list")
     sub.add_parser("serve", help="run the dashboard on HOST:PORT from the environment")
     add_eval_parser(sub)
@@ -179,6 +210,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if args.command == "sources":
                 return await _sources()
+            if args.command == "prune":
+                return await _prune(args.dry_run)
             if args.command == "eval":
                 return await run_eval(args)
             await _prepare()
