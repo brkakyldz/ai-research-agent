@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import Request
@@ -31,10 +32,25 @@ from ainews.web.i18n import (
 )
 
 
-def get_templates() -> Jinja2Templates:
-    from ainews.web.app import TEMPLATE_DIR as directory
+def build_templates(directory: Path, *, auto_reload: bool) -> Jinja2Templates:
+    """The Jinja environment, built once by `create_app`.
 
+    It used to be built by `get_templates()` on every call, and there are twelve
+    of those - so every page render parsed the loader's configuration, made a new
+    environment, registered seven filters, and threw away the template cache the
+    previous request had just filled. Jinja's whole compile-once design was being
+    defeated by the accessor in front of it.
+
+    `auto_reload` is the other half. `ENVIRONMENT=development` promised template
+    reloading in the env template and only ever toggled `/api/docs`; a rebuilt
+    environment made it true by accident and an environment built once would have
+    made it false by accident. It is a parameter now, so the promise is kept on
+    purpose and a production run gets the cache it is paying for.
+    """
     templates = Jinja2Templates(directory=str(directory))
+    # Starlette's wrapper forwards no environment options, so this is set after
+    # the fact rather than passed in.
+    templates.env.auto_reload = auto_reload
     templates.env.filters["clock"] = format_clock
     templates.env.filters["stamp"] = stamp_filter
     templates.env.filters["money"] = format_money
@@ -43,6 +59,11 @@ def get_templates() -> Jinja2Templates:
     templates.env.filters["band"] = impact_band
     templates.env.filters["paragraphs"] = split_paragraphs
     return templates
+
+
+def get_templates(request: Request) -> Jinja2Templates:
+    """The one environment this app was built with."""
+    return request.app.state.templates  # type: ignore[no-any-return]
 
 
 def local_zone() -> ZoneInfo:

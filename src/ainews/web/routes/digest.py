@@ -89,7 +89,7 @@ async def index(
         # time; the rail came off and the query went with it.
         context["split"] = impact_split(stories)
 
-    response = get_templates().TemplateResponse(request, "index.html", context)
+    response = get_templates(request).TemplateResponse(request, "index.html", context)
     remember_preferences(request, response, language)
     return response
 
@@ -129,7 +129,7 @@ async def archive(
             ),
         }
     )
-    response = get_templates().TemplateResponse(request, "archive.html", context)
+    response = get_templates(request).TemplateResponse(request, "archive.html", context)
     remember_preferences(request, response, language)
     return response
 
@@ -148,7 +148,7 @@ async def search(
             "stories": await queries.search_stories(session, q, language) if q.strip() else [],
         }
     )
-    response = get_templates().TemplateResponse(request, "search.html", context)
+    response = get_templates(request).TemplateResponse(request, "search.html", context)
     remember_preferences(request, response, language)
     return response
 
@@ -206,7 +206,7 @@ async def post_verdict(
 
     story = await queries.story_for_summary(session, summary_id, language)
     if frag == "words":
-        return get_templates().TemplateResponse(
+        return get_templates(request).TemplateResponse(
             request,
             "_verdict_words.html",
             {
@@ -218,7 +218,7 @@ async def post_verdict(
                 "frag": "words",
             },
         )
-    return get_templates().TemplateResponse(
+    return get_templates(request).TemplateResponse(
         request,
         "_story_foot.html",
         {"story": story, "language": language, "t": strings(language), "saved": True},

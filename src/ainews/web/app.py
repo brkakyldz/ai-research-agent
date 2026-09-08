@@ -25,6 +25,7 @@ from ainews.observability import enable_tracing
 from ainews.scheduler import start_scheduler
 from ainews.sources.seed import sync_sources
 from ainews.web.security import same_origin_only
+from ainews.web.views import build_templates
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +80,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # came from somewhere else is refused. `web/security.py` says why that is the
     # proportionate answer here rather than a token in every form.
     app.middleware("http")(same_origin_only)
+
+    # One environment for the life of the process, not one per render. Templates
+    # are recompiled on change only in development, which is what `ENVIRONMENT`
+    # has claimed in the env template since M0 and did not do.
+    app.state.templates = build_templates(
+        TEMPLATE_DIR, auto_reload=settings.environment == "development"
+    )
 
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

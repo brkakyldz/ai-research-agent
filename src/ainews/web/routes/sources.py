@@ -50,7 +50,7 @@ async def sources_page(
             "message_bad": bad,
         }
     )
-    response = get_templates().TemplateResponse(request, "sources.html", context)
+    response = get_templates(request).TemplateResponse(request, "sources.html", context)
     remember_preferences(request, response, language)
     return response
 

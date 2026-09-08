@@ -372,6 +372,27 @@ def test_run_now_starts_one_run_and_refuses_a_second(
     assert started == 1
 
 
+def test_the_template_environment_is_built_once(client: TestClient, digest: Run) -> None:
+    """Twelve call sites built their own until 2026-09-08, so every render threw
+    away the compile cache the previous one had filled."""
+    from ainews.web.views import get_templates
+
+    before = client.app.state.templates  # type: ignore[attr-defined]
+    client.get("/")
+    client.get("/runs")
+    assert client.app.state.templates is before  # type: ignore[attr-defined]
+    assert get_templates(SimpleNamespace(app=client.app)) is before  # type: ignore[arg-type]
+
+
+def test_templates_reload_in_development_and_not_in_production(settings: Settings) -> None:
+    """`ENVIRONMENT` promised this in the env template and only toggled the API
+    docs; an environment built per request made it true by accident."""
+    settings.environment = "development"
+    assert create_app(settings).state.templates.env.auto_reload is True
+    settings.environment = "production"
+    assert create_app(settings).state.templates.env.auto_reload is False
+
+
 # -- static -------------------------------------------------------------------
 
 

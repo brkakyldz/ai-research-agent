@@ -191,7 +191,7 @@ async def _render_action(
     settings: Settings,
 ) -> HTMLResponse:
     context = await _action_context(request, session, language, asking, out, models, settings)
-    return get_templates().TemplateResponse(request, "_run_action.html", context)
+    return get_templates(request).TemplateResponse(request, "_run_action.html", context)
 
 
 @router.get("/runs/action", response_class=HTMLResponse)
@@ -272,7 +272,7 @@ async def runs_page(
             "verdicts": await queries.verdict_progress(session),
         }
     )
-    response = get_templates().TemplateResponse(request, "runs.html", context)
+    response = get_templates(request).TemplateResponse(request, "runs.html", context)
     remember_preferences(request, response, language)
     return response
 
@@ -429,7 +429,7 @@ async def verdicts_page(
             "n_answered": sum(1 for f in findings if f.verdict is not None),
         }
     )
-    response = get_templates().TemplateResponse(request, "verdicts.html", context)
+    response = get_templates(request).TemplateResponse(request, "verdicts.html", context)
     remember_preferences(request, response, language)
     return response
 
@@ -455,7 +455,7 @@ async def run_detail(
     run = await queries.run_by_id(session, run_id)
     context = await shell_context(request, session, language, page="runs")
     if run is None:
-        response = get_templates().TemplateResponse(
+        response = get_templates(request).TemplateResponse(
             request, "run_missing.html", context, status_code=404
         )
         remember_preferences(request, response, language)
@@ -504,6 +504,6 @@ async def run_detail(
             ],
         }
     )
-    response = get_templates().TemplateResponse(request, "run_detail.html", context)
+    response = get_templates(request).TemplateResponse(request, "run_detail.html", context)
     remember_preferences(request, response, language)
     return response
