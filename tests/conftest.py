@@ -13,12 +13,14 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ainews import db as db_pkg
 from ainews.config import Settings, get_settings
 from ainews.db import create_engine, init_db
 from ainews.db.session import dispose_engine
+from ainews.web.app import create_app
 
 
 @pytest.fixture(autouse=True)
@@ -66,6 +68,16 @@ async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
         yield eng
     finally:
         await dispose_engine()
+
+
+@pytest.fixture
+def client(settings: Settings, engine: AsyncEngine) -> TestClient:
+    """No lifespan: the `engine` fixture already built the schema, and running it
+    again would point the app at a second engine.
+
+    It was five identical copies across the page test files until 2026-09-08.
+    """
+    return TestClient(create_app(settings))
 
 
 @pytest_asyncio.fixture

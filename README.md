@@ -209,14 +209,22 @@ right.
   disables itself and says so on `/sources`.
 - **Cost is an estimate**, computed from token counts. Prompt caching makes the
   real bill lower.
-- **No auth.** It binds inside the container and publishes to loopback only. Do
-  not put it on a network you do not own.
+- **No auth.** It binds to loopback — `127.0.0.1` by default, and the container
+  publishes to `127.0.0.1:8000` — so nothing on the network can reach it. Do not
+  change `HOST` to `0.0.0.0` outside Docker unless you own the network.
+- **No CSRF token, and no session to hang one on.** What guards the four POSTs
+  that do something is a same-origin check on every state-changing request: a
+  browser labels a cross-site POST itself (`Sec-Fetch-Site`, `Origin`) and page
+  script cannot forge either label, so a stranger's tab cannot press the button
+  that spends money. A caller sending neither header is not a browser and has no
+  ambient cookies to ride, so the terminal still works. `web/security.py` says
+  why that is the proportionate answer for a single-user tool.
 
 ## Development
 
 ```bash
 uv sync
-uv run pytest          # 394 tests, no API key, no network
+uv run pytest          # the whole suite, no API key, no network
 uv run ruff check .
 uv run pre-commit install
 ```

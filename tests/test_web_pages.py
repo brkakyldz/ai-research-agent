@@ -83,13 +83,6 @@ async def digest(session: AsyncSession) -> Run:
     return run
 
 
-@pytest.fixture
-def client(settings: Settings, engine: AsyncEngine) -> TestClient:
-    """No lifespan: the `engine` fixture already built the schema, and running it
-    again would point the app at a second engine."""
-    return TestClient(create_app(settings))
-
-
 # -- the digest page ----------------------------------------------------------
 
 

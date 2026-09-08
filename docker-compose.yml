@@ -17,6 +17,12 @@ services:
       # profile, and a dependency on a service that is not started is an error.
       PHOENIX_ENABLED: ${PHOENIX_ENABLED:-false}
       PHOENIX_ENDPOINT: http://phoenix:6006/v1/traces
+      # The one place 0.0.0.0 is right: a process bound to loopback inside its
+      # own network namespace is not reachable from the host at all. Published
+      # to 127.0.0.1 below, so the container's every-interface bind ends at the
+      # container. The image's CMD passes --host explicitly; this is for anyone
+      # who runs `ainews serve` inside it.
+      HOST: 0.0.0.0
     ports:
       # Bound to the loopback interface, not published to every interface on the
       # host. There is no auth on this dashboard (README, "Known limits"), so

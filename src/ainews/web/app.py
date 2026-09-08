@@ -24,6 +24,7 @@ from ainews.logging_conf import configure_logging
 from ainews.observability import enable_tracing
 from ainews.scheduler import start_scheduler
 from ainews.sources.seed import sync_sources
+from ainews.web.security import same_origin_only
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +74,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+
+    # The only guard on a dashboard with no login: a POST that a browser says
+    # came from somewhere else is refused. `web/security.py` says why that is the
+    # proportionate answer here rather than a token in every form.
+    app.middleware("http")(same_origin_only)
 
     STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

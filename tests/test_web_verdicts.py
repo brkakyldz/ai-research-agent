@@ -8,11 +8,9 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ainews.config import Settings
 from ainews.db import Article, Run, Source, Summary, Verdict
-from ainews.web.app import create_app
 
 
 @pytest.fixture
@@ -52,11 +50,6 @@ async def summaries(session: AsyncSession) -> list[int]:
         ids.append(summary.id)
     await session.commit()
     return ids
-
-
-@pytest.fixture
-def client(settings: Settings, engine: AsyncEngine) -> TestClient:
-    return TestClient(create_app(settings))
 
 
 async def _rows(session: AsyncSession) -> list[Verdict]:

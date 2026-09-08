@@ -171,11 +171,6 @@ def test_the_cli_resumes_by_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     assert seen == ["5c60e8"]
 
 
-@pytest.fixture
-def client(settings: Settings, engine: AsyncEngine) -> TestClient:
-    return TestClient(create_app(settings))
-
-
 async def test_the_question_offers_to_finish_the_failed_run(
     client: TestClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

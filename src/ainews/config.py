@@ -82,7 +82,14 @@ class Settings(BaseSettings):
     phoenix_endpoint: str = "http://localhost:6006/v1/traces"
 
     # -- Web ------------------------------------------------------------------
-    host: str = "0.0.0.0"  # Local tool: bound inside the container, port published by compose.
+    # Loopback, because there is no login on this dashboard. `ainews serve` on a
+    # laptop used to bind every interface, which put the day's bulletin and the
+    # button that spends money on whatever café network the laptop was joined to.
+    # The container is the case that needs 0.0.0.0 - the process has to be
+    # reachable from outside its own namespace - and the Dockerfile's CMD passes
+    # `--host 0.0.0.0` explicitly, so it is a property of that entry point rather
+    # than of everyone's default.
+    host: str = "127.0.0.1"
     port: int = 8000
     log_level: str = "INFO"
     environment: Literal["development", "production"] = "development"

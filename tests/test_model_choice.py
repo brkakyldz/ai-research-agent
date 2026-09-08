@@ -35,13 +35,6 @@ LUNA = "gpt-5.6-luna"
 TERRA = "gpt-5.6-terra"
 
 
-@pytest.fixture
-def client(settings: Settings, engine: AsyncEngine) -> TestClient:
-    """No lifespan: `engine` already built the schema. No digest behind it
-    either - the question draws the same four choices on a cold database."""
-    return TestClient(create_app(settings))
-
-
 # -- the menu -----------------------------------------------------------------
 
 
