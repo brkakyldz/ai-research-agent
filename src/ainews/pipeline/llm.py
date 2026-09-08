@@ -1,9 +1,10 @@
 """Model construction, and the token counts the price table is applied to.
 
 One factory so every node gets the same timeout and retry policy. The prices
-themselves moved to `pricing` on 2026-09-07 - that module says why - and are
-re-exported here so the twenty call sites that read `estimate_cost` off this
-module keep working.
+live in `pricing`, which that module says why, and are imported from there: they
+were re-exported through here for a while so existing call sites would keep
+working, which in a repository with one author and one commit history is a
+compatibility layer against nobody. The call sites moved.
 
 Since ADR 0020 each factory takes an optional model. Which one a run uses is the
 caller's to decide, not this module's to look up.
@@ -18,30 +19,12 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 
 from ainews.config import Settings, get_settings
-from ainews.pipeline.pricing import (
-    FALLBACK_PRICE,
-    MODEL_NAMES,
-    PRICES,
-    ModelChoice,
-    estimate_cost,
-    model_options,
-    price_for,
-    resolve_model,
-)
 
 __all__ = [
-    "FALLBACK_PRICE",
-    "MODEL_NAMES",
-    "PRICES",
-    "ModelChoice",
     "Usage",
-    "estimate_cost",
     "judge",
     "make_llm",
-    "model_options",
-    "price_for",
     "ranker",
-    "resolve_model",
     "summarizer",
     "usage_from_message",
 ]

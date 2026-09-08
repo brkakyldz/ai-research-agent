@@ -10,6 +10,7 @@ from ainews.db import Article, DailyCounter, Source
 from ainews.pipeline.nodes.enrich import VERSION_TITLE, enrich_articles
 from ainews.sources import tavily
 from ainews.sources.extract import MIN_USABLE_CHARS, clean_html, fetch_article, is_usable
+from ainews.sources.rss import make_client
 
 LONG = "Bir model duyuruldu ve bu duyuru sektor icin onemli. " * 20
 
@@ -64,19 +65,37 @@ def test_usability_threshold() -> None:
 
 
 @respx.mock
-def test_fetch_returns_empty_string_instead_of_raising() -> None:
+async def test_fetch_returns_empty_string_instead_of_raising() -> None:
     respx.get("https://dead.dev/a").mock(side_effect=httpx.ConnectError("nope"))
-    assert fetch_article("https://dead.dev/a") == ""
+    assert await fetch_article("https://dead.dev/a") == ""
 
 
 @respx.mock
-def test_non_html_responses_are_skipped() -> None:
+async def test_non_html_responses_are_skipped() -> None:
     respx.get("https://x.dev/a.pdf").mock(
         return_value=httpx.Response(
             200, content=b"%PDF-1.7", headers={"content-type": "application/pdf"}
         )
     )
-    assert fetch_article("https://x.dev/a.pdf") == ""
+    assert await fetch_article("https://x.dev/a.pdf") == ""
+
+
+@respx.mock
+async def test_the_body_fetch_shares_the_feed_polls_client() -> None:
+    """One HTTP stack. It was a blocking `httpx.get` inside a thread, so the
+    project ran two - two pools, two sets of defaults - and held a worker thread
+    for the length of a fifteen-second timeout to do nothing but wait."""
+    route = respx.get("https://x.dev/a").mock(
+        return_value=httpx.Response(
+            200,
+            content=b"<html><body><article>" + b"word " * 200 + b"</article></body></html>",
+            headers={"content-type": "text/html"},
+        )
+    )
+    async with make_client() as client:
+        assert await fetch_article("https://x.dev/a", client) != ""
+        assert await fetch_article("https://x.dev/a", client) != ""
+    assert route.call_count == 2
 
 
 # -- tiering ------------------------------------------------------------------

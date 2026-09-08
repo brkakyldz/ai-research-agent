@@ -527,7 +527,21 @@ def test_the_run_page_leads_with_the_advice(client: TestClient, digest: Run) -> 
     assert 'data-state="waiting"' in body
     assert "Bugünün bülteni alındı" in body, "the state line"
     assert "Önerilen zaman" in body and "Kaynak taraması" in body, "two of the three facts"
-    assert "data-due=" in body, "and a countdown the script can keep ticking"
+    assert 'hx-get="/runs/countdown' in body, "and a countdown that refreshes itself"
+
+
+def test_the_countdown_is_one_implementation(client: TestClient, digest: Run) -> None:
+    """`format_gap` walked the branches in Python and a `setInterval` walked them
+    again in JavaScript, on the one line of the page that exists to be trusted.
+    The fragment re-fetches itself now and there is no second copy to drift."""
+    page = client.get("/runs").text
+    assert "setInterval" not in page
+    assert "data-u-min=" not in page, "the units were only there for the script"
+
+    fragment = client.get("/runs/countdown?lang=tr").text
+    assert 'id="countdown"' in fragment
+    assert "sonra" in fragment or "geçti" in fragment
+    assert "<html" not in fragment, "a fragment, not a page"
 
 
 async def test_a_stale_digest_turns_the_block_into_an_invitation(

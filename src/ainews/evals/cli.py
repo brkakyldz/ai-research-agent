@@ -84,7 +84,8 @@ def add_eval_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore[ty
 
 
 async def _record(run_ref: str, out: Path | None) -> int:
-    from ainews.evals.record import record_run, resolve_run_id, write_fixture
+    from ainews.evals.record import record_run, write_fixture
+    from ainews.pipeline.runner import resolve_run_id
 
     await init_db(get_engine())
     async with session_scope() as session:
@@ -97,8 +98,8 @@ async def _record(run_ref: str, out: Path | None) -> int:
 
 async def _judge(args: argparse.Namespace) -> int:
     from ainews.evals.judge import CostGuard, format_calibration, judge_labelled, judge_run
-    from ainews.evals.record import resolve_run_id
-    from ainews.pipeline.llm import resolve_model
+    from ainews.pipeline.pricing import resolve_model
+    from ainews.pipeline.runner import resolve_run_id
 
     settings = get_settings()
     if not settings.llm_configured:
@@ -142,8 +143,8 @@ async def _judge(args: argparse.Namespace) -> int:
 
 
 async def _stability(args: argparse.Namespace) -> int:
-    from ainews.evals.record import resolve_run_id
     from ainews.evals.stability import rank_stability
+    from ainews.pipeline.runner import resolve_run_id
 
     settings = get_settings()
     if not settings.llm_configured:
@@ -165,7 +166,6 @@ async def _stability(args: argparse.Namespace) -> int:
 
 
 async def _report(args: argparse.Namespace) -> int:
-    from ainews.evals.record import resolve_run_id
     from ainews.evals.report import (
         append_report,
         build_report,
@@ -173,6 +173,7 @@ async def _report(args: argparse.Namespace) -> int:
         read_record,
         render_markdown,
     )
+    from ainews.pipeline.runner import resolve_run_id
 
     await init_db(get_engine())
     async with session_scope() as session:

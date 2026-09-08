@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ainews.config import Settings, get_settings
 from ainews.db import Run, Summary
 from ainews.db.models import utcnow
-from ainews.pipeline.llm import estimate_cost
+from ainews.pipeline.pricing import estimate_cost
 from ainews.pipeline.state import PipelineState, RankedItem, SummaryPayload
 
 log = logging.getLogger(__name__)

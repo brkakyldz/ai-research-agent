@@ -44,8 +44,8 @@ from ainews.db import Run, bulletin_runs
 from ainews.db.models import utcnow
 from ainews.db.session import session_scope
 from ainews.pipeline.graph import build_graph, checkpoint_path
-from ainews.pipeline.llm import resolve_model
 from ainews.pipeline.nodes.collect import collect_articles
+from ainews.pipeline.pricing import resolve_model
 from ainews.pipeline.state import PipelineState
 from ainews.pipeline.steps import step
 

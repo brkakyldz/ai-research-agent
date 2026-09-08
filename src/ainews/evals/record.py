@@ -29,9 +29,8 @@ from ainews.pipeline.nodes.summarize import MAX_BODY_CHARS
 
 # Moved to the runner on 2026-09-08, when `ainews digest --resume` needed the
 # same prefix lookup; re-exported so the eval commands keep their import.
-from ainews.pipeline.runner import resolve_run_id
 
-__all__ = ["FIXTURE_DIR", "record_run", "resolve_run_id", "write_fixture"]
+__all__ = ["FIXTURE_DIR", "record_run", "write_fixture"]
 
 # Bumped when a story gains a field. 2 added `editor_importance` (ADR 0025).
 SCHEMA = 2

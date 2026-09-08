@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ainews.config import Settings, get_settings
 from ainews.db import bulletin_runs, db_session
 from ainews.pipeline.api import count_candidates, digest_in_flight, resumable_run
-from ainews.pipeline.llm import model_options, resolve_model
+from ainews.pipeline.pricing import model_options, resolve_model
 from ainews.pipeline.runner import release_slot, reserve_slot
 from ainews.web import queries
 from ainews.web.format import format_step_duration
@@ -353,6 +353,29 @@ async def resume_run(
     return HTMLResponse(
         f'<span hx-get="/runs/status?lang={language}" hx-trigger="every 3s" '
         f'hx-swap="outerHTML">{t["running"]}</span>'
+    )
+
+
+@router.get("/runs/countdown", response_class=HTMLResponse)
+async def run_countdown(
+    request: Request,
+    lang: str | None = None,
+    session: AsyncSession = Depends(db_session),
+) -> HTMLResponse:
+    """The "when is another run worth it" line, re-fetched by itself.
+
+    It used to be a first frame from the server and a `setInterval` in
+    `runs.html` that walked `format_gap`'s branches again in JavaScript - two
+    implementations of one sentence, on the one line of the page that exists to
+    be trusted, with a comment admitting it. One implementation now; the fragment
+    says why the mechanism is a poll.
+    """
+    language = _valid(lang, language_of(request))
+    advice = await build_advice(session, language)  # type: ignore[arg-type]
+    return get_templates(request).TemplateResponse(
+        request,
+        "_countdown.html",
+        {"request": request, "language": language, "t": strings(language), "advice": advice},  # type: ignore[arg-type]
     )
 
 

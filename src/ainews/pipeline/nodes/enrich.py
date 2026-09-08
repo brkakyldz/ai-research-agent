@@ -20,6 +20,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,7 @@ from ainews.config import Settings, get_settings
 from ainews.db import Article, Source
 from ainews.sources import tavily
 from ainews.sources.extract import clean_html, fetch_article, is_usable
+from ainews.sources.rss import make_client
 
 log = logging.getLogger(__name__)
 
@@ -88,16 +90,20 @@ async def enrich_articles(
         needs_fetch.append((article, weight))
     await session.commit()
 
-    # Tier 2: fetch and extract, in parallel but not unboundedly.
+    # Tier 2: fetch and extract, in parallel but not unboundedly. One client for
+    # the whole pass, so ninety fetches share eight connections rather than
+    # opening ninety - and it is the client the feed poll already uses.
     semaphore = asyncio.Semaphore(FETCH_CONCURRENCY)
-
-    async def fetch_one(article: Article) -> tuple[Article, str]:
-        async with semaphore:
-            return article, await asyncio.to_thread(fetch_article, article.url)
 
     still_thin: list[tuple[Article, float]] = []
     if needs_fetch:
-        fetched = await asyncio.gather(*(fetch_one(a) for a, _ in needs_fetch))
+
+        async def fetch_one(article: Article, client: httpx.AsyncClient) -> tuple[Article, str]:
+            async with semaphore:
+                return article, await fetch_article(article.url, client)
+
+        async with make_client() as client:
+            fetched = await asyncio.gather(*(fetch_one(a, client) for a, _ in needs_fetch))
         weights = {a.id: w for a, w in needs_fetch}
         for article, body in fetched:
             if is_usable(body):

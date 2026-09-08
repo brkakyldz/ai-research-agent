@@ -1,0 +1,19 @@
+{# When another run is worth making, kept fresh by the server rather than by a
+   second copy of the rule.
+
+   `format_gap` walked these branches in Python and a script in `runs.html`
+   walked them again in JavaScript, with a comment admitting it - so the app held
+   two implementations of "3 sa 25 dk", and the moment a threshold moved in one
+   they would disagree on the one line that exists to be trusted. This fragment
+   re-fetches itself, which is the mechanism `/runs/status` and the run
+   confirmation already use, and there is one implementation again.
+
+   Thirty seconds because the resolution is a minute: it is the "under a minute"
+   step that must not sit there stale, and this is a loopback request against a
+   tool one person has open. #}
+<p class="advice__n num" id="countdown"
+   hx-get="/runs/countdown?lang={{ language }}" hx-trigger="every 30s" hx-swap="outerHTML">
+  {%- if advice.gap is none -%}{{ t.advice_now }}
+  {%- elif advice.seconds_left > 0 -%}{{ t.left_in.format(t=advice.gap) }}
+  {%- else -%}{{ t.late_by.format(t=advice.gap) }}{%- endif -%}
+</p>

@@ -8,18 +8,24 @@ else's URL, which is nearly nothing at all.
 So there are two functions: `clean_html` for the first two, and `fetch_article`
 for the third. Both go through trafilatura, whose job is exactly this - pulling
 the article out of a page full of navigation, cookie banners and related-story
-rails - and both are synchronous C-and-Python, so callers run them in a thread.
+rails - and trafilatura is synchronous C and Python, so it runs in a thread.
+
+The *download* does not. `fetch_article` is async and takes the same
+`httpx.AsyncClient` the feed poll uses; it was a blocking `httpx.get` inside a
+thread until 2026-09-08, which is a second HTTP stack with a second connection
+pool for no reason but that it was written second.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
 import httpx
 import trafilatura
 
-from ainews.sources.rss import DEFAULT_HEADERS
+from ainews.sources.rss import make_client
 
 log = logging.getLogger(__name__)
 
@@ -74,14 +80,27 @@ def is_usable(body: str | None) -> bool:
     return bool(body) and len(body.strip()) >= MIN_USABLE_CHARS
 
 
-def fetch_article(url: str, timeout: float = 15.0) -> str:
+async def fetch_article(
+    url: str, client: httpx.AsyncClient | None = None, timeout: float = 15.0
+) -> str:
     """Download `url` and extract its article text. Returns "" on any failure.
 
-    Synchronous on purpose: trafilatura's own fetch helpers are, and the caller
-    already has to move this off the event loop.
+    Two halves, and only one of them belongs off the event loop. The download is
+    async, on the same `httpx.AsyncClient` the feed poll uses - it was a blocking
+    `httpx.get` inside `asyncio.to_thread`, which meant this project ran two HTTP
+    stacks with two connection pools, two sets of defaults and one shared header
+    dict, and held a worker thread for the whole of a fifteen-second timeout to
+    do nothing but wait. Passing the client in also lets ninety fetches share
+    eight connections instead of opening ninety.
+
+    The extraction stays in a thread, because trafilatura is synchronous C and
+    Python and parsing a 300 KB page would otherwise stall every other branch of
+    the fan-out.
     """
+    own = client is None
+    client = client or make_client()
     try:
-        response = httpx.get(url, headers=DEFAULT_HEADERS, follow_redirects=True, timeout=timeout)
+        response = await client.get(url, timeout=timeout)
         response.raise_for_status()
     # `InvalidURL` is not an `HTTPError`: httpx raises it while building the
     # request, for a stored feed link like `http://[::1` or an un-encodable IDNA
@@ -90,14 +109,22 @@ def fetch_article(url: str, timeout: float = 15.0) -> str:
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
         log.debug("body fetch failed for %s: %s", url, exc)
         return ""
+    finally:
+        if own:
+            await client.aclose()
 
     content_type = response.headers.get("content-type", "")
     if "html" not in content_type and "xml" not in content_type:
         return ""
 
+    return await asyncio.to_thread(extract_body, response.text, url)
+
+
+def extract_body(html: str, url: str) -> str:
+    """The synchronous half: trafilatura over an already-downloaded page."""
     try:
         extracted = trafilatura.extract(
-            response.text,
+            html,
             include_comments=False,
             include_tables=False,
             favor_precision=True,

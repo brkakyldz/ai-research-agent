@@ -13,13 +13,8 @@ from ainews.cli import main
 from ainews.config import Settings
 from ainews.db import Article, Run, Source, Summary
 from ainews.evals.cli import run_eval
-from ainews.evals.record import (
-    dump_fixture,
-    fixture_name,
-    record_run,
-    resolve_run_id,
-    write_fixture,
-)
+from ainews.evals.record import dump_fixture, fixture_name, record_run, write_fixture
+from ainews.pipeline.runner import resolve_run_id
 
 BODY = (
     "Nvidia confirmed it will pay $12.9 billion for Hugging Face. The platform hosts "

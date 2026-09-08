@@ -56,19 +56,7 @@
       </div>
       <div>
         <p class="unit__h">{{ t.fact_due }}</p>
-        {# The server renders the first frame and the script below keeps it
-           ticking, so the number is right with JavaScript off and right a
-           minute later with it on. Both walk the same branches, and both read
-           the words off the same strings - the Python half is `format_gap`. #}
-        <p class="advice__n num" id="countdown"
-           {% if advice.due_epoch_ms %}data-due="{{ advice.due_epoch_ms }}"{% endif %}
-           data-t-left="{{ t.left_in }}" data-t-late="{{ t.late_by }}"
-           data-u-moment="{{ t.u_moment }}" data-u-sep="{{ t.u_sep }}"
-           data-u-min="{{ t.u_min }}" data-u-hour="{{ t.u_hour }}" data-u-day="{{ t.u_day }}">
-          {%- if advice.gap is none -%}{{ t.advice_now }}
-          {%- elif advice.seconds_left > 0 -%}{{ t.left_in.format(t=advice.gap) }}
-          {%- else -%}{{ t.late_by.format(t=advice.gap) }}{%- endif -%}
-        </p>
+        {% include "_countdown.html" %}
         <p class="advice__s">{{ advice.due_at|stamp if advice.due_at else t.advice_never }}</p>
       </div>
     </div>
@@ -150,39 +138,4 @@
   </section>
   {% endif %}
 
-{# The one script on this page, and it redraws one line. The units come off the
-   element as data attributes rather than being spelled here, because the
-   sentence is a translated string and this file must not hold a second copy of
-   it. A minute is the resolution the reader needs; it ticks every second only
-   so the "under a minute" step does not sit there for a full minute after the
-   time has actually passed. The state line above does not re-render when the
-   countdown crosses zero - that would need a second copy of the state rule in
-   JavaScript, and a page held open across the boundary is rarer than the bug
-   that copy would eventually become. #}
-<script>
-(function () {
-  var el = document.getElementById('countdown');
-  if (!el || !el.dataset.due) return;
-  var d = el.dataset;
-  var due = Number(d.due);
-
-  function words(ms) {
-    var minutes = Math.floor(Math.abs(ms) / 60000);
-    if (minutes < 1) return d.uMoment;
-    if (minutes < 60) return minutes + d.uSep + d.uMin;
-    var hours = Math.floor(minutes / 60), rest = minutes % 60;
-    if (hours >= 48) return Math.floor(hours / 24) + d.uSep + d.uDay;
-    if (!rest) return hours + d.uSep + d.uHour;
-    return hours + d.uSep + d.uHour + ' ' + rest + d.uSep + d.uMin;
-  }
-
-  function tick() {
-    var left = due - Date.now();
-    el.textContent = (left > 0 ? d.tLeft : d.tLate).replace('{t}', words(left));
-  }
-
-  tick();
-  setInterval(tick, 1000);
-})();
-</script>
 {% endblock %}

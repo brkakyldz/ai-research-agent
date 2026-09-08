@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+from ainews import __version__
 from ainews.config import Settings, get_settings
 from ainews.db import dispose_engine, get_engine, init_db
 from ainews.db.session import checkpoint_wal, session_scope
@@ -70,7 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(
         title="AI News Digest",
-        version="0.1.0",
+        version=__version__,
         docs_url="/api/docs" if settings.environment == "development" else None,
         redoc_url=None,
         lifespan=lifespan,
