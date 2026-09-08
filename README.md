@@ -114,6 +114,11 @@ uv run ainews sources     # what is being polled and what it last said
 
 ![Runs](docs/screenshots/runs.png)
 
+A run is not a status word. Each node says what came in, what went out, where
+the time went and what it cost, so "it was slow" resolves to a step:
+
+![One run, node by node](docs/screenshots/run-detail.png)
+
 Every page wears the same shell: a left rail that is navigation and nothing else,
 and one bar across the top holding only the reader's own controls — search
 (`/` or Ctrl-K), interface language, theme. Cost and duration live on `/runs`,
@@ -136,6 +141,7 @@ Measured, not estimated:
 |---|---|---|---|---|
 | First run (a week's backlog) | 136 | 191,960 / 64,126 | **$0.115** | 85s |
 | A three-hour delta | 21 | 30,600 / 8,200 | **$0.017** | 43s |
+| A two-day delta | 20 | 32,195 / 12,363 | **$0.021** | 58s |
 
 About **$0.00085 per article**, so a normal day of 100 stories is roughly
 **$0.09** — **~$2.50 a month** against a $10 budget. Tavily stays on its free
@@ -177,6 +183,14 @@ the ranker. Both were measured while the page ignored the ranker's order
 
 ![How the evaluation works](docs/eval-architecture.png)
 
+The judge's failures are the part worth looking at, so they have a page rather
+than a line in a log: the sentence it could not find in the article, with the
+same *doğru · yanlış* under it that the stories carry. Answering one labels the
+judge, which is the only way a one-reader tool learns whether its evaluator is
+right.
+
+![The reader's verdicts and the judge's failures](docs/screenshots/verdicts.png)
+
 ## Known limits
 
 - **One language per bulletin.** `tr` or `en`, chosen at the press. The switch in
@@ -202,7 +216,7 @@ the ranker. Both were measured while the page ignored the ranker's order
 
 ```bash
 uv sync
-uv run pytest          # 384 tests, no API key, no network
+uv run pytest          # 394 tests, no API key, no network
 uv run ruff check .
 uv run pre-commit install
 ```
