@@ -12,11 +12,11 @@ body length before the first call and the command refuses above `--max-cost`,
 and every judged summary becomes an `EvalResult` row - eval spend is on the
 record like product spend.
 
-The sample is drawn from the ranked stories first (since 2026-09-08). The
-reader labels what the page shows, and the page shows the ranked fifteen; a
-sample drawn uniformly over ninety-one summaries held one or two of those, so
-the judge and the reader were looking at different stories and the calibration
-pairs - a judgement *and* a label on the same summary - formed by accident.
+The sample is drawn from the ranked stories first. The reader labels what the
+page shows, and the page shows the ranked fifteen; drawn uniformly over
+ninety-one summaries a sample holds one or two of those, so the judge and the
+reader look at different stories and the calibration pairs - a judgement *and* a
+label on the same summary - form only by accident.
 
 Calibration (`--labelled`) judges every summary that carries a reader's
 `Verdict` and reports TPR and TNR separately, never one accuracy figure: a

@@ -66,9 +66,9 @@ def test_the_horizon_is_the_interval_runs_already_counts_a_day_by(settings: Sett
 
 
 def test_importance_leads_the_reading_order_and_rank_breaks_its_ties() -> None:
-    """The order was the other way round until 2026-09-08, on a page whose only
-    ranking indicator is the size of the headline: a real day came out
-    p4, p3, p3, p2, p3, which reads as no order at all."""
+    """Led by `rank` instead, on a page whose only ranking indicator is the size
+    of the headline, a real day comes out p4, p3, p3, p2, p3 - which reads as no
+    order at all."""
     clauses = reading_order()
     assert len(clauses) == 3
     first, second, third = (str(c) for c in clauses)

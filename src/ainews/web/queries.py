@@ -253,9 +253,9 @@ class TagCounts:
     Both numbers are on screen at once whenever `?all=1` is on: the filter row
     counts the list the reader can reach, and the brief's footnote counts the
     *digest* - the same stories the rail badge counts - so opening the full list
-    must not leave "11 haber" beside a topic count taken over ninety-one. That
-    was two calls to this query until 2026-09-08, the second one scanning every
-    `tags_json` in the run a second time to produce a single integer.
+    must not leave "11 haber" beside a topic count taken over ninety-one. Two
+    calls would scan every `tags_json` in the run a second time to produce a
+    single integer.
     """
 
     ranked: list[tuple[str, int]]
@@ -334,11 +334,10 @@ async def run_history(session: AsyncSession) -> RunHistory:
     """
     last_finished = await _latest(session, Run.status != "running")
     last_success = await _latest(session, Run.status.in_(("ok", "partial")))
-    # The feeds are polled by every run, not only by the `collect` kind: a
-    # digest's first node is the same poll. Until 2026-09-08 this read the last
-    # `collect` run, so `/runs` said the sources were last read two days ago
-    # while the digest that had just finished had read them a minute earlier.
-    # The sources' own clocks are the record of when they were last touched.
+    # The sources' own clocks, not the last `collect` run: the feeds are polled
+    # by every run, and a digest's first node is the same poll. Reading the run
+    # table here makes `/runs` say the sources were last read two days ago while
+    # the digest that just finished read them a minute earlier.
     last_polled = (
         await session.execute(
             select(Source)

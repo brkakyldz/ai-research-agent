@@ -23,13 +23,12 @@ log = logging.getLogger(__name__)
 
 FEEDS_FILE = Path(__file__).resolve().parent / "feeds.yaml"
 
-# Hosts that may not be added at all, not even by hand in /sources. Both were
-# shipped defaults until 2026-09-04 and both were removed for the same reason:
-# a firehose of comment threads whose items are a title plus someone else's
-# link, so the ones that rank cost an extra extraction round and still summarise
-# into a restatement of the article they point at. This is deliberately a host
-# rule rather than a URL rule - hnrss.org alone serves a dozen query variants of
-# the same feed, and Reddit one per subreddit.
+# Hosts that may not be added at all, not even by hand in /sources. Both are
+# refused for the same reason: a firehose of comment threads whose items are a
+# title plus someone else's link, so the ones that rank cost an extra extraction
+# round and still summarise into a restatement of the article they point at.
+# This is deliberately a host rule rather than a URL rule - hnrss.org alone
+# serves a dozen query variants of the same feed, and Reddit one per subreddit.
 BLOCKED_HOSTS = frozenset({"hnrss.org", "news.ycombinator.com", "reddit.com"})
 
 

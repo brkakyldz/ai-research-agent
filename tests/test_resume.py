@@ -1,9 +1,9 @@
 """A failed digest is finished from its checkpoint, not paid for twice.
 
-The graph has written a checkpoint after every superstep since M0 and nothing
-read one back until 2026-09-08. The case these cover is the expensive one: a
-hundred summaries land in the checkpoint, `persist` raises, and the next press
-summarises the same hundred articles again because no `Summary` row exists. A
+The graph writes a checkpoint after every superstep, and the case these cover
+is the expensive one: a hundred summaries land in the checkpoint, `persist`
+raises, and without a resume the next press summarises the same hundred
+articles again, because no `Summary` row exists. A
 resume re-runs the node that failed and the ones after it, and none before.
 """
 

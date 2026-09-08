@@ -45,10 +45,10 @@ def test_importance_drives_the_class_that_drives_the_type(client: TestClient, di
 async def test_the_feed_is_ordered_by_importance_not_by_rank(
     client: TestClient, session: AsyncSession
 ) -> None:
-    """The ink has to fade downwards, and until 2026-09-08 it did not.
+    """The ink has to fade downwards.
 
-    `rank` led the sort and `importance` only broke its ties. They are two
-    different measurements - the ranker's order over the whole run against the
+    Led by `rank` with `importance` only breaking its ties, it does not. They
+    are two different measurements - the ranker's order over the whole run against the
     model's 1-5 score on one story - so they disagree constantly, and a real day
     came out p4, p3, p3, p2, p3. On a page whose only ranking indicator is the
     size of the headline (ADR 0014) that reads as no order at all. `rank` still
@@ -130,9 +130,9 @@ def test_the_switch_translates_the_shell_and_never_hides_the_bulletin(
 ) -> None:
     """The switch is not a content filter (ADR 0017).
 
-    It was one until 2026-09-05: `latest_digest_run` took the page's language,
-    so a reader on `?lang=en` with only a Turkish bulletin in the database got
-    "No digest yet" - the digest was there, the shell was hiding it.
+    As one, it hides the reading: `latest_digest_run` taking the page's
+    language gives a reader on `?lang=en` with only a Turkish bulletin in the
+    database "No digest yet" - the digest is there, the shell is hiding it.
     """
     body = client.get("/?lang=en").text
     assert "Gunun ortak konusu" in body, "the Turkish bulletin is still the latest one"

@@ -23,11 +23,10 @@
       {# No green for "ok": a log where every good row is coloured makes the one
          bad row harder to find, not easier. Only the failure gets ink - and
          `partial` is not one. `persist` says so where it sets it: a feed 404ed
-         and the other ninety-seven summaries are still a digest. It wore the
-         alarm colour here until 2026-09-08, which made a run of ninety-one
-         summaries and one dead feed read as red as a run that produced nothing.
-         It keeps the error text under the pointer, which is where the dead
-         feed is named. #}
+         and the other ninety-seven summaries are still a digest. In the alarm
+         colour, a run of ninety-one summaries and one dead feed would read as
+         red as a run that produced nothing. It keeps the error text under the
+         pointer, which is where the dead feed is named. #}
       <td {% if r.status == 'error' %}class="bad" title="{{ r.error or '' }}"{% elif r.status == 'partial' %}title="{{ r.error or '' }}"{% endif %}>
         {{ t['status_' + r.status] }}
       </td>

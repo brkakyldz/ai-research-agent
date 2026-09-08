@@ -105,13 +105,13 @@ def build_header(
 async def count_ranked(session: AsyncSession, run: Run) -> int:
     """How many stories the digest actually holds.
 
-    It was `min(run.n_summarized, digest_top_n)` until 2026-09-06 - a guess, and
-    on a day the ranker returns fewer than the cap it is the wrong one. On
-    2026-09-05 the run summarised 136 and ranked 11; the page drew eleven
-    stories under a rail badge reading 15 and a footnote reading "15 haber".
+    A `COUNT`, not `min(run.n_summarized, digest_top_n)`. That arithmetic is a
+    guess, and on any day the ranker returns fewer than the cap it is the wrong
+    one: a run that summarised 136 and ranked 11 drew eleven stories under a
+    rail badge reading 15 and a footnote reading "15 haber".
 
     `digest_top_n` is a ceiling the ranker is asked to respect, not a promise it
-    made. The number of stories on the page is a `COUNT`, so it is counted.
+    made. The number of stories on the page is a count, so it is counted.
     """
     return (
         await session.execute(

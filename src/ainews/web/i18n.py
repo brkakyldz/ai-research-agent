@@ -2,9 +2,9 @@
 
 The digest itself is written by the model in one language per run, chosen at the
 press on `/runs`; this is the much smaller and entirely separate question of what
-the buttons say. Until 2026-09-06 it was one value doing both jobs, so the switch
-in the bar quietly decided what the next paid run would be written in and hid
-every bulletin written in the other language (ADR 0017). Two dictionaries beat a
+the buttons say. One value doing both jobs makes the switch in the bar quietly
+decide what the next paid run will be written in and hide every bulletin written
+in the other language, which is why they are two (ADR 0017). Two dictionaries beat a
 translation framework for thirty strings, and a missing key is a KeyError in a
 template render rather than a silent English fallback nobody notices.
 
@@ -32,11 +32,11 @@ THEME_COOKIE: Final = "digest_theme"
 THEMES: Final[tuple[str, ...]] = ("system", "light", "dark")
 
 # Every label here is written in sentence case, and that is a rule rather than a
-# habit: until 2026-09-06 every label in the interface was lower-cased - the day,
-# the archive, both themes - which read as a placeholder set somebody had not got
-# writing yet. A capital is what says a person put the word there. Units keep
-# their lower case ("dk", "sa"), because they are notation and not labels, and a
-# string that starts with a placeholder starts wherever the value starts.
+# habit. An interface of lower-cased labels - the day, the archive, both themes -
+# reads as a placeholder set somebody had not got to writing yet; a capital is
+# what says a person put the word there. Units keep their lower case ("dk",
+# "sa"), because they are notation and not labels, and a string that starts with
+# a placeholder starts wherever the value starts.
 STRINGS: Final[dict[str, dict[str, str]]] = {
     "tr": {
         "title": "AI Digest",

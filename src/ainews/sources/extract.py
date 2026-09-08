@@ -11,9 +11,9 @@ the article out of a page full of navigation, cookie banners and related-story
 rails - and trafilatura is synchronous C and Python, so it runs in a thread.
 
 The *download* does not. `fetch_article` is async and takes the same
-`httpx.AsyncClient` the feed poll uses; it was a blocking `httpx.get` inside a
-thread until 2026-09-08, which is a second HTTP stack with a second connection
-pool for no reason but that it was written second.
+`httpx.AsyncClient` the feed poll uses, rather than a blocking `httpx.get` inside
+that thread - which would be a second HTTP stack with a second connection pool,
+for no reason but that this half is written after the poll.
 """
 
 from __future__ import annotations

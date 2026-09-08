@@ -182,8 +182,8 @@ def tag_vocabulary(stories: list[Story], top: int = 10) -> dict[str, Any]:
     `singleton_share` is the share of distinct tags used exactly once - a tag
     that filters to one story filters nothing. `in_vocabulary_share` is the
     share of tag *uses* drawn from the list the prompt asks the model to prefer
-    (`prompts.TAG_VOCABULARY`, since 2026-09-08); on a run recorded before the
-    list existed it reports how the model's own words happened to overlap it.
+    (`prompts.TAG_VOCABULARY`); on a run recorded before that list existed it
+    reports how the model's own words happened to overlap it.
     """
     counts: Counter[str] = Counter()
     for story in stories:
@@ -241,9 +241,9 @@ def ranker_vs_fallback(stories: list[Story], top_n: int | None = None) -> dict[s
 def editor_shift(stories: list[Story]) -> dict[str, Any]:
     """How far the ranker moved the summariser's scores on the stories it kept.
 
-    Reported, never asserted. The rank call has been asked since 2026-09-05 to
-    correct the isolated scores where the day makes them wrong, and since ADR
-    0025 its corrections reach the page. This says whether it uses the power: a
+    Reported, never asserted. The rank call is asked to correct the isolated
+    scores where the day makes them wrong, and ADR 0025 is what lets those
+    corrections reach the page. This says whether it uses the power: a
     `n_changed` of zero on every run means the prompt line is decoration, and
     a mean shift near two means the summariser's scale and the ranker's are not
     the same scale. Stories with no `editor_importance` - unranked, or from a

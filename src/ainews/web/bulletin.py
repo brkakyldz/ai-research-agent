@@ -37,8 +37,8 @@ def is_supplement(run: Run, settings: Settings) -> bool:
     Every press is a delta: only what has not been summarised is a candidate. So
     a second press ten minutes after a fifteen-story bulletin summarises the two
     articles that arrived in between, ranks them, and writes a three-paragraph
-    note about a day of two stories. Until 2026-09-08 that two-story run became
-    the front page and the morning's bulletin dropped into the archive.
+    note about a day of two stories. Left to be the newest, that two-story run
+    becomes the front page and the morning's bulletin drops into the archive.
 
     It is still a real run and it stays in the archive. What it is not is the
     day.
@@ -60,13 +60,12 @@ def supplement_horizon(run: Run, settings: Settings) -> datetime:
 def reading_order() -> tuple[ColumnElement[object], ...]:
     """The order a bulletin reads in: heaviest first.
 
-    Importance leads and `rank` only breaks its ties. It was the other way round
-    until 2026-09-08, and the docstring claimed exactly what this one claims —
-    that the reader scanning downward sees the ink fade monotonically — while the
-    query made it false. `rank` is the ranker's order over the run, `importance`
-    is a 1-5 score on one story, and the two disagree constantly. A real day came
-    out p4, p3, p3, p2, p3, which on a page whose only ranking indicator is the
-    size of the headline (ADR 0014) reads as no order at all.
+    Importance leads and `rank` only breaks its ties, so the reader scanning
+    downward sees the ink fade monotonically. Leading with `rank` breaks that:
+    it is the ranker's order over the run, `importance` is a 1-5 score on one
+    story, and the two disagree constantly. A real day came out p4, p3, p3, p2,
+    p3, which on a page whose only ranking indicator is the size of the headline
+    (ADR 0014) reads as no order at all.
 
     *Whose* importance is the other half (ADR 0025, the same day). The ranker is
     the one node that sees the whole day and is told to correct the summariser's

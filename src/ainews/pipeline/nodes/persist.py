@@ -87,9 +87,9 @@ async def persist_run(
         )
 
     # The rank call's tokens come on their own channel and are priced at *its*
-    # model. Until 2026-09-06 every token was costed at `openai_model_summarize`,
-    # which is only right while the two knobs point at the same model - the day
-    # the summariser moves up to terra (ADR 0001) the run row would have lied.
+    # model. Costing every token at `openai_model_summarize` is only right while
+    # the two knobs point at the same model - the day the summariser moves up to
+    # terra (ADR 0001) the run row would lie about the bill.
     usage = state.get("rank_usage") or {"tokens_in": 0, "tokens_out": 0}
     rank_in, rank_out = usage["tokens_in"], usage["tokens_out"]
     summarize_in = sum(s["tokens_in"] for s in payloads)

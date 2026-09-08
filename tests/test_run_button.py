@@ -70,8 +70,8 @@ def test_run_now_starts_one_run_and_refuses_a_second(
 
 
 def test_the_template_environment_is_built_once(client: TestClient, digest: Run) -> None:
-    """Twelve call sites built their own until 2026-09-08, so every render threw
-    away the compile cache the previous one had filled."""
+    """One environment for twelve call sites: each building its own throws away
+    the compile cache the render before it filled."""
     from ainews.web.views import get_templates
 
     before = client.app.state.templates  # type: ignore[attr-defined]

@@ -63,10 +63,10 @@
   </section>
 
   {# This is where the execution numbers live - cost, duration, token counts by
-     way of them. They were on the top bar of every page until 2026-09-05; they
-     are the machine reporting on itself, and this is the page for that. The
-     spend totals joined them on 2026-09-06, off the digest's side column: the
-     same argument, applied to the one copy of them that had stayed behind. #}
+     way of them, and the spend totals with them. They are the machine reporting
+     on itself, and this is the page for that: on the top bar of every page, or
+     in a column beside the reading, they report on the machine to someone who
+     opened the app to read the news. #}
   <section class="totals">
     <div>
       <p class="unit__h">{{ t.cost_today }}</p>
@@ -98,11 +98,10 @@
     </div>
   </section>
 
-  {# The week, one bar a day. It was the fourth unit of the digest's right rail
-     until 2026-09-08 and it moved here rather than being deleted with it: it is
-     the only figure on the page that is a shape rather than a number, and what
-     it reports - how much came in on each of the last seven days - is the run
-     log's own subject read at a different grain. It is labelled for what it
+  {# The week, one bar a day. It is here rather than beside the reading (ADR
+     0024) because what it reports - how much came in on each of the last seven
+     days - is the run log's own subject read at a different grain, and it is
+     the only figure on the page that is a shape rather than a number. It is labelled for what it
      counts, not for how long it counts: `7 gün` is already three inches to the
      left of it, spending money. #}
   {% if activity.days %}

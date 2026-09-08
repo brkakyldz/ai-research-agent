@@ -77,7 +77,7 @@ def client(settings: Settings, engine: AsyncEngine) -> TestClient:
     """No lifespan: the `engine` fixture already built the schema, and running it
     again would point the app at a second engine.
 
-    It was five identical copies across the page test files until 2026-09-08.
+    Here rather than in each page test file, where it was five identical copies.
     """
     return TestClient(create_app(settings))
 
@@ -103,8 +103,8 @@ async def digest(session: AsyncSession) -> Run:
     """One finished Turkish digest: three ranked stories and two below the fold.
 
     Here rather than in a page test file because three of them want it: the
-    pages, the shell and the press. It was one 1,307-line file until 2026-09-08
-    and the fixture came out of the split with it.
+    pages, the shell and the press, which were one 1,307-line file before the
+    split that this fixture came out of.
     """
     src = Source(name="OpenAI", url="https://openai.com/news/rss.xml", weight=2.0)
     session.add(src)

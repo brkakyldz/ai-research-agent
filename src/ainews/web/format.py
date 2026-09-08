@@ -77,11 +77,11 @@ def format_clock(value: datetime | None) -> str:
     return local.strftime("%d.%m %H:%M") if local else "—"
 
 
-# Month abbreviations, per language. `%b` gives the C locale's English in both
-# languages, and until 2026-09-06 it was lower-cased on top - so a Turkish page
-# read "04 sep" wherever the stamp was drawn without the `.mono` class that
-# uppercases it, which is the exact failure ADR 0016 moved the capitals into
-# the string table to prevent.
+# Month abbreviations, per language, rather than `%b` - which gives the C
+# locale's English in both, so a Turkish page reads "04 Sep". Lower-casing it and
+# letting `.mono` put the capitals back is worse still: the stamp is also drawn
+# without that class, and there it reads "04 sep". This is the failure ADR 0016
+# moved the capitals into the string table to prevent.
 MONTHS: dict[Language, tuple[str, ...]] = {
     "tr": ("Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"),
     "en": ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),

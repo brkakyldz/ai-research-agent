@@ -18,11 +18,11 @@ failure. A run that crashed and left `status='running'` forever would be the one
 thing the /runs page could not explain.
 
 A failed digest can be picked up where it stopped. The graph checkpoints every
-superstep into `checkpoints.db` under the run's id, and until 2026-09-08 nothing
-ever read those checkpoints back: a run that died at `persist` had a hundred paid
-summaries sitting in the checkpoint file, and the next press summarised the same
-hundred articles again, because `_unsummarized` saw no `Summary` rows. `resume`
-is the read: `ainvoke(None, thread_id=run_id)` re-runs the node that failed and
+superstep into `checkpoints.db` under the run's id, and reading those back is
+what a resume is for: a run that dies at `persist` has a hundred paid summaries
+sitting in the checkpoint file, and without the read the next press summarises
+the same hundred articles again, because `_unsummarized` sees no `Summary` rows.
+`ainvoke(None, thread_id=run_id)` re-runs the node that failed and
 everything after it, and nothing before it.
 """
 

@@ -58,10 +58,10 @@ def test_the_rail_marks_the_page_you_are_on(client: TestClient, digest: Run, pat
 def test_the_rail_counts_what_is_behind_each_link(client: TestClient, digest: Run) -> None:
     """The badge counts the stories the link leads to, and it is a COUNT.
 
-    It was `min(run.n_summarized, digest_top_n)` until 2026-09-06 - a ceiling
-    the ranker is asked to respect, not a promise it made. The seeded run
-    summarises five and ranks three, so the badge said five over a page of
-    three; a real run on 2026-09-05 said fifteen over a page of eleven.
+    Not `min(run.n_summarized, digest_top_n)`, which is a ceiling the ranker is
+    asked to respect rather than a promise it made. The seeded run summarises
+    five and ranks three, so that arithmetic says five over a page of three, and
+    on a real run it said fifteen over a page of eleven.
     """
     body = client.get("/").text
     assert '<span class="pill pill--acc">3</span>' in body, "three ranked stories today"
@@ -131,9 +131,10 @@ async def test_a_stale_digest_turns_the_block_into_an_invitation(
 def test_only_the_run_page_can_start_a_run(path: str, client: TestClient, digest: Run) -> None:
     """The press is on `/runs` and nowhere else.
 
-    It was in the top bar of every page until 2026-09-06 and briefly in the
-    rail's foot after that. What every other page carries now is the way in -
-    the runs link, drawn in the accent - and nothing that spends money.
+    What every other page carries is the way in - the runs link, drawn in the
+    accent - and nothing that spends money. In the top bar, or in the rail's
+    foot, the one control that costs money is drawn on every page at the size of
+    a preference.
     """
     body = client.get(path).text
     assert "/runs/start" not in body and "/runs/confirm" not in body
@@ -359,10 +360,9 @@ def test_the_digest_reads_the_note_then_the_topics_then_the_day(
 ) -> None:
     """The order is the page's argument, and it survived the right rail.
 
-    Until 2026-09-08 the brief and the impact spread were units of a column
-    beside the feed. The column came off; the two of them landed in the
-    reading in the order they already had, above the stories rather than
-    beside them.
+    The brief and the impact spread were units of a column beside the feed; ADR
+    0024 took the column off and they kept the order they already had, above the
+    stories rather than beside them.
     """
     body = client.get("/").text
     order = [
@@ -378,11 +378,10 @@ def test_the_digest_reads_the_note_then_the_topics_then_the_day(
 def test_every_count_is_a_count_of_the_list_you_can_reach(client: TestClient, digest: Run) -> None:
     """The filter pill and the feed have to agree.
 
-    They did not until 2026-09-06: the tags were counted over every summary the
-    run produced while the filter narrowed the ranked ones, so a pill could
-    promise 27 stories on a page holding fifteen and return four when pressed.
-    The themes panel was the third party to this agreement until 2026-09-08,
-    when the right rail came off and took it along.
+    Counting the tags over every summary the run produced while the filter
+    narrows the ranked ones, a pill promises 27 stories on a page holding
+    fifteen and returns four when pressed. There were three parties to this
+    agreement until the right rail took the themes panel with it (ADR 0024).
 
     Seeded: five summaries, three of them ranked. `openai` is on the first two
     (both ranked), `policy` on the last three (one ranked).
@@ -421,7 +420,7 @@ def test_the_impact_spread_keeps_all_three_bands(client: TestClient, digest: Run
     The empty band keeps its row, dimmed, because a scale with holes in it is
     still read as a scale.
 
-    It is drawn at the end of the topic row since 2026-09-08, so what it is read
+    It is drawn at the end of the topic row (ADR 0024), so what it is read
     against is the row three lines above the stories rather than a column
     standing beside them.
     """
@@ -448,9 +447,9 @@ def test_the_week_is_read_from_real_runs_on_the_run_log(client: TestClient, dige
     """Nothing in it is projected or filled in - if the numbers were invented
     the chart would not be worth the space it takes.
 
-    It was the fourth unit of the digest's right rail until 2026-09-08 and moved
-    to `/runs` when that rail came off: it is the record's own subject read at a
-    different grain, and the reading page has nowhere to put a chart.
+    It is on `/runs` rather than beside the reading (ADR 0024): it is the
+    record's own subject read at a different grain, and the reading page has
+    nowhere to put a chart.
     """
     body = client.get("/runs").text
     assert 'class="chart"' in body
@@ -582,9 +581,9 @@ async def test_a_long_topic_list_folds_after_six(
 def test_the_bar_spans_the_shell_and_carries_the_brand(client: TestClient, digest: Run) -> None:
     """One bar across the window, with the rail hanging under its left cell.
 
-    Until 2026-09-07 the bar was the first child of the content column, so the
-    window's top edge was two bands: the brand in the rail's own box, and the
-    reader's controls starting 264px in. The order in the markup is what says
+    As the first child of the content column, the bar makes the window's top
+    edge two bands: the brand in the rail's own box, and the reader's controls
+    starting 264px in. The order in the markup is what says
     which of the two shells is being drawn - the bar before the rail, both
     inside `.app` - so this asserts the order rather than a class name.
     """
@@ -653,13 +652,13 @@ def test_the_two_switches_are_one_group_at_the_head_of_the_right_rail(
     client: TestClient, digest: Run
 ) -> None:
     """The theme and the language are the same kind of control - a thing you set
-    once - and until 2026-09-07 they sat at opposite corners of the window: the
-    language top right, the theme at the foot of the rail (ADR 0013). They share
-    the bar's last cell now, which is also the head of the right rail.
+    once - so they share the bar's last cell, which is also the head of the
+    right rail. Apart, they sit at opposite corners of the window: the language
+    top right, the theme at the foot of the rail (ADR 0013).
 
-    The theme switch is written once as a result. It used to be rendered twice
-    and drawn once, because the rail's foot disappears on a phone and the bar
-    had to carry a spare - and that pattern cost a real bug: a `display: none`
+    The theme switch is written once as a result. Rendered twice and drawn once
+    - because the rail's foot disappears on a phone and the bar carries a spare
+    - the pattern costs a real bug: a `display: none`
     placed above the rule it was overriding drew both on every wide window.
     """
     body = client.get("/").text

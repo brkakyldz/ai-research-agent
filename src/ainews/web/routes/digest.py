@@ -75,17 +75,15 @@ async def index(
         # The brief's footnote does not follow it. That line is the size of the
         # *digest* - the same eleven stories the rail badge counts - so opening
         # `?all=1` must not leave "11 haber" beside a topic count taken over
-        # ninety-one. It counted `tags|length` until 2026-09-06, which was the
-        # row's twelve-item cap reporting itself as a measurement.
+        # ninety-one. Nor `tags|length`, which is the row's twelve-item cap
+        # reporting itself as a measurement.
         context["n_topics"] = len(topics.ranked)
         # How heavy the day in view is, drawn at the end of the topic row. It is
         # counted off the list already in `context` rather than off the run, so
-        # the filtered page answers for its filter.
-        #
-        # `topic_pulse` was called beside it until 2026-09-08, for the right
-        # rail's themes list. That list drew a name, a share and a count per
-        # topic, which is the filter row three lines above it written a second
-        # time; the rail came off and the query went with it.
+        # the filtered page answers for its filter. It is the only thing the
+        # right rail's themes list is missed for: that list drew a name, a share
+        # and a count per topic, which is the filter row three lines above it
+        # written a second time (ADR 0024).
         context["split"] = impact_split(stories)
 
     response = get_templates(request).TemplateResponse(request, "index.html", context)

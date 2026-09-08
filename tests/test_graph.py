@@ -350,8 +350,8 @@ async def test_rank_tokens_are_priced_at_the_rank_model(
     session: AsyncSession, settings: Settings
 ) -> None:
     """The two model knobs can differ (ADR 0001); the run's cost has to know
-    which tokens went where. Until 2026-09-06 everything was priced as the
-    summariser, which was right only by coincidence."""
+    which tokens went where. Pricing everything at the summariser is right only
+    when the two knobs happen to hold the same model."""
     from ainews.pipeline.nodes.persist import persist_run
 
     src = Source(name="Lab", url="https://lab.dev/feed")

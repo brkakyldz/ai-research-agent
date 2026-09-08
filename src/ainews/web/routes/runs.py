@@ -146,7 +146,7 @@ async def _action_context(
     multiplying it by a new pair of prices would be a number with a decimal
     point and no basis. Two honest facts beat one invented one.
 
-    Two more facts since 2026-09-08, both only when the question is open. How
+    Two more facts, both only when the question is open. How
     many articles are waiting to be summarised, because a press is a delta and
     a delta of two stories is a bulletin of two stories - the reader should see
     that number before paying for it, not after. And, when the last run failed
@@ -432,11 +432,11 @@ async def verdicts_page(
     being made - `evals/` is not imported and no call is made (ADR 0019 §2,
     ADR 0023). It reads three tables the web layer already owns.
 
-    The third is `eval_results`, since 2026-09-08: the summaries the grounding
-    judge failed, with the sentence it could not support, each with the two
-    words under it. The judge's failures are the most informative thing the
-    evaluation layer produces and they had been printed once at a terminal and
-    filed; a reader who answers one of them here gives the label that measures
+    The third is `eval_results`: the summaries the grounding judge failed, with
+    the sentence it could not support, each with the two words under it. The
+    judge's failures are the most informative thing the evaluation layer
+    produces and they are otherwise printed once at a terminal and filed; a
+    reader who answers one of them here gives the label that measures
     the judge's precision directly, which is the number a one-reader tool acts
     on. Ten of those carry more than a hundred `ok`s on random stories.
     """

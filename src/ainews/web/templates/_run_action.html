@@ -14,9 +14,9 @@
   {% if asking %}
   <p class="act__q">{{ t.confirm_what.format(n=n_sources) }}</p>
   {# What is waiting to be summarised, counted the way the dedupe node will
-     count it. A press is a delta, and until 2026-09-08 the question did not say
-     how big the delta was: a second press ten minutes after the first paid for
-     a bulletin of two stories and then put it on the front page. The count is
+     count it. A press is a delta, so the question has to say how big the delta
+     is: without the count, a second press ten minutes after the first pays for
+     a bulletin of two stories and then puts it on the front page. The count is
      "waiting" rather than "will be" because the poll that opens a run can add
      to it and dedupe can take from it; with nothing waiting the sentence says
      what the press would then produce, and still lets it be pressed. #}

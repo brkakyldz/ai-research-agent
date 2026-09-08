@@ -58,12 +58,11 @@ class ArticleSummary(BaseModel):
 class Pick(BaseModel):
     """One story the ranker keeps, and what it thinks the story is worth.
 
-    The importance travels with the pick because the ranker is the one node
-    that sees the whole day, and the prompt has asked it since 2026-09-05 to
-    correct the summariser's isolated scores where the day makes them wrong.
-    Until 2026-09-08 the schema had nowhere to put the correction: the model was
-    told to fix a number and could only return an order, and the page then
-    sorted by the number it had been told to fix (ADR 0025).
+    The importance travels with the pick because the ranker is the one node that
+    sees the whole day, and the prompt asks it to correct the summariser's
+    isolated scores where the day makes them wrong. Without this field the model
+    would be told to fix a number and able to return only an order, and the page
+    would sort by the number it had been told to fix (ADR 0025).
     """
 
     number: int = Field(description="The candidate number shown in the table.")
@@ -81,9 +80,9 @@ class Pick(BaseModel):
 class RankedDigest(BaseModel):
     """What the rank node must return for a whole run."""
 
-    # A word count, not a sentence count. "One or two sentences" was the ask
-    # until 2026-09-05 and the model answered with whatever length it liked;
-    # a number of words is a constraint it actually honours.
+    # A word count, not a sentence count: asked for "one or two sentences" the
+    # model answers with whatever length it likes, and a number of words is a
+    # constraint it actually honours.
     editor_note: str = Field(
         description=(
             "Three paragraphs separated by a blank line, 25-40 words each: what led "
@@ -124,10 +123,10 @@ class RankedItem(TypedDict):
 class RankUsage(TypedDict):
     """The rank call's tokens, on their own channel.
 
-    Until 2026-09-08 these rode back on a fake `SummaryPayload` with
-    `article_id = -1`, "to avoid opening a second channel for two integers".
-    The carrier then had to be defined in two modules, filtered in three, and
-    explained in each - which is more than a channel costs.
+    Its own key rather than a fake `SummaryPayload` with `article_id = -1`
+    riding the summaries channel. A sentinel that avoids "opening a second
+    channel for two integers" has to be defined in two modules, filtered in
+    three and explained in each, which is more than a channel costs.
     """
 
     tokens_in: int
@@ -141,9 +140,9 @@ class PipelineState(TypedDict, total=False):
     branch per article and LangGraph concatenates them, which is the only reason
     a hundred parallel branches can share one key without clobbering each other.
 
-    The state carries what a node downstream reads and nothing else. `mode` was
-    a key here until 2026-09-08; no node ever read it - the run row's `kind`
-    already says what started the run - so it came off.
+    The state carries what a node downstream reads and nothing else. What
+    started a run is not in here, because no node asks: the run row's `kind` is
+    where that lives.
     """
 
     run_id: str

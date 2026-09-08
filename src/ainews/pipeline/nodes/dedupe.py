@@ -100,12 +100,12 @@ def _unsummarized(settings: Settings) -> Select[tuple[Article]]:
 
     The order is the survivor rule. `dedupe_candidates` walks this list once
     and the first article of a cluster is the one that stays; the rest are
-    marked `dup_of` it and never reach the ranker. Until 2026-09-08 the list
-    was newest-first, which chose the *last* outlet to write a story up: OpenAI
-    posts at 09:00 at weight 2.0, TechCrunch rewrites it at 11:00 at 1.0, and
-    the rewrite survived while the primary source was marked as its duplicate.
-    The rank prompt's rule - the representative of an event is the primary
-    source's item - could then never fire, because the primary source had been
+    marked `dup_of` it and never reach the ranker. Newest-first would choose the
+    *last* outlet to write a story up: OpenAI posts at 09:00 at weight 2.0,
+    TechCrunch rewrites it at 11:00 at 1.0, and the rewrite survives while the
+    primary source is marked as its duplicate. The rank prompt's rule - the
+    representative of an event is the primary source's item - then never fires,
+    because the primary source has been
     dropped one node earlier. Heaviest source first, and among equals the
     earliest published, which is the original by definition.
     """

@@ -1,23 +1,23 @@
 {# The shell every page wears: one bar across the top, a navigation rail
    hanging under its left end, and the reading beside it.
 
-   Until 2026-09-07 the bar started where the left rail stopped, so the window's
-   top edge was two bands that happened to be the same height: the brand sat in
-   the rail's own scroll box, the bar's hairline began 264px in, and the
-   reader's controls were a strip belonging to the content column rather than to
-   the application. The bar spans the window now, and its first and last cells
-   are exactly the widths of the two columns beneath them, on the same ground -
-   so each rail is one surface from the top of the window to the bottom, and the
-   bar is the head of both rather than a strip laid over them (ADR 0021).
+   The bar spans the window, and its first and last cells are exactly the widths
+   of the two columns beneath them, on the same ground - so each rail is one
+   surface from the top of the window to the bottom, and the bar is the head of
+   both rather than a strip laid over them (ADR 0021). A bar that starts where
+   the left rail stops makes the window's top edge two bands that happen to be
+   the same height: the brand in the rail's own scroll box, the bar's hairline
+   beginning 264px in, and the reader's controls a strip belonging to the
+   content column rather than to the application.
 
-   There was a third column between 2026-09-06 and 2026-09-08: a right rail on
-   the digest, holding the day's brief, its themes, the impact spread, the week
-   and one status line. It came off. The brief is at the top of the
-   reading now, the spread is at the end of the topic row, the week is on
-   `/runs`, and the themes and the status line are gone - the first was the
-   topic row written a second time three lines below it, the second was the run
-   log's first sentence and the left rail's foot written a third. The bar's last
-   cell is the width of the switches it holds and nothing follows it down.
+   There is no third column (ADR 0024). A right rail on the digest holding the
+   day's brief, its themes, the impact spread, the week and one status line came
+   off: the brief is at the top of the reading, the spread is at the end of the
+   topic row, the week is on `/runs`, and the themes and the status line are
+   gone - the first was the topic row written a second time three lines below
+   it, the second was the run log's first sentence and the left rail's foot
+   written a third. The bar's last cell is the width of the switches it holds
+   and nothing follows it down.
 
    The left rail is navigation and nothing else. It is grouped rather than flat,
    because five
@@ -35,12 +35,12 @@
 
    The bar is four cells and it is laid out as four: the brand over the left
    rail, what page this is and when its bulletin was made, the search box, and
-   at the end the two switches with the status of a run in flight. Both
-   switches, since 2026-09-07: they are the same kind of control - a thing you
-   set once - and they had been sitting at opposite corners of the window. The
-   run button lived here until 2026-09-06 and is now on `/runs` alone: it is the
-   one control in the app that spends money and in the bar it was drawn at the
-   size of a preference, in the row of preferences.
+   at the end the two switches with the status of a run in flight. Both switches
+   together, because they are the same kind of control - a thing you set once -
+   and at opposite corners of the window they read as two unrelated ones. The
+   run button is not among them; it is on `/runs` alone, because it is the one
+   control in the app that spends money, and here it would be drawn at the size
+   of a preference, in the row of preferences.
 
    `data-theme` is only written when the reader has actually chosen one:
    without it `color-scheme: light dark` follows the operating system, which
