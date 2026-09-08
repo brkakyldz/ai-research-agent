@@ -17,6 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, Settings, get_settings
 from ainews.db import Article, EvalResult, Run, RunStep, Source, Summary, Verdict, bulletin_runs
+from ainews.web.bulletin import (
+    is_supplement,
+    reading_order,
+    supplement_floor,
+    supplement_horizon,
+)
 from ainews.web.format import relative_age, to_local
 
 
@@ -55,40 +61,27 @@ def archive_runs() -> Any:
 async def latest_digest_run(session: AsyncSession, settings: Settings | None = None) -> Run | None:
     """The bulletin the front page shows, whatever language it was written in.
 
-    It used to be "the most recent digest in the page's language", which made
-    the shell's TR/EN switch a content filter: a reader on a Turkish page who
-    pressed `English` got "no digest yet", because the bulletin sitting in the
-    database was Turkish. The switch translates the buttons
-    and nothing else now, and the language a bulletin was written in is chosen
-    where it is paid for - the press on `/runs` (ADR 0017). The bar names the
+    Not filtered by the page's language. That made the shell's TR/EN switch a
+    content filter: a reader on a Turkish page who pressed `English` got "no
+    digest yet", because the bulletin sitting in the database was Turkish. The
+    switch translates the buttons and nothing else (ADR 0017); the bar names the
     bulletin's language when it differs from the page's, so a Turkish shell
     around English stories is labelled rather than silently served.
 
-    And it is not simply the newest. Every press is a delta - only what has not
-    been summarised is a candidate - so a second press ten minutes after a
-    fifteen-story bulletin summarises the two stories that arrived in between,
-    ranks them, and writes a three-paragraph note about a day of two stories.
-    Until 2026-09-08 that two-story run became the front page and the morning's
-    bulletin dropped into the archive. A run that summarised fewer than half of
-    `digest_top_n` is a supplement: the page shows the last full bulletin from
-    the same bulletin-day instead - within `digest_suggest_after_hours`, the
-    interval `/runs` already counts a day by - and the supplement stays in the
-    archive. When the last full one is older than that, the small run is the
-    day's bulletin and is shown, because a stale full page would be worse.
+    Nor is it simply the newest. `bulletin.is_supplement` says why a small run is
+    not the day, and `bulletin.supplement_horizon` how far back the fuller one it
+    supplements may be. Both of those are editorial policy and live there; this
+    is the two queries that ask them.
     """
     settings = settings or get_settings()
     latest = (await session.execute(_finished_digests().limit(1))).scalar_one_or_none()
-    if latest is None:
-        return None
-    floor = max(1, settings.digest_top_n // 2)
-    if latest.n_summarized >= floor:
+    if latest is None or not is_supplement(latest, settings):
         return latest
-    since = latest.started_at - timedelta(hours=settings.digest_suggest_after_hours)
     fuller = (
         await session.execute(
             _finished_digests()
-            .where(Run.n_summarized >= floor)
-            .where(Run.started_at >= since)
+            .where(Run.n_summarized >= supplement_floor(settings))
+            .where(Run.started_at >= supplement_horizon(latest, settings))
             .where(Run.started_at < latest.started_at)
             .limit(1)
         )
@@ -132,30 +125,9 @@ async def stories_for_run(
     ranked_only: bool = True,
     tag: str | None = None,
 ) -> list[Story]:
-    """The run's stories, heaviest first.
+    """The run's stories, in the order a bulletin reads: `bulletin.reading_order`.
 
-    Importance leads the sort since 2026-09-08, and `rank` only breaks its ties.
-    It was the other way round, and the docstring claimed exactly what this
-    paragraph claims - that the reader scanning downward sees the ink fade
-    monotonically - while the query made it false: `rank` is the ranker's own
-    order over the run, `importance` is the model's 1-5 score on one story, and
-    the two disagree constantly. A real day came out p4, p3, p3, p2, p3, which
-    on a page whose only ranking indicator is the size of the headline (ADR
-    0014) reads as no order at all: the stories read as randomly arranged.
-
-    Whose importance is the second half of that fix (ADR 0025, the same day).
-    Sorting by the summariser's score meant the one node that sees the whole
-    day - and is told to correct the isolated scores - had its corrections
-    thrown away, because the schema gave it nowhere to put them. It has now:
-    `editor_importance`, set on every ranked story, and this sort reads it
-    where it exists. The summariser's score still orders the stories below the
-    fold and every run from before the column.
-
-    `rank` still decides *which* stories are here - `ranked_only` is the top-N
-    filter, and that is the job it was written for. What it no longer does is
-    decide the order they are read in, which is what the typography is already
-    saying.
-
+    `ranked_only` is the top-N filter - which stories are in the bulletin at all.
     `language` is the page's, not the run's, and only the age string uses it:
     "3 saat" is a button, not reporting - it is written by this app rather than
     by the model, so it follows the shell even when the stories under it were
@@ -179,11 +151,7 @@ async def stories_for_run(
         # refuses to do is make SQLite parse the JSON, which fails the whole
         # query on one malformed row rather than skipping it.
         query = query.where(Summary.tags_json.contains(f'"{tag}"', autoescape=True))
-    query = query.order_by(
-        func.coalesce(Summary.editor_importance, Summary.importance).desc(),
-        Summary.rank.asc().nullslast(),
-        Summary.id.asc(),
-    )
+    query = query.order_by(*reading_order())
 
     stories = []
     for summary, article, source_name, verdict in (await session.execute(query)).all():
