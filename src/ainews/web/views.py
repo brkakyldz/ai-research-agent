@@ -193,8 +193,6 @@ async def build_advice(
     since = None
     if history.last_success_at is not None:
         anchor = history.last_success_at
-        if anchor.tzinfo is None:
-            anchor = anchor.replace(tzinfo=UTC)
         due_at = anchor + timedelta(hours=interval)
         now = datetime.now(UTC)
         seconds_left = (due_at - now).total_seconds()

@@ -33,6 +33,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 SourceKind = Literal["rss", "tavily"]
 # Two kinds, because there are two kinds of work: the free feed poll and the run
@@ -48,6 +49,43 @@ RunStatus = Literal["running", "ok", "partial", "error"]
 def utcnow() -> datetime:
     """Timezone-aware UTC now. Every stored timestamp is UTC; only the UI localises."""
     return datetime.now(UTC)
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    """A timestamp that comes back the way it went in: aware, in UTC.
+
+    `DateTime(timezone=True)` is a promise the backend has to keep, and SQLite
+    has no timestamp type to keep it with - it stores a string, and every value
+    read back is naive. The `timezone=True` on ten columns was therefore a no-op,
+    and the consequence was a guard at each read: `to_local`,
+    `latest_digest_run` and `build_advice` each re-attached UTC by hand, the
+    three of them agreeing by luck rather than by rule.
+
+    Where it had already gone wrong is `steps._fan_out_row`, which brackets the
+    summarise fan-out between two other nodes' timestamps: `rank.started_at`
+    came back naive and the fallback was `utcnow()`, aware. The subtraction that
+    follows raises `TypeError` on exactly the path that matters most - the one
+    taken when every branch of the fan-out failed and there is no `rank` row.
+
+    So the conversion belongs at the boundary, once, in both directions. A naive
+    value going in is read as UTC, because that is what `utcnow()` produces and
+    what every writer in this codebase means; an aware one is converted rather
+    than truncated. Coming out, UTC is re-attached. Nothing above this line has
+    to think about it again.
+    """
+
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    def process_result_value(self, value: datetime | None, dialect: object) -> datetime | None:
+        if value is None:
+            return None
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def new_id() -> str:
@@ -79,7 +117,7 @@ class Source(Base):
     etag: Mapped[str | None] = mapped_column(String(500), default=None)
     modified: Mapped[str | None] = mapped_column(String(200), default=None)
     last_status: Mapped[str | None] = mapped_column(String(200), default=None)
-    last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_fetched_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)
 
     articles: Mapped[list[Article]] = relationship(back_populates="source")
@@ -105,9 +143,9 @@ class Article(Base):
     url_canonical: Mapped[str] = mapped_column(String(1000), unique=True)
     url: Mapped[str] = mapped_column(String(1000))
     title: Mapped[str] = mapped_column(Text)
-    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     body_text: Mapped[str | None] = mapped_column(Text, default=None)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    fetched_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     # Set when this article was judged a restatement of an earlier one.
     dup_of: Mapped[int | None] = mapped_column(ForeignKey("articles.id"), default=None)
 
@@ -137,8 +175,8 @@ class Run(Base):
     language: Mapped[str] = mapped_column(String(2), default="tr")
     status: Mapped[str] = mapped_column(String(20), default="running")
 
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
 
     n_collected: Mapped[int] = mapped_column(Integer, default=0)
     n_new: Mapped[int] = mapped_column(Integer, default=0)
@@ -192,8 +230,8 @@ class RunStep(Base):
     node: Mapped[str] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(String(20), default="ok")
 
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
 
     n_in: Mapped[int | None] = mapped_column(Integer, default=None)
     n_out: Mapped[int | None] = mapped_column(Integer, default=None)
@@ -255,7 +293,7 @@ class Summary(Base):
     editor_importance: Mapped[int | None] = mapped_column(Integer, default=None)
     rank: Mapped[int | None] = mapped_column(Integer, default=None)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     article: Mapped[Article] = relationship(back_populates="summaries")
     run: Mapped[Run] = relationship(back_populates="summaries")
@@ -290,7 +328,7 @@ class Verdict(Base):
     summary_id: Mapped[int] = mapped_column(ForeignKey("summaries.id"), unique=True)
     verdict: Mapped[str] = mapped_column(String(10))
     note: Mapped[str | None] = mapped_column(Text, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     summary: Mapped[Summary] = relationship()
 
@@ -321,7 +359,7 @@ class EvalResult(Base):
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
     est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     __table_args__ = (
         CheckConstraint("kind in ('grounding', 'rank_stability')", name="ck_eval_results_kind"),

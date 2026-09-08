@@ -171,7 +171,7 @@ async def test_the_poll_time_is_the_sources_own_clock_not_the_collect_runs(
     assert advice.last_collect_at is not None
     # SQLite hands every stored timestamp back naive; the `stamp` filter
     # re-attaches UTC, so the test does the same before comparing.
-    polled = advice.last_collect_at.replace(tzinfo=UTC)
+    polled = advice.last_collect_at  # aware already (db.models.UTCDateTime)
     assert abs((polled - just_now).total_seconds()) < 1
 
 

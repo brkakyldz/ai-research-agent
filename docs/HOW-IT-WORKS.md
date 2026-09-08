@@ -245,6 +245,15 @@ node moves up a tier and ranking stays on the cheap model.
 
 Seven real tables in `src/ainews/db/models.py`, plus a virtual one.
 
+Every timestamp column is `UTCDateTime`, a `TypeDecorator` rather than
+`DateTime(timezone=True)`. The difference matters because SQLite has no timestamp
+type: it stores a string, so `timezone=True` was a promise the backend could not
+keep and every value read back was naive. Three readers re-attached UTC by hand
+and agreed by luck; `steps._fan_out_row` mixed a naive column with an aware
+`utcnow()` and raised on the one path where it mattered most. The conversion is
+at the boundary now, both ways — normalised to UTC going in, aware coming out —
+and nothing above the model has to think about it.
+
 **`sources`** (`models.py`) — what to poll. Beyond name and URL it carries
 `etag` and `modified`, the conditional-GET tokens from the last successful fetch;
 `consecutive_failures`, which is what auto-disables a rotted feed; and `weight`

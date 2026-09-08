@@ -65,10 +65,10 @@ def local_zone() -> ZoneInfo:
 
 
 def to_local(value: datetime | None) -> datetime | None:
+    """Every stored timestamp arrives aware and in UTC (`db.models.UTCDateTime`),
+    so this converts and does not have to guess."""
     if value is None:
         return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
     return value.astimezone(local_zone())
 
 

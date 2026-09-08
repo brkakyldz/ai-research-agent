@@ -83,10 +83,7 @@ async def latest_digest_run(session: AsyncSession, settings: Settings | None = N
     floor = max(1, settings.digest_top_n // 2)
     if latest.n_summarized >= floor:
         return latest
-    started = latest.started_at
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=UTC)
-    since = started - timedelta(hours=settings.digest_suggest_after_hours)
+    since = latest.started_at - timedelta(hours=settings.digest_suggest_after_hours)
     fuller = (
         await session.execute(
             _finished_digests()
