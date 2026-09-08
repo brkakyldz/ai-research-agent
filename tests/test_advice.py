@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
-from ainews.db import Run
+from ainews.db import Run, Source
 from ainews.web.views import build_advice, format_gap
 
 
@@ -138,12 +138,40 @@ async def test_the_collect_poll_is_reported_but_never_counted_as_a_digest(
     get_settings.cache_clear()
     await _run(session, kind="digest", hours_ago=30)
     await _run(session, kind="collect", hours_ago=0.5)
+    polled = datetime.now(UTC) - timedelta(minutes=30)
+    session.add(Source(name="S", url="https://s.dev/feed", last_fetched_at=polled))
+    await session.commit()
 
     advice = await build_advice(session, "tr")
 
     assert advice.state == "due"
     assert advice.last_collect_at is not None
     assert advice.last is not None and advice.last.kind == "digest"
+
+
+async def test_the_poll_time_is_the_sources_own_clock_not_the_collect_runs(
+    session: AsyncSession,
+) -> None:
+    """Every digest polls the feeds first. Read from the last `collect` run, the
+    page said the sources were two days old a minute after a digest had read
+    them (2026-09-08); the sources' `last_fetched_at` is written by every poll."""
+    await _run(session, kind="collect", hours_ago=48)
+    just_now = datetime.now(UTC) - timedelta(minutes=1)
+    session.add(Source(name="S", url="https://s.dev/feed", last_fetched_at=just_now))
+    session.add(
+        Source(
+            name="Off", url="https://off.dev/feed", enabled=False, last_fetched_at=datetime.now(UTC)
+        )
+    )
+    await session.commit()
+
+    advice = await build_advice(session, "tr")
+
+    assert advice.last_collect_at is not None
+    # SQLite hands every stored timestamp back naive; the `stamp` filter
+    # re-attaches UTC, so the test does the same before comparing.
+    polled = advice.last_collect_at.replace(tzinfo=UTC)
+    assert abs((polled - just_now).total_seconds()) < 1
 
 
 @pytest.mark.parametrize(

@@ -283,11 +283,23 @@ async def run_history(session: AsyncSession) -> RunHistory:
     """
     last_finished = await _latest(session, Run.kind != "collect", Run.status != "running")
     last_success = await _latest(session, Run.kind != "collect", Run.status.in_(("ok", "partial")))
-    last_collect = await _latest(session, Run.kind == "collect", Run.status.in_(("ok", "partial")))
+    # The feeds are polled by every run, not only by the `collect` kind: a
+    # digest's first node is the same poll. Until 2026-09-08 this read the last
+    # `collect` run, so `/runs` said the sources were last read two days ago
+    # while the digest that had just finished had read them a minute earlier.
+    # The sources' own clocks are the record of when they were last touched.
+    last_polled = (
+        await session.execute(
+            select(Source)
+            .where(Source.enabled.is_(True), Source.last_fetched_at.isnot(None))
+            .order_by(Source.last_fetched_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     return RunHistory(
         last_finished=last_finished,
         last_success_at=last_success.started_at if last_success else None,
-        last_collect_at=last_collect.started_at if last_collect else None,
+        last_collect_at=last_polled.last_fetched_at if last_polled else None,
     )
 
 

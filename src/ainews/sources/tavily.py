@@ -61,22 +61,26 @@ async def _reserve_credit(session: AsyncSession, settings: Settings) -> bool:
 def _search_sync(query: str, settings: Settings) -> str:
     from langchain_tavily import TavilySearch
 
+    # No `include_answer`, since 2026-09-08. The answer is Tavily's own model
+    # writing a paragraph over whatever the search returned, and for a query
+    # that matched nothing relevant it writes a confident paragraph about the
+    # noise: the run of that day appended "the LLM model identified as '0.28'
+    # refers to Claude Sonnet 5" to a plugin release note titled
+    # `llm-anthropic 0.28`, the summariser summarised it, and the grounding
+    # judge - which reads the stored body - would have called it grounded.
+    # Snippets are at least text someone published; the answer was not.
     tool = TavilySearch(
         tavily_api_key=settings.tavily_api_key,
         max_results=MAX_RESULTS,
         search_depth=SEARCH_DEPTH,
         topic="news",
         time_range="week",
-        include_answer=True,
     )
     payload = tool.invoke({"query": query})
     if not isinstance(payload, dict):
         return ""
 
     parts: list[str] = []
-    answer = payload.get("answer")
-    if isinstance(answer, str) and answer.strip():
-        parts.append(answer.strip())
     for result in payload.get("results") or []:
         snippet = (result.get("content") or "").strip()
         if snippet:

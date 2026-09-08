@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import Article, DailyCounter, Source
-from ainews.pipeline.nodes.enrich import enrich_articles
+from ainews.pipeline.nodes.enrich import VERSION_TITLE, enrich_articles
 from ainews.sources import tavily
 from ainews.sources.extract import MIN_USABLE_CHARS, clean_html, fetch_article, is_usable
 
@@ -15,14 +15,19 @@ LONG = "Bir model duyuruldu ve bu duyuru sektor icin onemli. " * 20
 
 
 async def _article(
-    session: AsyncSession, *, body: str | None, weight: float = 1.5, slug: str = "a"
+    session: AsyncSession,
+    *,
+    body: str | None,
+    weight: float = 1.5,
+    slug: str = "a",
+    title: str = "A headline about a model",
 ) -> Article:
     src = Source(name=f"S{slug}", url=f"https://s{slug}.dev/feed", weight=weight)
     session.add(src)
     await session.flush()
     art = Article(
         source_id=src.id,
-        title="A headline about a model",
+        title=title,
         url=f"https://s{slug}.dev/{slug}",
         url_canonical=f"https://s{slug}.dev/{slug}",
         body_text=body,
@@ -119,6 +124,54 @@ async def test_a_failed_fetch_keeps_the_teaser(session: AsyncSession, settings: 
 
 
 # -- the Tavily cap -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "title", ["llm 0.35", "llm-anthropic 0.28", "llm-openrouter 0.7.1", "Rerun v0.35.2"]
+)
+def test_a_name_and_a_version_number_is_not_a_news_query(title: str) -> None:
+    assert VERSION_TITLE.match(title), title
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "The complex corporate web behind a $3.2 billion AI data center",
+        "Python 3.15 released",
+        "GPT-5.5",
+        "A headline about a model",
+    ],
+)
+def test_a_version_number_inside_a_sentence_still_qualifies(title: str) -> None:
+    assert not VERSION_TITLE.match(title), title
+
+
+@respx.mock
+async def test_a_release_note_title_never_spends_a_credit(
+    session: AsyncSession, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`llm-anthropic 0.28`, searched as news on 2026-09-08, came back as every
+    page on the web containing "0.28" and the summariser wrote a headline about
+    an Anthropic evaluation that never happened."""
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
+    get_settings.cache_clear()
+    art = await _article(session, body=None, title="llm-anthropic 0.28")
+    respx.get(art.url).mock(return_value=httpx.Response(404))
+
+    called = False
+
+    def _boom(*args: object, **kwargs: object) -> str:
+        nonlocal called
+        called = True
+        return "the LLM model identified as '0.28' refers to Claude Sonnet 5"
+
+    monkeypatch.setattr(tavily, "_search_sync", _boom)
+    stats = await enrich_articles(session, [art.id], get_settings())
+    await session.refresh(art)
+
+    assert not called
+    assert stats.n_tavily == 0 and stats.n_still_empty == 1
+    assert not art.body_text
 
 
 @respx.mock

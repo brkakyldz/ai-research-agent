@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -34,6 +35,15 @@ log = logging.getLogger(__name__)
 TAVILY_MIN_SOURCE_WEIGHT = 1.0
 # Fetches run in threads; more than this and we are hammering a dozen hosts.
 FETCH_CONCURRENCY = 6
+# A title that is a name and a version number - `llm 0.35`, `llm-anthropic
+# 0.28`, `llm-openrouter 0.7.1` - is not a news query. Searched as one on
+# 2026-09-08 it returned everything on the web containing "0.28": a safety
+# evaluation, a per-token price, a forum thread, and the summariser wrote a
+# headline about an Anthropic evaluation that never happened. Such a title
+# names a release, and the release note is either in the feed already or not
+# on the news index at all; a credit spent here buys noise. Anchored at both
+# ends so `$3.2 billion data center` and `Python 3.15 released` still qualify.
+VERSION_TITLE = re.compile(r"^\S[^\n]{0,60}?\s+v?\d+\.\d+(?:\.\d+)*[\w.\-]*$")
 
 
 @dataclass(slots=True)
@@ -101,7 +111,7 @@ async def enrich_articles(
 
     # Tier 3: Tavily, for the few that are still empty and worth a credit.
     for article, weight in still_thin:
-        if weight < TAVILY_MIN_SOURCE_WEIGHT:
+        if weight < TAVILY_MIN_SOURCE_WEIGHT or VERSION_TITLE.match(article.title or ""):
             stats.n_still_empty += 1
             continue
         extra = await tavily.enrich(session, article.title, settings)
