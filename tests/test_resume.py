@@ -213,11 +213,12 @@ async def test_the_resume_press_starts_the_run_it_was_offered_and_no_other(
     async def _offer(*_: Any, **__: Any) -> runner.Resumable:
         return runner.Resumable(run=failed, next_node="persist")
 
-    async def _record(run_id: str) -> None:
-        resumed.append(run_id)
+    async def _record(resume: str = "", **_: object) -> str:
+        resumed.append(resume)
+        return resume
 
     monkeypatch.setattr(runs_route, "resumable_run", _offer)
-    monkeypatch.setattr(runs_route, "_resume", _record)
+    monkeypatch.setattr(runner, "run_digest", _record)
 
     with TestClient(create_app(settings)) as client:
         stale = client.post("/runs/resume?lang=tr&run=someoldrun").text

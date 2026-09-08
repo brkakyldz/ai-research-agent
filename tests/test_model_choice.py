@@ -127,15 +127,16 @@ def test_an_unknown_model_in_the_url_draws_the_default(client: TestClient) -> No
 def test_the_press_sends_the_models_it_was_asked_for(
     monkeypatch: pytest.MonkeyPatch, settings: Settings
 ) -> None:
-    from ainews.web.routes import runs as runs_route
+    from ainews.pipeline import runner
 
     settings.openai_api_key = "sk-test"
     seen: list[tuple[str, str]] = []
 
-    async def _record(language: str, models: tuple[str, str]) -> None:
-        seen.append(models)
+    async def _record(model_summarize: str = "", model_rank: str = "", **_: object) -> str:
+        seen.append((model_summarize, model_rank))
+        return ""
 
-    monkeypatch.setattr(runs_route, "_execute", _record)
+    monkeypatch.setattr(runner, "run_digest", _record)
 
     with TestClient(create_app(settings)) as client:
         client.post(f"/runs/start?lang=tr&out=tr&ms={TERRA}&mr={LUNA}")
@@ -148,15 +149,16 @@ def test_a_press_that_names_nothing_runs_the_configured_models(
 ) -> None:
     """The CLI's shape, and a fragment left open in a tab since before ADR 0020.
     Neither should error, and neither should reach for an expensive tier."""
-    from ainews.web.routes import runs as runs_route
+    from ainews.pipeline import runner
 
     settings.openai_api_key = "sk-test"
     seen: list[tuple[str, str]] = []
 
-    async def _record(language: str, models: tuple[str, str]) -> None:
-        seen.append(models)
+    async def _record(model_summarize: str = "", model_rank: str = "", **_: object) -> str:
+        seen.append((model_summarize, model_rank))
+        return ""
 
-    monkeypatch.setattr(runs_route, "_execute", _record)
+    monkeypatch.setattr(runner, "run_digest", _record)
 
     with TestClient(create_app(settings)) as client:
         client.post("/runs/start?lang=tr")

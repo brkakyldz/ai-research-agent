@@ -31,10 +31,14 @@ MISFIRE_GRACE_SECONDS = 60 * 30
 
 
 async def _collect_job() -> None:
-    from ainews.pipeline.runner import run_collect
+    from ainews.pipeline.runner import RunBusy, run_collect
 
     try:
         await run_collect()
+    except RunBusy:
+        # A digest is running, and its first node is this same poll. Not a
+        # failure and not worth a traceback: the next cycle is three hours out.
+        log.info("scheduled collect skipped: a run is already in flight")
     except Exception:
         # The run row already records the failure; the scheduler must survive it,
         # because a scheduler that dies on one bad night stops every later night.

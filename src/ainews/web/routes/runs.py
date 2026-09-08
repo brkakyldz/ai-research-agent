@@ -50,9 +50,9 @@ from ainews.db import Run, db_session
 from ainews.pipeline.llm import model_options, resolve_model
 from ainews.pipeline.runner import (
     digest_in_flight,
-    release_digest,
+    release_slot,
+    reserve_slot,
     resumable_run,
-    try_claim_digest,
 )
 from ainews.web import queries
 from ainews.web.i18n import LANGUAGES, note_text, strings
@@ -69,20 +69,27 @@ from ainews.web.views import (
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# The claim itself lives in `pipeline.runner`, because the CLI never goes through
-# a route and has to take the same one. A second press while a run is in flight is
-# refused, not queued.
+# The slot itself is taken and released by `pipeline.runner`, which is where every
+# entry point passes; this route only *reserves* it, because it has to answer the
+# request before the run it schedules has begun. A second press while a run is in
+# flight is refused, not queued.
 # The event loop keeps only a weak reference to a task, so a fire-and-forget
 # digest can be garbage-collected mid-run. Holding it here is what stops that.
 _tasks: set[asyncio.Task[None]] = set()
 
 
 def is_running() -> bool:
-
     return digest_in_flight()
 
 
-async def _execute(language: str, models: tuple[str, str]) -> None:
+async def _guarded(language: str, models: tuple[str, str], token: str) -> None:
+    """Run under the slot this route already reserved.
+
+    The `finally` is not the release - `run_digest` holds and releases the token
+    itself. It is the one case that function cannot cover: a task cancelled
+    between `create_task` and its first line never reaches the runner at all, and
+    would otherwise leave the slot held forever. `release_slot` is idempotent.
+    """
     from ainews.pipeline.runner import run_digest
 
     try:
@@ -91,34 +98,23 @@ async def _execute(language: str, models: tuple[str, str]) -> None:
             mode="manual",
             model_summarize=models[0],
             model_rank=models[1],
+            reserved_token=token,
         )
     except Exception:
         log.exception("manual run failed")
-
-
-async def _resume(run_id: str) -> None:
-    from ainews.pipeline.runner import run_digest
-
-    try:
-        await run_digest(resume=run_id)
-    except Exception:
-        log.exception("resumed run %s failed", run_id)
-
-
-async def _guarded(language: str, models: tuple[str, str], token: str) -> None:
-    """Hold the claim for exactly as long as the run lasts, however it ends."""
-
-    try:
-        await _execute(language, models)
     finally:
-        release_digest(token)
+        release_slot(token)
 
 
 async def _guarded_resume(run_id: str, token: str) -> None:
+    from ainews.pipeline.runner import run_digest
+
     try:
-        await _resume(run_id)
+        await run_digest(resume=run_id, reserved_token=token)
+    except Exception:
+        log.exception("resumed run %s failed", run_id)
     finally:
-        release_digest(token)
+        release_slot(token)
 
 
 def _valid(value: str | None, fallback: str) -> str:
@@ -305,11 +301,12 @@ async def start_run(
     if not settings.llm_configured:
         return HTMLResponse(f'<span class="bad">{t["no_key"]}</span>')
 
-    # Claim before creating the task, not inside it: `create_task` only schedules,
-    # so a second press arriving before the task's first line would find the claim
-    # still free and start a second - paid - digest.
+    # Reserve before creating the task, not inside it: `create_task` only
+    # schedules, so a second press arriving before the task's first line would
+    # find the slot still free and start a second - paid - digest. The run holds
+    # the same token from there on.
     token = f"manual:{produce}:{models[0]}:{models[1]}"
-    if not await try_claim_digest(token):
+    if not await reserve_slot(token, "digest"):
         return HTMLResponse(t["busy"])
     # Fire and forget: the caller gets an answer now, the run finishes later.
     task = asyncio.create_task(_guarded(produce, models, token))
@@ -353,7 +350,7 @@ async def resume_run(
         return HTMLResponse(f'<span class="bad">{t["resume_gone"]}</span>')
 
     token = f"resume:{run}"
-    if not await try_claim_digest(token):
+    if not await reserve_slot(token, "digest"):
         return HTMLResponse(t["busy"])
     task = asyncio.create_task(_guarded_resume(run, token))
     _tasks.add(task)

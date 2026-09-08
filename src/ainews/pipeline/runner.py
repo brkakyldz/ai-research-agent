@@ -6,6 +6,11 @@ CLI, with `manual` or `digest` written on the run row. The delta logic lives in
 candidate selection rather than here, so an article already summarised is never
 a candidate again and pressing the button twice costs nothing twice.
 
+Both take the one run slot before they open anything and hold it until they are
+done, so a terminal digest and a pressed one cannot overlap however they were
+started. That is the whole concurrency story and it is enforced here rather than
+asked of the caller.
+
 Each opens a run row before the work and closes it afterwards, including on
 failure. A run that crashed and left `status='running'` forever would be the one
 thing the /runs page could not explain.
@@ -23,6 +28,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -46,30 +54,69 @@ log = logging.getLogger(__name__)
 # future node that loops, and the default of 25 is not obviously above six.
 RECURSION_LIMIT = 200
 
-# One digest at a time, whatever started it. SQLite has a single writer (ADR 0003)
+
+class RunBusy(RuntimeError):
+    """Another run holds the slot. Raised by `run_digest` and `run_collect`."""
+
+
+# One run at a time, whatever started it. SQLite has a single writer (ADR 0003)
 # and everything shares this process (ADR 0004), so a module-level claim is the
-# whole concurrency story - but only if every path takes it. It lives here rather
-# than in the web layer because the CLI never goes through a route, and two
-# digests over the same candidates means paying the model twice for one day.
-_digest_lock = asyncio.Lock()
-_digest_running: set[str] = set()
+# whole concurrency story - but only if every path takes it, and the way to make
+# that true is for the slot to be taken by the two functions that *are* the entry
+# points rather than by their callers. It used to be the caller's job, documented
+# as "only if every path takes it", and the CLI did not: `ainews digest` in a
+# terminal alongside a press on `/runs` selected the same unsummarised candidates
+# and paid the model twice for one day.
+#
+# One slot and not two, because a collect and a digest race as well: a digest's
+# first node is the same feed poll, and `_insert_new_items` checks then inserts,
+# so an overlapping scheduled poll turns into an IntegrityError that fails one of
+# the two runs.
+_slot_lock = asyncio.Lock()
+_slot_holders: dict[str, str] = {}  # token -> kind
 
 
 def digest_in_flight() -> bool:
-    return bool(_digest_running)
+    """A *paid* run is in flight. The three-hourly poll holds the same slot but
+    is not what the button and the advice block are reporting on."""
+    return any(kind != "collect" for kind in _slot_holders.values())
 
 
-async def try_claim_digest(token: str) -> bool:
-    """Take the digest slot, or report that someone else holds it."""
-    async with _digest_lock:
-        if _digest_running:
+def run_in_flight() -> bool:
+    return bool(_slot_holders)
+
+
+async def reserve_slot(token: str, kind: str) -> bool:
+    """Take the slot ahead of the work, or report that someone else holds it.
+
+    For the one caller that cannot let `run_digest` do it: `/runs/start` answers
+    the request before the run finishes, so it schedules a task and returns.
+    `create_task` only schedules - a second press arriving before the task's
+    first line would find the slot free and start a second, paid, digest. So the
+    route reserves, then hands the token to `run_digest`, which holds and
+    releases it exactly as if it had taken it itself.
+    """
+    async with _slot_lock:
+        if _slot_holders:
             return False
-        _digest_running.add(token)
+        _slot_holders[token] = kind
         return True
 
 
-def release_digest(token: str) -> None:
-    _digest_running.discard(token)
+def release_slot(token: str) -> None:
+    """Idempotent: a reserving caller may also release in its own `finally`, for
+    the case where the task it scheduled never ran at all."""
+    _slot_holders.pop(token, None)
+
+
+@asynccontextmanager
+async def _slot(token: str, kind: str, reserved: bool) -> AsyncIterator[None]:
+    if not reserved and not await reserve_slot(token, kind):
+        raise RunBusy(f"a {next(iter(_slot_holders.values()))} run is already in flight")
+    try:
+        yield
+    finally:
+        release_slot(token)
 
 
 async def resolve_run_id(session: AsyncSession, ref: str) -> str:
@@ -117,9 +164,22 @@ async def _fail_run(run_id: str, error: str) -> None:
         run.error = error[:2000]
 
 
-async def run_collect(settings: Settings | None = None) -> str:
-    """The three-hourly poll. No LLM, no cost, no digest."""
+async def run_collect(
+    settings: Settings | None = None, *, reserved_token: str | None = None
+) -> str:
+    """The three-hourly poll. No LLM, no cost, no digest.
+
+    Raises `RunBusy` rather than queueing when a digest is in flight: the poll
+    comes round again in three hours, and the digest's own first node is the
+    same poll, so nothing is missed by standing aside.
+    """
     settings = settings or get_settings()
+    token = reserved_token or f"collect:{uuid.uuid4().hex[:8]}"
+    async with _slot(token, "collect", reserved_token is not None):
+        return await _collect(settings)
+
+
+async def _collect(settings: Settings) -> str:
     run_id = await _open_run("collect", settings.digest_language)
     try:
         # A collect run is one node, so it gets one `run_steps` row (ADR 0022).
@@ -202,8 +262,14 @@ async def run_digest(
     model_summarize: str | None = None,
     model_rank: str | None = None,
     resume: str | None = None,
+    reserved_token: str | None = None,
 ) -> str:
     """The full pipeline. Returns the run id, which is also the checkpoint thread.
+
+    Holds the one run slot for its whole length and raises `RunBusy` when
+    another run has it, so a terminal digest and a pressed one cannot select the
+    same candidates and pay for them twice. `reserved_token` is for the caller
+    that had to take the slot before scheduling this - `reserve_slot` says why.
 
     The two model arguments have the same standing as `language` (ADR 0020):
     the caller decides, the environment is only the default, and the choice is
@@ -217,9 +283,20 @@ async def run_digest(
     than a new one written, so the bulletin lands on the id the reader saw fail.
     """
     settings = settings or get_settings()
-    if resume is not None:
-        return await _resume_digest(resume, settings)
+    token = reserved_token or f"digest:{resume or uuid.uuid4().hex[:8]}"
+    async with _slot(token, "digest", reserved_token is not None):
+        if resume is not None:
+            return await _resume_digest(resume, settings)
+        return await _start_digest(language, mode, settings, model_summarize, model_rank)
 
+
+async def _start_digest(
+    language: Language | None,
+    mode: RunMode,
+    settings: Settings,
+    model_summarize: str | None,
+    model_rank: str | None,
+) -> str:
     language = language or settings.digest_language
     model_summarize = resolve_model(model_summarize, settings.openai_model_summarize)
     model_rank = resolve_model(model_rank, settings.openai_model)

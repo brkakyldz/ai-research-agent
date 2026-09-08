@@ -600,11 +600,15 @@ summarised the same candidates. The language and the models are not asked again:
 they are in the checkpoint, and a run finished by a different model would be
 priced as neither.
 
-**Concurrency** is one module-level claim: `_digest_lock` plus `_digest_running`.
-SQLite has one writer (ADR 0003) and everything shares one process (ADR 0004), so
-that is the whole concurrency story — but only if every path takes it. It lives in
-the runner rather than the web layer because the CLI never goes through a route,
-and two digests over the same candidates means paying the model twice for one day.
+**Concurrency** is one module-level slot: `_slot_lock` plus `_slot_holders`, taken
+by `run_digest` and `run_collect` themselves. SQLite has one writer (ADR 0003) and
+everything shares one process (ADR 0004), so that is the whole concurrency story —
+and it holds only if every path takes it, which is why the two entry points take it
+rather than their callers. `/runs/start` is the one caller that reserves the slot
+first, because it answers the request before the run it schedules has begun, and it
+hands the token straight to `run_digest`. A collect shares the slot with a digest:
+a digest's first node is the same feed poll, and an overlapping poll is an
+IntegrityError that fails one of the two runs.
 
 ## 8. Which model runs, and where that is decided
 

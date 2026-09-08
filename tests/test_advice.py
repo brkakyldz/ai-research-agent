@@ -106,11 +106,11 @@ async def test_a_run_in_flight_is_the_one_state_the_button_is_dead_in(
     from ainews.pipeline import runner
 
     await _run(session, hours_ago=30)
-    assert await runner.try_claim_digest("test")
+    assert await runner.reserve_slot("test", "digest")
     try:
         advice = await build_advice(session, "tr")
     finally:
-        runner.release_digest("test")
+        runner.release_slot("test")
 
     assert advice.state == "running"
     assert advice.ready is False
