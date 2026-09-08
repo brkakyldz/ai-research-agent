@@ -16,7 +16,7 @@ from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, Settings, get_settings
-from ainews.db import Article, EvalResult, Run, RunStep, Source, Summary, Verdict
+from ainews.db import Article, EvalResult, Run, RunStep, Source, Summary, Verdict, bulletin_runs
 
 
 @dataclass(slots=True)
@@ -36,13 +36,19 @@ class Story:
 
 
 def _finished_digests() -> Any:
-    return (
-        select(Run)
-        .where(Run.kind != "collect")
-        .where(Run.status.in_(("ok", "partial")))
-        .where(Run.n_summarized > 0)
-        .order_by(Run.started_at.desc())
-    )
+    """A bulletin that exists: it ran, it did not fail, and it wrote something."""
+    return bulletin_runs().where(Run.status.in_(("ok", "partial"))).where(Run.n_summarized > 0)
+
+
+def archive_runs() -> Any:
+    """What `/archive` lists, and what the rail badge counts.
+
+    One selector for both, because they were two and disagreed: the badge
+    counted `kind == "digest"` while every press wrote `manual`, so it read 1
+    over a list of 3 (ADR 0026). A count is a promise about what is behind the
+    link, and it can only keep that promise by being the same query.
+    """
+    return bulletin_runs().where(Run.n_summarized > 0)
 
 
 async def latest_digest_run(session: AsyncSession, settings: Settings | None = None) -> Run | None:
@@ -267,7 +273,8 @@ class RunHistory:
 
 
 async def _latest(session: AsyncSession, *conditions: Any) -> Run | None:
-    statement = select(Run).order_by(Run.started_at.desc()).limit(1)
+    """The newest bulletin run matching the conditions, or none."""
+    statement = bulletin_runs().limit(1)
     for condition in conditions:
         statement = statement.where(condition)
     return (await session.execute(statement)).scalar_one_or_none()
@@ -281,8 +288,8 @@ async def run_history(session: AsyncSession) -> RunHistory:
     fall outside any window a single query picked, and the countdown would
     silently restart.
     """
-    last_finished = await _latest(session, Run.kind != "collect", Run.status != "running")
-    last_success = await _latest(session, Run.kind != "collect", Run.status.in_(("ok", "partial")))
+    last_finished = await _latest(session, Run.status != "running")
+    last_success = await _latest(session, Run.status.in_(("ok", "partial")))
     # The feeds are polled by every run, not only by the `collect` kind: a
     # digest's first node is the same poll. Until 2026-09-08 this read the last
     # `collect` run, so `/runs` said the sources were last read two days ago
@@ -314,17 +321,15 @@ async def digest_runs(session: AsyncSession, limit: int = 30) -> list[Run]:
     language for the same reason the digest does not (ADR 0017); each row in the
     picker carries its own language, so a mixed archive reads as a list of
     bulletins rather than as a page that lost half its history."""
-    return list(
-        (
-            await session.execute(
-                select(Run)
-                .where(Run.kind != "collect")
-                .where(Run.n_summarized > 0)
-                .order_by(Run.started_at.desc())
-                .limit(limit)
-            )
-        ).scalars()
-    )
+    return list((await session.execute(archive_runs().limit(limit))).scalars())
+
+
+async def count_archive(session: AsyncSession) -> int:
+    """How many bulletins the archive holds - the rail badge's number, counted
+    off the very query that draws the list."""
+    return (
+        await session.execute(select(func.count()).select_from(archive_runs().subquery()))
+    ).scalar_one()
 
 
 def _fts_query(raw: str) -> str:

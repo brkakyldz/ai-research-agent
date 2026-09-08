@@ -1,8 +1,8 @@
 """The run log, the button that starts one, and the question in front of it.
 
 `POST /runs/start` is the only thing that starts a digest in the running app
-(ADR 0015). It calls exactly the function the CLI calls; the only difference is
-the `kind` written on the run row. When it is worth pressing is the advice block
+(ADR 0015). It calls exactly the function the CLI calls, and since ADR 0026 the
+run row it writes is identical too. When it is worth pressing is the advice block
 above it, computed in `views.build_advice` and never enforced here: this route
 refuses a press for two reasons only, a run in flight and a missing key.
 
@@ -42,11 +42,10 @@ import logging
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
-from ainews.db import Run, db_session
+from ainews.db import bulletin_runs, db_session
 from ainews.pipeline.llm import model_options, resolve_model
 from ainews.pipeline.runner import (
     digest_in_flight,
@@ -95,7 +94,6 @@ async def _guarded(language: str, models: tuple[str, str], token: str) -> None:
     try:
         await run_digest(
             language=language,  # type: ignore[arg-type]
-            mode="manual",
             model_summarize=models[0],
             model_rank=models[1],
             reserved_token=token,
@@ -378,11 +376,10 @@ async def run_status(
             f'hx-swap="outerHTML">{t["running"]}</span>'
         )
 
-    latest = (
-        await session.execute(
-            select(Run).where(Run.kind == "manual").order_by(Run.started_at.desc()).limit(1)
-        )
-    ).scalar_one_or_none()
+    # Every bulletin run, not just the pressed ones. This read `kind == "manual"`
+    # until ADR 0026 collapsed the kinds, so a resumed run or one started at a
+    # terminal never reported its error on the strip that is polling for it.
+    latest = (await session.execute(bulletin_runs().limit(1))).scalar_one_or_none()
 
     label = t["status_error"] if latest is not None and latest.status == "error" else ""
     # The run is over, so the progress line stops and the page shows the result.

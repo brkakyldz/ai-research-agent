@@ -1140,7 +1140,7 @@ async def _bulletin(
 ) -> Run:
     started = datetime.now(UTC) - timedelta(minutes=minutes_ago)
     run = Run(
-        kind="manual",
+        kind="digest",
         language="tr",
         status="ok",
         n_summarized=n,
@@ -1244,7 +1244,7 @@ async def test_a_partial_run_is_not_drawn_as_a_failure(
     alarm colour anyway. The dead feed stays readable under the pointer."""
     session.add(
         Run(
-            kind="manual",
+            kind="digest",
             language="tr",
             status="partial",
             n_summarized=91,

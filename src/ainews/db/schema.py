@@ -9,8 +9,11 @@ There is no migration tool in v1 - see `docs/decisions/0005-no-alembic-in-v1.md`
 worth keeping and a column was needed on it (ADR 0025). `ADDED_COLUMNS` is the
 narrow answer: additive, nullable, applied only when `PRAGMA table_info` says
 the column is missing, and listed here so the whole history of the schema
-outside `create_all` is one list. Adding one later is still `alembic init` plus
-one autogenerate against these models.
+outside `create_all` is one list. `DATA_FIXUPS` is the second narrow answer
+(ADR 0026): idempotent one-statement updates for a value the code has stopped
+writing, so an existing archive does not keep rows in a shape nothing reads.
+Adding anything wider is still `alembic init` plus one autogenerate against
+these models.
 """
 
 from __future__ import annotations
@@ -63,6 +66,20 @@ ADDED_COLUMNS: list[tuple[str, str, str]] = [
     ("summaries", "editor_importance", "INTEGER"),  # ADR 0025, 2026-09-08
 ]
 
+# The other half of the same amendment: a value the code no longer writes and no
+# longer reads, left on rows an existing archive still holds. Idempotent by
+# construction - the second run matches nothing - and each entry has to stay
+# harmless on a fresh database, where it also matches nothing. Same bar as
+# `ADDED_COLUMNS`: no new table, no dropped column, no rewritten row that a
+# reader would notice as different data.
+DATA_FIXUPS: list[str] = [
+    # ADR 0026, 2026-09-08. `manual` distinguished a pressed digest from a
+    # scheduled one and stopped meaning anything when ADR 0015 took the clock
+    # off. Leaving the rows behind would have kept every reader filtering for a
+    # kind that is no longer written.
+    "UPDATE runs SET kind = 'digest' WHERE kind = 'manual'",
+]
+
 
 async def init_db(engine: AsyncEngine) -> None:
     """Create every table, index and trigger. Safe to call on every start."""
@@ -76,6 +93,8 @@ async def init_db(engine: AsyncEngine) -> None:
             }
             if column not in present:
                 await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
+        for statement in DATA_FIXUPS:
+            await conn.execute(text(statement))
 
 
 async def drop_all(engine: AsyncEngine) -> None:

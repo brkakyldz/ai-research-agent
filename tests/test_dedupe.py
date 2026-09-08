@@ -178,7 +178,7 @@ async def test_already_summarised_articles_are_never_candidates_again(
 
     assert [a.id for a in await select_candidates(session, settings)] == [art.id]
 
-    run = Run(kind="manual", language="tr")
+    run = Run(kind="digest", language="tr")
     session.add(run)
     await session.flush()
     session.add(

@@ -77,7 +77,7 @@ async def _run_the_graph(
     monkeypatch.setattr(graph_module, "enrich_articles", _no_enrich)
     if n:
         await _seed_articles(session, n)
-    run = Run(kind="manual", language=language)
+    run = Run(kind="digest", language=language)
     session.add(run)
     await session.commit()
     app = graph_module.build_graph().compile()
@@ -158,7 +158,7 @@ async def test_the_costs_add_up_when_the_state_carries_no_model(
     monkeypatch.setattr(graph_module, "collect_articles", _no_collect)
     monkeypatch.setattr(graph_module, "enrich_articles", _no_enrich)
     await _seed_articles(session, 3)
-    run = Run(kind="manual", language="tr")
+    run = Run(kind="digest", language="tr")
     session.add(run)
     await session.commit()
     # The shape a checkpoint written before ADR 0020 resumes with.
@@ -239,7 +239,7 @@ async def test_a_node_that_raises_still_leaves_its_row(
     session: AsyncSession, settings: Settings, engine: AsyncEngine
 ) -> None:
     """A run that died with no trace of where it died is what this table is for."""
-    run = Run(kind="manual", language="tr")
+    run = Run(kind="digest", language="tr")
     session.add(run)
     await session.commit()
 
@@ -263,7 +263,7 @@ async def test_bookkeeping_never_kills_the_run(
         raise RuntimeError("the disk is gone")
 
     monkeypatch.setattr(steps_module, "session_scope", explode)
-    run = Run(kind="manual", language="tr")
+    run = Run(kind="digest", language="tr")
     session.add(run)
     await session.commit()
 
@@ -285,7 +285,7 @@ async def test_the_fan_out_lookup_never_kills_the_run(
         raise RuntimeError("the disk is gone")
 
     monkeypatch.setattr(steps_module, "session_scope", explode)
-    run = Run(kind="manual", language="tr")
+    run = Run(kind="digest", language="tr")
     session.add(run)
     await session.commit()
 
@@ -347,7 +347,7 @@ async def test_a_node_the_dictionary_no_longer_knows_still_renders(
     label is gone from `i18n`. The template already falls back to the bare node
     name; the route builds the models strip from the same dictionary and has to
     fall back the same way, or an old run is a 500 instead of a record."""
-    run = Run(kind="manual", language="tr", finished_at=utcnow())
+    run = Run(kind="digest", language="tr", finished_at=utcnow())
     session.add(run)
     await session.flush()
     session.add(
@@ -375,7 +375,7 @@ async def test_a_token_count_is_grouped_in_the_pages_own_notation(
     each other's decimal point. A count grouped the English way on a Turkish
     page does not read as foreign, it reads as a different number: "50,521"
     is fifty-and-a-half."""
-    run = Run(kind="manual", language="tr", finished_at=utcnow(), tokens_in=50_000, tokens_out=521)
+    run = Run(kind="digest", language="tr", finished_at=utcnow(), tokens_in=50_000, tokens_out=521)
     session.add(run)
     await session.commit()
 

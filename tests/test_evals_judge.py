@@ -73,7 +73,7 @@ async def run(session: AsyncSession) -> Run:
     src = Source(name="Ars", url="https://ars.dev/feed", weight=1.2)
     session.add(src)
     await session.flush()
-    run = Run(kind="manual", language="tr", status="ok", n_summarized=6)
+    run = Run(kind="digest", language="tr", status="ok", n_summarized=6)
     session.add(run)
     await session.flush()
     for i in range(6):

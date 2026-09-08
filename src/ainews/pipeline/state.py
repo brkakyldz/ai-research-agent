@@ -20,7 +20,6 @@ from typing import Annotated, Literal, TypedDict
 from pydantic import BaseModel, Field, field_validator
 
 Language = Literal["tr", "en"]
-RunMode = Literal["digest", "manual"]
 
 
 class ArticleSummary(BaseModel):

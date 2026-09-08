@@ -2,9 +2,11 @@
 
 Two of them, and they are the only two ways work starts: the three-hourly
 collect, and the digest - which a person starts from `/runs` (ADR 0015) or the
-CLI, with `manual` or `digest` written on the run row. The delta logic lives in
-candidate selection rather than here, so an article already summarised is never
-a candidate again and pressing the button twice costs nothing twice.
+CLI. Those two words are also the two values of `Run.kind` (ADR 0026): a run is
+the free poll or it is the one that spends money, and nothing else distinguishes
+them. The delta logic lives in candidate selection rather than here, so an
+article already summarised is never a candidate again and pressing the button
+twice costs nothing twice.
 
 Both take the one run slot before they open anything and hold it until they are
 done, so a terminal digest and a pressed one cannot overlap however they were
@@ -38,13 +40,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, Settings, get_settings
-from ainews.db import Run
+from ainews.db import Run, bulletin_runs
 from ainews.db.models import utcnow
 from ainews.db.session import session_scope
 from ainews.pipeline.graph import build_graph, checkpoint_path
 from ainews.pipeline.llm import resolve_model
 from ainews.pipeline.nodes.collect import collect_articles
-from ainews.pipeline.state import PipelineState, RunMode
+from ainews.pipeline.state import PipelineState
 from ainews.pipeline.steps import step
 
 log = logging.getLogger(__name__)
@@ -127,13 +129,7 @@ async def resolve_run_id(session: AsyncSession, ref: str) -> str:
     """
     if ref == "latest":
         run = (
-            await session.execute(
-                select(Run)
-                .where(Run.kind != "collect")
-                .where(Run.n_summarized > 0)
-                .order_by(Run.started_at.desc())
-                .limit(1)
-            )
+            await session.execute(bulletin_runs().where(Run.n_summarized > 0).limit(1))
         ).scalar_one_or_none()
         if run is None:
             raise LookupError("no digest run with summaries in the database")
@@ -241,13 +237,7 @@ async def resumable_run(
     for a day that already has one.
     """
     last = (
-        await session.execute(
-            select(Run)
-            .where(Run.kind != "collect")
-            .where(Run.status != "running")
-            .order_by(Run.started_at.desc())
-            .limit(1)
-        )
+        await session.execute(bulletin_runs().where(Run.status != "running").limit(1))
     ).scalar_one_or_none()
     if last is None or last.status != "error":
         return None
@@ -257,7 +247,6 @@ async def resumable_run(
 
 async def run_digest(
     language: Language | None = None,
-    mode: RunMode = "digest",
     settings: Settings | None = None,
     model_summarize: str | None = None,
     model_rank: str | None = None,
@@ -287,12 +276,11 @@ async def run_digest(
     async with _slot(token, "digest", reserved_token is not None):
         if resume is not None:
             return await _resume_digest(resume, settings)
-        return await _start_digest(language, mode, settings, model_summarize, model_rank)
+        return await _start_digest(language, settings, model_summarize, model_rank)
 
 
 async def _start_digest(
     language: Language | None,
-    mode: RunMode,
     settings: Settings,
     model_summarize: str | None,
     model_rank: str | None,
@@ -300,12 +288,10 @@ async def _start_digest(
     language = language or settings.digest_language
     model_summarize = resolve_model(model_summarize, settings.openai_model_summarize)
     model_rank = resolve_model(model_rank, settings.openai_model)
-    kind = "digest" if mode == "digest" else "manual"
-    run_id = await _open_run(kind, language)
+    run_id = await _open_run("digest", language)
     log.info(
-        "run %s starting (%s, language=%s, summarize=%s, rank=%s)",
+        "run %s starting (language=%s, summarize=%s, rank=%s)",
         run_id,
-        kind,
         language,
         model_summarize,
         model_rank,
@@ -330,7 +316,7 @@ async def _resume_digest(run_id: str, settings: Settings) -> str:
         run = await session.get(Run, run_id)
         if run is None:
             raise LookupError(f"no run {run_id}")
-        if run.kind == "collect":
+        if run.kind != "digest":
             raise ValueError(f"run {run_id} is a feed poll; only a digest can be resumed")
         if run.status != "error":
             raise ValueError(f"run {run_id} is {run.status}; only a failed run can be resumed")

@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import PROJECT_ROOT, Settings, get_settings
-from ainews.db import EvalResult, Run, Summary, Verdict
+from ainews.db import EvalResult, Run, Summary, Verdict, bulletin_runs
 from ainews.db.models import utcnow
 from ainews.evals import checks
 from ainews.evals.judge import Calibration, calibrate
@@ -185,13 +185,7 @@ async def build_report(
     horizon = utcnow() - timedelta(days=since_days)
     report = Report(since_days=since_days, generated_at=utcnow().strftime("%Y-%m-%d %H:%M UTC"))
 
-    query = (
-        select(Run)
-        .where(Run.kind != "collect")
-        .where(Run.n_summarized > 0)
-        .where(Run.started_at >= horizon)
-        .order_by(Run.started_at.desc())
-    )
+    query = bulletin_runs().where(Run.n_summarized > 0).where(Run.started_at >= horizon)
     if run_id is not None:
         query = query.where(Run.id == run_id)
     runs = list((await session.execute(query)).scalars())

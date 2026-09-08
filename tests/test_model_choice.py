@@ -242,7 +242,7 @@ async def test_the_run_row_is_priced_at_the_models_that_ran(
     art = Article(
         source_id=src.id, title="t", url="https://lab.dev/3", url_canonical="https://lab.dev/3"
     )
-    run = Run(kind="manual", language="en")
+    run = Run(kind="digest", language="en")
     session.add_all([art, run])
     await session.commit()
 
@@ -303,7 +303,7 @@ async def test_run_digest_resolves_both_models_before_it_opens_the_run(
     )
 
     await runner_module.run_digest(
-        language="en", mode="manual", settings=settings, model_summarize=TERRA, model_rank="nope"
+        language="en", settings=settings, model_summarize=TERRA, model_rank="nope"
     )
 
     assert seen["model_summarize"] == TERRA
@@ -322,7 +322,6 @@ def test_the_cli_offers_the_same_two_choices(monkeypatch: pytest.MonkeyPatch) ->
 
     async def _fake_digest(
         language: str | None,
-        mode: str,
         model_summarize: str | None = None,
         model_rank: str | None = None,
         resume: str | None = None,

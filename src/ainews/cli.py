@@ -41,7 +41,6 @@ async def _collect() -> int:
 
 async def _digest(
     language: str | None,
-    mode: str,
     model_summarize: str | None = None,
     model_rank: str | None = None,
     resume: str | None = None,
@@ -67,7 +66,6 @@ async def _digest(
         return 0
     run_id = await run_digest(
         language=language,  # type: ignore[arg-type]
-        mode=mode,  # type: ignore[arg-type]
         model_summarize=model_summarize,
         model_rank=model_rank,
     )
@@ -133,12 +131,6 @@ def main(argv: list[str] | None = None) -> int:
 
     digest = sub.add_parser("digest", help="run the full pipeline and write a digest")
     digest.add_argument("--language", choices=("tr", "en"), default=None)
-    digest.add_argument(
-        "--mode",
-        choices=("digest", "manual"),
-        default="manual",
-        help="'manual' is what the dashboard button writes; 'digest' is the same work, labelled",
-    )
     # The same two choices the confirmation on /runs offers (ADR 0020), so a
     # terminal run and a press can be made identical - which is what makes the
     # dashboard reproducible from a shell rather than merely similar.
@@ -183,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
                 return await _collect()
             if args.command == "digest":
                 return await _digest(
-                    args.language, args.mode, args.model_summarize, args.model_rank, args.resume
+                    args.language, args.model_summarize, args.model_rank, args.resume
                 )
             if args.command == "sources":
                 return await _sources()

@@ -223,7 +223,7 @@ async def test_a_full_run_fans_out_ranks_and_persists(
     monkeypatch.setattr(graph_module, "collect_articles", _no_collect)
     monkeypatch.setattr(graph_module, "enrich_articles", _no_enrich)
 
-    run = Run(kind="manual", language="tr")
+    run = Run(kind="digest", language="tr")
     session.add(run)
     await session.commit()
 
@@ -292,7 +292,7 @@ async def test_one_failing_article_does_not_fail_the_run(
         ),
     )
 
-    run = Run(kind="manual", language="en")
+    run = Run(kind="digest", language="en")
     session.add(run)
     await session.commit()
 
@@ -359,7 +359,7 @@ async def test_rank_tokens_are_priced_at_the_rank_model(
     art = Article(
         source_id=src.id, title="t", url="https://lab.dev/1", url_canonical="https://lab.dev/1"
     )
-    run = Run(kind="manual", language="en")
+    run = Run(kind="digest", language="en")
     session.add_all([art, run])
     await session.commit()
 

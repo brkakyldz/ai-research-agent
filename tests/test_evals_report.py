@@ -29,7 +29,7 @@ async def measured_run(session: AsyncSession) -> Run:
     session.add(src)
     await session.flush()
     run = Run(
-        kind="manual",
+        kind="digest",
         language="tr",
         status="ok",
         n_summarized=4,
@@ -209,7 +209,7 @@ async def test_a_run_already_on_the_record_in_the_same_numbers_is_a_pointer_not_
 async def test_the_report_can_be_narrowed_to_one_run(
     session: AsyncSession, measured_run: Run, settings: Settings
 ) -> None:
-    other = Run(kind="manual", language="en", status="ok", n_summarized=1, est_cost_usd=0.01)
+    other = Run(kind="digest", language="en", status="ok", n_summarized=1, est_cost_usd=0.01)
     session.add(other)
     await session.commit()
 

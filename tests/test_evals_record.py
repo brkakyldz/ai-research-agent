@@ -31,7 +31,7 @@ async def _seed_run(session: AsyncSession, language: str = "tr") -> Run:
     src = Source(name="Ars Technica", url="https://ars.dev/feed", weight=1.2)
     session.add(src)
     await session.flush()
-    run = Run(kind="manual", language=language, status="ok", n_summarized=2)
+    run = Run(kind="digest", language=language, status="ok", n_summarized=2)
     session.add(run)
     await session.flush()
     for i, (title, rank) in enumerate(

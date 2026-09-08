@@ -26,14 +26,22 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Select,
     String,
     Text,
     UniqueConstraint,
+    select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 SourceKind = Literal["rss", "tavily"]
-RunKind = Literal["collect", "digest", "manual"]
+# Two kinds, because there are two kinds of work: the free feed poll and the run
+# that spends money. There was a third, `manual`, distinguishing a pressed digest
+# from a scheduled one - vestigial since ADR 0015 took the clock off and nothing
+# schedules a digest any more. It was worse than merely spare: the button and the
+# CLI both wrote `manual` while the rail's archive badge counted `digest`, so the
+# badge said 1 above an archive listing 3.
+RunKind = Literal["collect", "digest"]
 RunStatus = Literal["running", "ok", "partial", "error"]
 
 
@@ -145,7 +153,7 @@ class Run(Base):
     summaries: Mapped[list[Summary]] = relationship(back_populates="run")
 
     __table_args__ = (
-        CheckConstraint("kind in ('collect', 'digest', 'manual')", name="ck_runs_kind"),
+        CheckConstraint("kind in ('collect', 'digest')", name="ck_runs_kind"),
         Index("ix_runs_started_at", "started_at"),
     )
 
@@ -328,3 +336,24 @@ class DailyCounter(Base):
 
     day: Mapped[str] = mapped_column(String(10), primary_key=True)  # UTC YYYY-MM-DD
     tavily_credits: Mapped[int] = mapped_column(Integer, default=0)
+
+
+def bulletin_runs() -> Select[tuple[Run]]:
+    """Every run that is a bulletin rather than a feed poll, newest first.
+
+    The one place the distinction is written down. There were six: the archive,
+    the front page, the status strip, `resolve_run_id("latest")`, the resume
+    offer and `/runs/status` each filtered `runs` their own way, and two of the
+    six were wrong - the rail badge counted a `kind` nothing wrote, and
+    `/runs/status` read `manual` only, so a resumed or terminal run never
+    reported its error there.
+
+    It lives beside the model rather than in `web/queries.py` because the
+    pipeline asks the same question - which run is the latest, which one can be
+    resumed - and the pipeline must not import the web layer to ask it.
+
+    Callers add their own conditions: `.where(Run.status != "running")` for a
+    run that has finished, `.where(Run.n_summarized > 0)` for one that produced
+    something. What none of them repeat is the `kind` test.
+    """
+    return select(Run).where(Run.kind == "digest").order_by(Run.started_at.desc())

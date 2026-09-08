@@ -10,6 +10,7 @@ from ainews.db.models import (
     Source,
     Summary,
     Verdict,
+    bulletin_runs,
 )
 from ainews.db.schema import init_db
 from ainews.db.session import (
@@ -31,6 +32,7 @@ __all__ = [
     "Source",
     "Summary",
     "Verdict",
+    "bulletin_runs",
     "create_engine",
     "db_session",
     "dispose_engine",

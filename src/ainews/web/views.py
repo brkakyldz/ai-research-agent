@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, Settings, get_settings
-from ainews.db import Run, Source, Summary
+from ainews.db import Run, Source, Summary, bulletin_runs
 from ainews.web.i18n import (
     LANGUAGE_COOKIE,
     LANGUAGES,
@@ -362,13 +362,7 @@ async def latest_finished_run(session: AsyncSession) -> Run | None:
     neither is what the status strip is reporting on.
     """
     return (
-        await session.execute(
-            select(Run)
-            .where(Run.kind != "collect")
-            .where(Run.status != "running")
-            .order_by(Run.started_at.desc())
-            .limit(1)
-        )
+        await session.execute(bulletin_runs().where(Run.status != "running").limit(1))
     ).scalar_one_or_none()
 
 
@@ -495,9 +489,9 @@ async def build_rail(
     n_sources: int,
     n_stories: int | None = None,
 ) -> Rail:
-    n_archive = (
-        await session.execute(select(func.count()).select_from(Run).where(Run.kind == "digest"))
-    ).scalar_one()
+    from ainews.web import queries
+
+    n_archive = await queries.count_archive(session)
     return Rail(
         counts={
             "digest": n_stories,

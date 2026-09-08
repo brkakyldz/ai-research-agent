@@ -20,8 +20,6 @@ from ainews.config import Settings
 from ainews.db import Run
 from ainews.pipeline import runner
 
-pytestmark = pytest.mark.asyncio
-
 
 async def test_the_cli_refuses_while_a_pressed_run_is_in_flight(
     settings: Settings, engine: AsyncEngine

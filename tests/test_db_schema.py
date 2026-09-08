@@ -49,7 +49,7 @@ async def test_fts_index_follows_summary_writes(session: AsyncSession) -> None:
     session.add(src)
     await session.flush()
     art = Article(source_id=src.id, url_canonical="https://example.com/x", url="x", title="T")
-    run = Run(kind="manual", language="tr")
+    run = Run(kind="digest", language="tr")
     session.add_all([art, run])
     await session.flush()
     session.add(

@@ -70,7 +70,7 @@ async def _fail_then_resume(
 
     monkeypatch.setattr(graph_module, "persist_run", broken)
     with pytest.raises(RuntimeError, match="locked"):
-        await runner.run_digest(language="tr", mode="manual")
+        await runner.run_digest(language="tr")
 
     failed = (await session.execute(select(Run))).scalar_one()
     paid = CountingLLM.calls
@@ -118,7 +118,7 @@ async def test_a_resume_needs_a_failed_run_with_a_checkpoint(
     with pytest.raises(LookupError, match="no run"):
         await runner.run_digest(resume="nope")
 
-    run = Run(kind="manual", language="tr", status="ok")
+    run = Run(kind="digest", language="tr", status="ok")
     session.add(run)
     await session.commit()
     with pytest.raises(ValueError, match="only a failed run"):
@@ -142,7 +142,7 @@ async def test_only_the_most_recent_failure_is_offered(
     offered = await runner.resumable_run(session)
     assert offered is not None and (offered.run.id, offered.next_node) == (run_id, "persist")
 
-    later = Run(kind="manual", language="tr", status="ok", n_summarized=1)
+    later = Run(kind="digest", language="tr", status="ok", n_summarized=1)
     session.add(later)
     await session.commit()
     assert await runner.resumable_run(session) is None
@@ -158,7 +158,6 @@ def test_the_cli_resumes_by_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def _fake_digest(
         language: str | None,
-        mode: str,
         model_summarize: str | None = None,
         model_rank: str | None = None,
         resume: str | None = None,
@@ -177,7 +176,7 @@ async def test_the_question_offers_to_finish_the_failed_run(
     """Inside the one press (ADR 0015), naming the node it stopped at."""
     from ainews.web.routes import runs as runs_route
 
-    failed = Run(kind="manual", language="tr", status="error", error="RuntimeError: locked")
+    failed = Run(kind="digest", language="tr", status="error", error="RuntimeError: locked")
     session.add(failed)
     await session.commit()
 
@@ -200,7 +199,7 @@ async def test_the_resume_press_starts_the_run_it_was_offered_and_no_other(
     from ainews.web.routes import runs as runs_route
 
     settings.openai_api_key = "sk-test"
-    failed = Run(kind="manual", language="tr", status="error", error="x")
+    failed = Run(kind="digest", language="tr", status="error", error="x")
     session.add(failed)
     await session.commit()
     resumed: list[str] = []
