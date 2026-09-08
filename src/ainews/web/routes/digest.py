@@ -65,20 +65,17 @@ async def index(
         # pill promising 27 stories on a page that holds fifteen, and returning
         # four when pressed, was three numbers disagreeing about one day.
         ranked_only = not all
-        # The filter row follows the list on screen; the whole list is fetched
-        # so the row can draw twelve of it and the disclosure the rest.
-        topics_shown = await queries.tag_counts(session, run, limit=200, ranked_only=ranked_only)
-        context["tags"] = topics_shown[:12]
+        # One pass over the run's rows, both scopes counted. The filter row
+        # follows the list on screen, so it draws twelve of whichever scope is
+        # showing and the disclosure the rest.
+        topics = await queries.tag_counts(session, run)
+        context["tags"] = topics.shown(ranked_only)[:12]
         # The brief's footnote does not follow it. That line is the size of the
         # *digest* - the same eleven stories the rail badge counts - so opening
         # `?all=1` must not leave "11 haber" beside a topic count taken over
         # ninety-one. It counted `tags|length` until 2026-09-06, which was the
         # row's twelve-item cap reporting itself as a measurement.
-        context["n_topics"] = (
-            len(topics_shown)
-            if ranked_only
-            else len(await queries.tag_counts(session, run, limit=200))
-        )
+        context["n_topics"] = len(topics.ranked)
         # How heavy the day in view is, drawn at the end of the topic row. It is
         # counted off the list already in `context` rather than off the run, so
         # the filtered page answers for its filter.

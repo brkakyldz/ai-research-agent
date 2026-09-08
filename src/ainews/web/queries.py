@@ -170,6 +170,15 @@ async def stories_for_run(
     )
     if ranked_only:
         query = query.where(Summary.rank.isnot(None))
+    if tag:
+        # A cheap narrowing, not the decision. `tags_json` is a JSON array in a
+        # text column, so `"openai"` as a substring can only appear as a whole
+        # element - but it could also be part of a longer word inside a *value*
+        # this column does not hold, so the exact membership test below still
+        # runs. What this saves is loading ninety rows to keep ten; what it
+        # refuses to do is make SQLite parse the JSON, which fails the whole
+        # query on one malformed row rather than skipping it.
+        query = query.where(Summary.tags_json.contains(f'"{tag}"', autoescape=True))
     query = query.order_by(
         func.coalesce(Summary.editor_importance, Summary.importance).desc(),
         Summary.rank.asc().nullslast(),
@@ -219,36 +228,59 @@ async def count_unranked(session: AsyncSession, run: Run) -> int:
     ).scalar_one()
 
 
-async def tag_counts(
-    session: AsyncSession,
-    run: Run,
-    limit: int = 12,
-    *,
-    ranked_only: bool = True,
-) -> list[tuple[str, int]]:
-    """Tags across the run, most common first.
+@dataclass(slots=True)
+class TagCounts:
+    """The run's tags counted two ways, from one pass over its rows.
+
+    Both numbers are on screen at once whenever `?all=1` is on: the filter row
+    counts the list the reader can reach, and the brief's footnote counts the
+    *digest* - the same stories the rail badge counts - so opening the full list
+    must not leave "11 haber" beside a topic count taken over ninety-one. That
+    was two calls to this query until 2026-09-08, the second one scanning every
+    `tags_json` in the run a second time to produce a single integer.
+    """
+
+    ranked: list[tuple[str, int]]
+    every: list[tuple[str, int]]
+
+    def shown(self, ranked_only: bool) -> list[tuple[str, int]]:
+        return self.ranked if ranked_only else self.every
+
+
+async def tag_counts(session: AsyncSession, run: Run) -> TagCounts:
+    """Tags across the run, most common first, in both scopes.
 
     Counted in Python rather than in SQL because the tags live in a JSON column;
-    at a hundred rows a day that is not worth a second table.
+    at a hundred rows a day that is not worth a second table, and a malformed
+    value is skipped here rather than failing a `json_each` mid-query.
 
-    `ranked_only` has to track the list the page is showing, and until
+    The ranked scope has to track the list the page is showing, and until
     2026-09-06 it did not exist: the counts were taken over every summary the
     run produced while the filter they label narrows the *ranked* fifteen. So
     the row said `agents 27` on a page headed "15 haber", and pressing it
     returned four stories. A count is a promise about what is behind the link.
     """
-    query = select(Summary.tags_json).where(Summary.run_id == run.id)
-    if ranked_only:
-        query = query.where(Summary.rank.isnot(None))
-    rows = (await session.execute(query)).scalars()
-    counts: dict[str, int] = {}
-    for raw in rows:
+    rows = (
+        await session.execute(
+            select(Summary.tags_json, Summary.rank).where(Summary.run_id == run.id)
+        )
+    ).all()
+    ranked: dict[str, int] = {}
+    every: dict[str, int] = {}
+    for raw, rank in rows:
         try:
-            for tag in json.loads(raw or "[]"):
-                counts[tag] = counts.get(tag, 0) + 1
+            tags = json.loads(raw or "[]")
         except json.JSONDecodeError:
             continue
-    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+        for tag in tags:
+            every[tag] = every.get(tag, 0) + 1
+            if rank is not None:
+                ranked[tag] = ranked.get(tag, 0) + 1
+
+    def ordered(counts: dict[str, int]) -> list[tuple[str, int]]:
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+    return TagCounts(ranked=ordered(ranked), every=ordered(every))
 
 
 @dataclass(slots=True)

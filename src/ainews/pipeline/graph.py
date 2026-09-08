@@ -22,10 +22,12 @@ from (`runner.run_digest(resume=...)`), which is the one thing they are read for
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
+from sqlalchemy import select
 
 from ainews.config import Settings, get_settings
 from ainews.db import Article, Source
@@ -128,18 +130,33 @@ async def rank_node(state: PipelineState) -> PipelineState:
         return await _rank(state, summaries, s)
 
 
+async def _source_meta(article_ids: list[int]) -> dict[int, tuple[str, float]]:
+    """Each article's source name and weight - the ranker's tie-break material.
+
+    One join, not two `session.get` calls per summary. At ninety summaries that
+    was a hundred and eighty round trips to name the source of each, and the
+    name and the weight are one row of `sources` reachable from the id the
+    payload already carries.
+    """
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                select(Article.id, Source.name, Source.weight)
+                .join(Source, Source.id == Article.source_id)
+                .where(Article.id.in_(article_ids))
+            )
+        ).all()
+    found = {article_id: (name, weight) for article_id, name, weight in rows}
+    # An article whose row has gone is still ranked, under the same placeholder
+    # it had before: the ranker's input is the summary, and a missing source is
+    # a tie-break it does without rather than a run it fails.
+    return {article_id: found.get(article_id, ("unknown", 1.0)) for article_id in article_ids}
+
+
 async def _rank(
     state: PipelineState, summaries: list[SummaryPayload], s: StepRecord
 ) -> PipelineState:
-    async with session_scope() as session:
-        meta: dict[int, tuple[str, float]] = {}
-        for item in summaries:
-            article = await session.get(Article, item["article_id"])
-            source = await session.get(Source, article.source_id) if article else None
-            meta[item["article_id"]] = (
-                source.name if source else "unknown",
-                source.weight if source else 1.0,
-            )
+    meta = await _source_meta([item["article_id"] for item in summaries])
 
     ranking = await rank_summaries(
         summaries, meta, state["language"], model=state.get("model_rank")
@@ -173,7 +190,19 @@ async def persist_node(state: PipelineState) -> PipelineState:
         return {}
 
 
+@lru_cache(maxsize=1)
 def build_graph() -> StateGraph:
+    """The graph itself, built once.
+
+    Cached because it is built from constants - six nodes and their edges, no
+    settings and no session - and because it is not only built when a run
+    starts. `runner.pending_nodes` builds and compiles it to ask a checkpoint
+    what is left to do, which happens on the confirmation fragment and on every
+    model-slot click behind it.
+
+    Compiling still happens per call: `.compile()` binds a checkpointer, and the
+    checkpointer is the one part that differs between a run and a read.
+    """
     graph = StateGraph(PipelineState)
     graph.add_node("collect", collect_node)
     graph.add_node("dedupe", dedupe_node)

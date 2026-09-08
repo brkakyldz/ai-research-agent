@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, Settings, get_settings
-from ainews.db import Run, Source, Summary, bulletin_runs
+from ainews.db import Run, Source, Summary
 from ainews.pipeline.api import digest_in_flight
 from ainews.web import queries
 from ainews.web.format import format_gap, format_stamp_long
@@ -79,22 +79,19 @@ class Rail:
     advice: Advice
 
 
-async def build_header(
-    session: AsyncSession,
+def build_header(
     language: Language,
-    run: Run | None = None,
-    n_sources: int | None = None,
-    n_stories: int | None = None,
+    run: Run | None,
+    n_sources: int,
+    n_stories: int | None,
 ) -> Header:
-    if n_sources is None:
-        n_sources = await count_enabled_sources(session)
+    """Pure: `shell_context` has already paid for every number in here.
 
-    if run is None:
-        run = await latest_finished_run(session)
-
-    if n_stories is None and run is not None:
-        n_stories = await count_ranked(session, run)
-
+    It used to take three of them as optional and fetch each one itself when it
+    was not given, which read as a convenience and worked out as a second copy of
+    `latest_finished_run` on every page render. Its only caller has the run, the
+    count and the source total in hand.
+    """
     return Header(
         # No run, no stamp: the bar used to show the current time, which is a
         # number nobody measured dressed as one somebody did.
@@ -124,17 +121,6 @@ async def count_ranked(session: AsyncSession, run: Run) -> int:
             .where(Summary.rank.isnot(None))
         )
     ).scalar_one()
-
-
-async def latest_finished_run(session: AsyncSession) -> Run | None:
-    """The most recent run that produced something, in any language.
-
-    A run still going has no numbers yet, and a collect has no digest in it -
-    neither is what the status strip is reporting on.
-    """
-    return (
-        await session.execute(bulletin_runs().where(Run.status != "running").limit(1))
-    ).scalar_one_or_none()
 
 
 async def count_enabled_sources(session: AsyncSession) -> int:
@@ -259,24 +245,30 @@ async def shell_context(
     page: str,
     run: Run | None = None,
 ) -> dict[str, object]:
-    """`base_context` plus the two things the shell reads from the database.
+    """`base_context` plus the things the shell reads from the database.
 
     One helper because the rail and the status strip need the same source count,
     and paying for it twice on every page would be the only cost of splitting.
+
+    The advice is built first, which is not an ordering preference. `advice.last`
+    *is* the latest finished bulletin run, and `latest_finished_run()` asks for
+    the same row with the same query - so every page in the app used to run that
+    lookup twice, on a table it also scans for `last_success_at` and the archive
+    count. Building the advice first means the second lookup is a dictionary
+    read, and it cannot disagree with the first.
     """
     n_sources = await count_enabled_sources(session)
+    # One advice object, three readers now: the rail's foot on every page, the
+    # block at the head of `/runs`, and the run the header is drawn from. It is
+    # built here so none of the three can disagree.
+    context = base_context(request, language, page)
+    context["advice"] = advice = await build_advice(session, language)
     if run is None:
-        run = await latest_finished_run(session)
+        run = advice.last
     # One count, two readers. The rail badge and the brief's footnote are the
     # same number and used to be arrived at twice by the same wrong formula.
     n_stories = await count_ranked(session, run) if run is not None else None
-    context = base_context(request, language, page)
-    context["header"] = await build_header(
-        session, language, run, n_sources=n_sources, n_stories=n_stories
-    )
-    # One advice object, two readers: the rail's foot on every page and the block
-    # at the head of `/runs`. It is built here so the two can never disagree.
-    context["advice"] = advice = await build_advice(session, language)
+    context["header"] = build_header(language, run, n_sources, n_stories)
     context["rail"] = await build_rail(session, language, advice, n_sources, n_stories)
     return context
 
