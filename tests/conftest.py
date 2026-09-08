@@ -7,8 +7,10 @@ below overwrite both before the settings cache is built.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ainews import db as db_pkg
 from ainews.config import Settings, get_settings
-from ainews.db import create_engine, init_db
+from ainews.db import Article, Run, Source, Summary, create_engine, init_db
 from ainews.db.session import dispose_engine
 from ainews.web.app import create_app
 
@@ -85,6 +87,69 @@ async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as s:
         yield s
+
+
+TITLES = [
+    ("OpenAI ucuz bir model duyurdu", 5),
+    ("Avrupa yapay zeka yasasi icin rehber yayimladi", 4),
+    ("Bir robotik girisimi yatirim aldi", 3),
+    ("Kucuk bir kutuphane surum cikardi", 2),
+    ("Topluluk derlemesi paylasildi", 1),
+]
+
+
+@pytest.fixture
+async def digest(session: AsyncSession) -> Run:
+    """One finished Turkish digest: three ranked stories and two below the fold.
+
+    Here rather than in a page test file because three of them want it: the
+    pages, the shell and the press. It was one 1,307-line file until 2026-09-08
+    and the fixture came out of the split with it.
+    """
+    src = Source(name="OpenAI", url="https://openai.com/news/rss.xml", weight=2.0)
+    session.add(src)
+    await session.flush()
+
+    run = Run(
+        kind="digest",
+        language="tr",
+        status="ok",
+        n_summarized=len(TITLES),
+        n_new=len(TITLES),
+        est_cost_usd=0.0421,
+        tokens_in=1000,
+        tokens_out=400,
+        editor_note="Gunun ortak konusu fiyat degil olcum.",
+        finished_at=datetime.now(UTC),
+    )
+    session.add(run)
+    await session.flush()
+
+    for index, (title, importance) in enumerate(TITLES):
+        art = Article(
+            source_id=src.id,
+            title=title,
+            url=f"https://openai.com/news/{index}",
+            url_canonical=f"https://openai.com/news/{index}",
+            published_at=datetime.now(UTC) - timedelta(hours=index + 1),
+        )
+        session.add(art)
+        await session.flush()
+        session.add(
+            Summary(
+                article_id=art.id,
+                run_id=run.id,
+                language="tr",
+                title_local=title,
+                summary=f"Ozet metni {index}. Ikinci cumle. Ucuncu cumle.",
+                why_it_matters="Bu yuzden onemli.",
+                tags_json=json.dumps(["openai", "models"] if index < 2 else ["policy"]),
+                importance=importance,
+                rank=index + 1 if index < 3 else None,
+            )
+        )
+    await session.commit()
+    return run
 
 
 @pytest.fixture
