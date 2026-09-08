@@ -260,3 +260,193 @@ async def test_the_counter_tells_the_two_labels_apart(
 
     progress = await queries.verdict_progress(session)
     assert (progress.labelled, progress.wrong, progress.ok) == (2, 1, 1)
+
+
+# ---------------------------------------------------------------------------
+# The labels, read back (`/runs/verdicts`)
+#
+# The note had been write-only since E2: stored on the press, and read by
+# exactly one thing - the input it was typed into. E5's human step ("rewrite
+# the judge prompt from the `wrong` notes") had no screen. These cover the page
+# that gives it one.
+
+
+def test_the_labels_page_lists_a_verdict_with_its_note(
+    client: TestClient, summaries: list[int]
+) -> None:
+    client.post(
+        "/verdict",
+        data={"summary_id": summaries[0], "verdict": "wrong", "note": "Tarih uydurma."},
+    )
+    body = client.get("/runs/verdicts").text
+    assert "Tarih uydurma." in body, "the reason is readable without opening the story"
+    assert "Haber 0" in body
+    assert "OpenAI" in body
+
+
+def test_the_labels_page_lists_both_words(client: TestClient, summaries: list[int]) -> None:
+    """Not only the `wrong` ones: the count this page hangs off says 2/2, and a
+    list of one row would be a second number disagreeing with the first."""
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "ok"})
+    client.post("/verdict", data={"summary_id": summaries[1], "verdict": "wrong", "note": "yok"})
+    body = client.get("/runs/verdicts").text
+    assert body.count('class="verdict') == 2
+    assert body.count('class="verdict bad"') == 1, "only the wrong one takes ink"
+    assert "—" in body, "a verdict with no reason says so rather than leaving a hole"
+
+
+def test_the_newest_press_is_first(client: TestClient, summaries: list[int]) -> None:
+    """The first column is when the verdict was given, so the sort is that and
+    not "wrong first" - a hidden rule would make the times read as unsorted."""
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "ok"})
+    client.post("/verdict", data={"summary_id": summaries[1], "verdict": "wrong"})
+    body = client.get("/runs/verdicts").text
+    assert body.index("Haber 1") < body.index("Haber 0")
+
+
+def test_a_label_links_to_the_story_it_was_given_on(
+    client: TestClient, summaries: list[int]
+) -> None:
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "wrong", "note": "x"})
+    body = client.get("/runs/verdicts").text
+    assert f"#story-{summaries[0]}" in body
+    assert "all=1" in body, "a verdict can sit on a story below the fold"
+
+
+async def test_the_link_lands_on_the_story_even_when_it_was_below_the_fold(
+    client: TestClient, session: AsyncSession
+) -> None:
+    """The reason `all=1` is on that href.
+
+    The digest offers the two words on every rendered item, ranked or not, so a
+    reader pressing the wrong word on an unranked story creates a label whose story
+    the archive does not draw by default. Without the flag the link is a dead
+    anchor - a page that loads and goes nowhere, which is worse than an error.
+    """
+    src = Source(name="OpenAI", url="https://openai.com/news/rss.xml", weight=2.0)
+    session.add(src)
+    await session.flush()
+    run = Run(
+        kind="digest", language="tr", status="ok", n_summarized=1, finished_at=datetime.now(UTC)
+    )
+    session.add(run)
+    await session.flush()
+    art = Article(
+        source_id=src.id,
+        title="Below",
+        url="https://openai.com/news/below",
+        url_canonical="https://openai.com/news/below",
+    )
+    session.add(art)
+    await session.flush()
+    summary = Summary(
+        article_id=art.id,
+        run_id=run.id,
+        language="tr",
+        title_local="Katlanin altinda",
+        summary="Bir. Iki. Uc.",
+        why_it_matters="Onemli.",
+        tags_json=json.dumps(["openai"]),
+        importance=2,
+        rank=None,  # never made the top N
+    )
+    session.add(summary)
+    await session.commit()
+
+    client.post("/verdict", data={"summary_id": summary.id, "verdict": "wrong", "note": "n"})
+    assert f'id="story-{summary.id}"' not in client.get(f"/archive?run={run.id}").text
+    assert f'id="story-{summary.id}"' in client.get(f"/archive?run={run.id}&all=1").text
+
+
+def test_the_labels_page_says_so_when_nothing_has_been_judged(
+    client: TestClient, summaries: list[int]
+) -> None:
+    body = client.get("/runs/verdicts?lang=en").text
+    assert "No story carries a verdict yet" in body
+    assert "<table" not in body, "no column headings over an empty list"
+
+
+def test_the_runs_page_opens_the_labels_from_the_count(
+    client: TestClient, summaries: list[int]
+) -> None:
+    """The way in is the figure itself - the page behind it is what the figure
+    is made of - so there is no sixth link in the rail for it."""
+    body = client.get("/runs").text
+    assert 'href="/runs/verdicts?lang=tr"' in body
+
+
+def test_the_labels_route_is_not_swallowed_by_the_run_detail_route(
+    client: TestClient, summaries: list[int]
+) -> None:
+    """`/runs/{run_id}` matches any segment and is declared last for this reason;
+    a re-ordering would turn this page into "there is no such run"."""
+    response = client.get("/runs/verdicts")
+    assert response.status_code == 200
+    assert "Böyle bir çalışma yok" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# The judge's findings, in front of the reader (`/runs/verdicts`, 2026-09-08)
+#
+# The sentence the judge could not support was printed once at a terminal and
+# filed in `docs/evals.md`; the reader whose verdict calibrates the judge never
+# saw it. Each answer here is one label that measures the judge's precision.
+
+
+async def _judged(session: AsyncSession, summary_id: int, passed: bool, claim: str | None) -> None:
+    from ainews.db import EvalResult
+
+    summary = await session.get(Summary, summary_id)
+    assert summary is not None
+    session.add(
+        EvalResult(
+            run_id=summary.run_id,
+            summary_id=summary_id,
+            kind="grounding",
+            passed=passed,
+            detail=claim,
+            model="gpt-5.6-terra",
+        )
+    )
+    await session.commit()
+
+
+async def test_a_failed_judgement_is_listed_with_its_sentence_and_the_two_words(
+    client: TestClient, summaries: list[int], session: AsyncSession
+) -> None:
+    await _judged(session, summaries[0], False, "500 bin veri kümesi")
+    await _judged(session, summaries[1], True, None)
+    body = client.get("/runs/verdicts?lang=tr").text
+    assert "500 bin veri kümesi" in body
+    assert "1 bulgu · 0 tanesine karar verildi" in body
+    assert f'id="vd-{summaries[0]}"' in body, "the words sit in the row"
+    assert '"frag": "words"' in body, "and swap themselves, not a story foot"
+    assert body.count('id="vd-') == 1, "a passed summary is not a finding"
+
+
+async def test_only_the_latest_judgement_of_a_summary_counts(
+    client: TestClient, summaries: list[int], session: AsyncSession
+) -> None:
+    """Judged twice - say on two tiers - the last word stands."""
+    await _judged(session, summaries[0], False, "eski iddia")
+    await _judged(session, summaries[0], True, None)
+    body = client.get("/runs/verdicts?lang=tr").text
+    assert "eski iddia" not in body
+    assert "Yargıç henüz bir cümleyi desteksiz bulmadı" in body
+
+
+async def test_answering_a_finding_swaps_the_words_alone_and_saves_the_label(
+    client: TestClient, summaries: list[int], session: AsyncSession
+) -> None:
+    await _judged(session, summaries[0], False, "uydurma rakam")
+    response = client.post(
+        "/verdict", data={"summary_id": summaries[0], "verdict": "wrong", "frag": "words"}
+    )
+    assert response.status_code == 200
+    assert response.text.lstrip().startswith("<span"), "the fragment is the control itself"
+    assert 'id="foot-' not in response.text, "no story foot inside a table cell"
+    assert 'aria-pressed="true"' in response.text
+
+    rows = await _rows(session)
+    assert [(r.summary_id, r.verdict) for r in rows] == [(summaries[0], "wrong")]
+    assert "1 bulgu · 1 tanesine karar verildi" in client.get("/runs/verdicts?lang=tr").text

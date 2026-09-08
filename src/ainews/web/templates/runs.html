@@ -101,7 +101,12 @@
        debt the reader owes it. #}
     <div>
       <p class="unit__h">{{ t.verdicts_labelled }}</p>
-      <p class="totals__n num">{{ verdicts.labelled }}<small> / {{ verdicts.total }}</small></p>
+      {# And, since the notes had nowhere to be read, the way into them. The
+         figure is the link because the figure is what the page behind it is
+         made of; no extra word, and no colour - the affordance is the
+         underline under the pointer, the bargain the run log's time cell
+         already makes. #}
+      <p class="totals__n num"><a href="/runs/verdicts?lang={{ language }}">{{ verdicts.labelled }}<small> / {{ verdicts.total }}</small></a></p>
     </div>
   </section>
 
@@ -135,8 +140,11 @@
   <section class="panel">
     <div class="ph"><h2>{{ t.status_error }}</h2></div>
     <ul class="pb fails">
+      {# A partial run's text is here too - the dead feed is worth reading -
+         but only a failed run's time takes the alarm colour, for the reason
+         `_runs_table.html` gives. #}
       {% for r in failures %}
-      <li class="raw"><span class="bad">{{ r.started_at|clock }}</span> {{ r.error }}</li>
+      <li class="raw"><span{% if r.status == 'error' %} class="bad"{% endif %}>{{ r.started_at|clock }}</span> {{ r.error }}</li>
       {% endfor %}
     </ul>
   </section>

@@ -14,19 +14,16 @@ from __future__ import annotations
 import json
 import logging
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import Run, Summary
 from ainews.db.models import utcnow
 from ainews.pipeline.llm import estimate_cost
-from ainews.pipeline.state import PipelineState, SummaryPayload
+from ainews.pipeline.state import PipelineState, RankedItem, SummaryPayload
 
 log = logging.getLogger(__name__)
-
-# The rank node reports its tokens on a payload with this id rather than opening
-# a second state channel just for two integers.
-TOKEN_CARRIER_ID = -1
 
 # Errors are shown in /runs verbatim, so the column has to stay readable.
 MAX_STORED_ERRORS = 20
@@ -40,8 +37,10 @@ async def persist_run(
     if run is None:
         raise RuntimeError(f"run {state['run_id']} disappeared mid-flight")
 
-    payloads = [s for s in (state.get("summaries") or []) if s["article_id"] != TOKEN_CARRIER_ID]
-    ranks = {item["article_id"]: item["rank"] for item in (state.get("ranked") or [])}
+    payloads = state.get("summaries") or []
+    ranked: dict[int, RankedItem] = {
+        item["article_id"]: item for item in (state.get("ranked") or [])
+    }
 
     # A retried `Send` - a resumed run, a superstep replayed - appends its payload
     # a second time, because `summaries` is a concatenating reducer. The unique
@@ -51,7 +50,23 @@ async def persist_run(
     for payload in payloads:
         by_article[payload["article_id"]] = payload
 
+    # A run resumed after this node had already committed - which can happen
+    # when the failure was in the bookkeeping after the commit - must not try
+    # to insert the same rows again for the same reason.
+    already = set(
+        (
+            await session.execute(
+                select(Summary.article_id)
+                .where(Summary.run_id == run.id)
+                .where(Summary.language == state["language"])
+            )
+        ).scalars()
+    )
+
     for payload in by_article.values():
+        if payload["article_id"] in already:
+            continue
+        pick = ranked.get(payload["article_id"])
         session.add(
             Summary(
                 article_id=payload["article_id"],
@@ -61,18 +76,22 @@ async def persist_run(
                 summary=payload["summary"],
                 why_it_matters=payload["why_it_matters"],
                 tags_json=json.dumps(payload["tags"], ensure_ascii=False),
+                # Two scores, kept apart on purpose (ADR 0025): the summariser's
+                # own, and the ranker's read of the same story against the whole
+                # day. The page draws the second where there is one; the
+                # evaluation layer compares the two.
                 importance=payload["importance"],
-                rank=ranks.get(payload["article_id"]),
+                editor_importance=pick["importance"] if pick else None,
+                rank=pick["rank"] if pick else None,
             )
         )
 
-    # The rank call rides on the carrier payload and is priced at *its* model.
-    # Until 2026-09-06 every token was costed at `openai_model_summarize`, which
-    # is only right while the two knobs point at the same model - the day the
-    # summariser moves up to terra (ADR 0001) the run row would have lied.
-    carrier = [s for s in (state.get("summaries") or []) if s["article_id"] == TOKEN_CARRIER_ID]
-    rank_in = sum(s["tokens_in"] for s in carrier)
-    rank_out = sum(s["tokens_out"] for s in carrier)
+    # The rank call's tokens come on their own channel and are priced at *its*
+    # model. Until 2026-09-06 every token was costed at `openai_model_summarize`,
+    # which is only right while the two knobs point at the same model - the day
+    # the summariser moves up to terra (ADR 0001) the run row would have lied.
+    usage = state.get("rank_usage") or {"tokens_in": 0, "tokens_out": 0}
+    rank_in, rank_out = usage["tokens_in"], usage["tokens_out"]
     summarize_in = sum(s["tokens_in"] for s in payloads)
     summarize_out = sum(s["tokens_out"] for s in payloads)
     tokens_in = summarize_in + rank_in

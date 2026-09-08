@@ -98,8 +98,17 @@ async def index(
 async def archive(
     request: Request,
     run: str | None = None,
+    all: bool = Query(False, description="show everything summarised, not just the ranked top N"),
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
+    """One past bulletin, and the list of the others.
+
+    `all=1` is the digest's own flag, taken here for one caller: `/runs/verdicts`
+    links a labelled story by its anchor, and a verdict can be given on a story
+    below the fold - the digest offers the two words on every rendered item,
+    ranked or not. Without the flag that link lands on a page the story is not
+    on, which is a dead anchor rather than a visible error.
+    """
     language = language_of(request)
     runs = await queries.digest_runs(session)
     selected: Run | None = None
@@ -112,7 +121,9 @@ async def archive(
             "runs": runs,
             "selected": selected,
             "stories": (
-                await queries.stories_for_run(session, selected, language=language)
+                await queries.stories_for_run(
+                    session, selected, language=language, ranked_only=not all
+                )
                 if selected
                 else []
             ),
@@ -148,6 +159,7 @@ async def post_verdict(
     summary_id: int = Form(...),
     verdict: str = Form(...),
     note: str | None = Form(None),
+    frag: str | None = Form(None),
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     """The reader's call on one summary (PLAN-EVALS E2.3).
@@ -157,6 +169,11 @@ async def post_verdict(
     top of a list they were halfway down. One row per summary - a second
     verdict overwrites the first - and the note is kept only with "wrong",
     because "right, and here is why" is not a thing a reader writes.
+
+    `frag=words` answers with the two words alone. That is what the findings
+    table on `/runs/verdicts` swaps: the control sits in a table cell there,
+    and a story foot - chips, source link, note line - swapped into a cell
+    would be a story card inside a table.
     """
     language = language_of(request)
     if verdict not in ("ok", "wrong"):
@@ -188,6 +205,19 @@ async def post_verdict(
     await session.commit()
 
     story = await queries.story_for_summary(session, summary_id, language)
+    if frag == "words":
+        return get_templates().TemplateResponse(
+            request,
+            "_verdict_words.html",
+            {
+                "sid": summary_id,
+                "verdict": story.verdict if story else None,
+                "language": language,
+                "t": strings(language),
+                "target": f"#vd-{summary_id}",
+                "frag": "words",
+            },
+        )
     return get_templates().TemplateResponse(
         request,
         "_story_foot.html",

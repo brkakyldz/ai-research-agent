@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from ainews.config import Settings
+from ainews.config import Settings, get_settings
 from ainews.db import Article, Run, Source, Summary
 from ainews.web.app import create_app
 from ainews.web.i18n import LANGUAGE_COOKIE, STRINGS, THEME_COOKIE, strings
@@ -1134,3 +1134,174 @@ def test_a_missing_interface_string_is_loud() -> None:
     # The lookups that want a quiet miss ask instead of catching, and keep it.
     assert t.get("nope") is None
     assert "nope" not in t
+
+
+# -- the front page and the supplement press (2026-09-08) -----------------------
+
+
+async def _bulletin(
+    session: AsyncSession, *, n: int, minutes_ago: float, note: str, src: Source
+) -> Run:
+    started = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    run = Run(
+        kind="manual",
+        language="tr",
+        status="ok",
+        n_summarized=n,
+        editor_note=note,
+        started_at=started,
+        finished_at=started + timedelta(minutes=1),
+    )
+    session.add(run)
+    await session.flush()
+    for i in range(n):
+        art = Article(
+            source_id=src.id,
+            title=f"{note} {i}",
+            url=f"https://openai.com/{run.id}/{i}",
+            url_canonical=f"https://openai.com/{run.id}/{i}",
+            published_at=started,
+        )
+        session.add(art)
+        await session.flush()
+        session.add(
+            Summary(
+                article_id=art.id,
+                run_id=run.id,
+                language="tr",
+                title_local=f"{note} {i}",
+                summary="Bir. Iki. Uc.",
+                why_it_matters="Onemli.",
+                importance=3,
+                rank=i + 1,
+            )
+        )
+    await session.commit()
+    return run
+
+
+async def test_a_two_story_press_does_not_replace_the_mornings_bulletin(
+    client: TestClient, session: AsyncSession
+) -> None:
+    """Every press is a delta. A second press ten minutes after a full bulletin
+    summarises what arrived in between - two stories - and used to become the
+    front page, with the fifteen-story bulletin dropped into the archive."""
+    src = Source(name="OpenAI", url="https://openai.com/news/rss.xml")
+    session.add(src)
+    await session.flush()
+    morning = await _bulletin(session, n=15, minutes_ago=30, note="Sabah bulteni", src=src)
+    supplement = await _bulletin(session, n=2, minutes_ago=10, note="Ek baski", src=src)
+
+    body = client.get("/").text
+    assert "Sabah bulteni" in body and "Ek baski 0" not in body
+    assert body.count('class="item ') == 15
+
+    archive = client.get("/archive").text
+    assert morning.id in archive and supplement.id in archive, "the supplement is not lost"
+
+
+async def test_a_small_run_is_the_bulletin_when_the_last_full_one_is_a_day_old(
+    client: TestClient, session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rule is scoped to one bulletin-day (`digest_suggest_after_hours`):
+    on a quiet day two stories is the bulletin, and yesterday's fifteen would
+    be a stale front page."""
+    monkeypatch.setenv("DIGEST_SUGGEST_AFTER_HOURS", "24")
+    get_settings.cache_clear()
+    src = Source(name="OpenAI", url="https://openai.com/news/rss.xml")
+    session.add(src)
+    await session.flush()
+    await _bulletin(session, n=15, minutes_ago=26 * 60, note="Dunku bulten", src=src)
+    await _bulletin(session, n=2, minutes_ago=10, note="Sakin gun", src=src)
+
+    body = client.get("/").text
+    assert "Sakin gun" in body and "Dunku bulten 0" not in body
+
+
+async def test_the_question_says_how_many_stories_are_waiting(
+    client: TestClient, digest: Run, session: AsyncSession
+) -> None:
+    """The size of the delta, before it is paid for."""
+    assert "özetlenmeyi bekleyen haber yok" in client.get("/runs/confirm?lang=tr").text
+
+    src = (await session.execute(select(Source))).scalars().first()
+    session.add(
+        Article(
+            source_id=src.id,
+            title="Yeni gelen",
+            url="https://openai.com/news/new",
+            url_canonical="https://openai.com/news/new",
+            published_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    asked = client.get("/runs/confirm?lang=tr").text
+    assert "özetlenmeyi bekleyen 1 haber var" in asked
+    assert "bekleyen" not in client.get("/runs/action?lang=tr").text, "only inside the question"
+
+
+async def test_a_partial_run_is_not_drawn_as_a_failure(
+    client: TestClient, digest: Run, session: AsyncSession
+) -> None:
+    """One feed 404ed and ninety-one summaries shipped; `persist` calls that a
+    real outcome and not a failure, and the run log used to paint it in the
+    alarm colour anyway. The dead feed stays readable under the pointer."""
+    session.add(
+        Run(
+            kind="manual",
+            language="tr",
+            status="partial",
+            n_summarized=91,
+            error="Ben's Bites: HTTP 404",
+            finished_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+    body = client.get("/runs").text
+    assert "Kısmi" in body
+    assert 'class="bad"' not in body
+    assert 'title="Ben&#39;s Bites: HTTP 404"' in body or 'title="Ben\'s Bites: HTTP 404"' in body
+
+
+async def test_the_page_draws_the_editors_score_where_the_ranker_gave_one(
+    client: TestClient, session: AsyncSession
+) -> None:
+    """ADR 0025: the summariser said 3 for every story; the ranker, seeing the
+    day, said 5, 4, 2 - and the headline sizes and the order follow the ranker.
+    A story below the fold keeps the summariser's score."""
+    src = Source(name="OpenAI", url="https://openai.com/news/rss.xml")
+    session.add(src)
+    await session.flush()
+    run = Run(
+        kind="digest", language="tr", status="ok", n_summarized=4, finished_at=datetime.now(UTC)
+    )
+    session.add(run)
+    await session.flush()
+    for position, (editor, rank) in enumerate([(2, 3), (5, 1), (4, 2), (None, None)]):
+        art = Article(
+            source_id=src.id,
+            title=f"Haber {position}",
+            url=f"https://openai.com/news/e{position}",
+            url_canonical=f"https://openai.com/news/e{position}",
+            published_at=datetime.now(UTC),
+        )
+        session.add(art)
+        await session.flush()
+        session.add(
+            Summary(
+                article_id=art.id,
+                run_id=run.id,
+                language="tr",
+                title_local=f"Haber {position}",
+                summary="Ozet.",
+                why_it_matters="Bu yuzden onemli.",
+                tags_json="[]",
+                importance=3,
+                editor_importance=editor,
+                rank=rank,
+            )
+        )
+    await session.commit()
+
+    assert re.findall(r'class="item p(\d)"', client.get("/").text) == ["5", "4", "2"]
+    assert re.findall(r'class="item p(\d)"', client.get("/?all=1").text) == ["5", "4", "3", "2"]

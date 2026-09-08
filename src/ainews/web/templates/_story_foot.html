@@ -30,22 +30,10 @@
   </span>
   {% endif %}
 
-  {# Two words, the chips' face and size, the chosen one in full ink with a
-     check after it. No fill and no colour: the accent's jobs are taken, and a
-     verdict is the reader's own note, not a state of the machine. #}
-  <span class="vd{% if story.verdict %} vd--on{% endif %}" role="group">
-    {%- for value in ('ok', 'wrong') %}
-    <button type="button"
-            {# Both states are written, not just the pressed one: a toggle that
-               drops the attribute when it is off announces itself as an ordinary
-               button, so a screen reader is told the word is a control only after
-               it has been chosen. #}
-            aria-pressed="{{ 'true' if story.verdict == value else 'false' }}"
-            hx-post="/verdict?lang={{ language }}"
-            hx-vals='{"summary_id": {{ story.id }}, "verdict": "{{ value }}"}'
-            hx-target="#foot-{{ story.id }}" hx-swap="outerHTML">{{ t['verdict_' ~ value] }}</button>
-    {%- endfor %}
-  </span>
+  {# The two words themselves are `_verdict_words.html`, which the findings
+     table on `/runs/verdicts` draws too. Here the swap target is this whole
+     foot, so a "wrong" grows its note line under it. #}
+  {% with sid=story.id, verdict=story.verdict, target='#foot-' ~ story.id, frag=None %}{% include "_verdict_words.html" %}{% endwith %}
 
   <a class="go" href="{{ story.url }}" target="_blank" rel="noreferrer noopener">
     {{ t.open_source }}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg>

@@ -6,17 +6,24 @@ and mean nothing relative to each other. This node is the only place with the
 whole day in view, which is what lets it say "these three are the same event" and
 "this 4 is really today's 5".
 
+It answers two things per story it keeps: its place in the reading order and its
+importance against the day. The second is what the page draws - the headline's
+size comes from it (ADR 0025) - so a correction the ranker makes reaches the
+reader instead of stopping in the prompt.
+
 The model is asked for candidate *numbers*, not article ids. Ids are long, easy
 to transpose and carry no meaning; short ordinals that only exist inside one
 prompt are much harder to get subtly wrong, and validating them is a range check.
 
 If the call fails the digest still ships: the fallback ordering is importance
-first, source weight second, which is what a human would do with the same table.
+first, source weight second, which is what a human would do with the same table,
+and every kept story keeps the summariser's score.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 
 from ainews.config import Settings, get_settings
 from ainews.pipeline.llm import ranker, usage_from_message
@@ -31,15 +38,36 @@ FALLBACK_NOTE = {
 }
 
 
-def _fallback_order(
-    summaries: list[SummaryPayload], weights: dict[int, float], top_n: int
-) -> list[int]:
+@dataclass(slots=True)
+class Ranking:
+    """What the rank call produced, or what stood in for it.
+
+    `order` is the article ids in reading order; `importance` is the ranker's
+    score for each of them. The two are kept apart rather than zipped because
+    they are read apart: the stability probe compares orders, `persist` writes
+    scores.
+    """
+
+    order: list[int] = field(default_factory=list)
+    importance: dict[int, int] = field(default_factory=dict)
+    editor_note: str = ""
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
+def _fallback(
+    summaries: list[SummaryPayload], weights: dict[int, float], top_n: int, language: str
+) -> Ranking:
     ordered = sorted(
         summaries,
         key=lambda s: (s["importance"], weights.get(s["article_id"], 1.0)),
         reverse=True,
+    )[:top_n]
+    return Ranking(
+        order=[s["article_id"] for s in ordered],
+        importance={s["article_id"]: s["importance"] for s in ordered},
+        editor_note=FALLBACK_NOTE.get(language, ""),
     )
-    return [s["article_id"] for s in ordered[:top_n]]
 
 
 def build_candidate_table(
@@ -61,13 +89,12 @@ async def rank_summaries(
     language: str,
     settings: Settings | None = None,
     model: str | None = None,
-) -> tuple[list[int], str, int, int]:
-    """Return (ordered article ids, editor's note, tokens in, tokens out)."""
+) -> Ranking:
     settings = settings or get_settings()
     weights = {aid: weight for aid, (_, weight) in meta.items()}
     top_n = min(settings.digest_top_n, len(summaries))
     if not summaries:
-        return [], "", 0, 0
+        return Ranking()
 
     prompt = load_prompt("rank", language).format(
         top_n=top_n,
@@ -82,22 +109,32 @@ async def rank_summaries(
             raise ValueError("ranker returned unparsable output")
     except Exception as exc:
         log.warning("ranking failed (%s); falling back to importance order", exc)
-        return _fallback_order(summaries, weights, top_n), FALLBACK_NOTE.get(language, ""), 0, 0
+        return _fallback(summaries, weights, top_n, language)
 
     usage = usage_from_message(response.get("raw"))
 
     # The model answers with ordinals from the prompt, so anything out of range
-    # or repeated is dropped rather than trusted.
+    # or repeated is dropped rather than trusted. The importance on a pick is
+    # already 1-5 by the schema.
     seen: set[int] = set()
-    ordered: list[int] = []
-    for number in parsed.order:
-        index = number - 1
+    ranking = Ranking(
+        editor_note=parsed.editor_note.strip(),
+        tokens_in=usage.tokens_in,
+        tokens_out=usage.tokens_out,
+    )
+    for pick in parsed.picks:
+        index = pick.number - 1
         if 0 <= index < len(summaries) and index not in seen:
             seen.add(index)
-            ordered.append(summaries[index]["article_id"])
+            article_id = summaries[index]["article_id"]
+            ranking.order.append(article_id)
+            ranking.importance[article_id] = pick.importance
+        if len(ranking.order) == top_n:
+            break
 
-    if not ordered:
+    if not ranking.order:
         log.warning("ranker returned no usable positions; falling back to importance order")
-        ordered = _fallback_order(summaries, weights, top_n)
+        fallback = _fallback(summaries, weights, top_n, language)
+        ranking.order, ranking.importance = fallback.order, fallback.importance
 
-    return ordered[:top_n], parsed.editor_note.strip(), usage.tokens_in, usage.tokens_out
+    return ranking

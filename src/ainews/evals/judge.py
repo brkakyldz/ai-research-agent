@@ -12,10 +12,20 @@ body length before the first call and the command refuses above `--max-cost`,
 and every judged summary becomes an `EvalResult` row - eval spend is on the
 record like product spend.
 
+The sample is drawn from the ranked stories first (since 2026-09-08). The
+reader labels what the page shows, and the page shows the ranked fifteen; a
+sample drawn uniformly over ninety-one summaries held one or two of those, so
+the judge and the reader were looking at different stories and the calibration
+pairs - a judgement *and* a label on the same summary - formed by accident.
+
 Calibration (`--labelled`) judges every summary that carries a reader's
 `Verdict` and reports TPR and TNR separately, never one accuracy figure: a
 judge that passes everything scores 90% accuracy on a mostly-right digest and
-catches nothing.
+catches nothing. It also reports precision - of the summaries the judge failed,
+the share the reader agreed were wrong - because for a tool with one reader the
+question the judge exists to answer is not "did it miss something" but "when it
+raises its hand, is it right", and `/runs/verdicts` puts the judge's failures in
+front of the reader for exactly that answer.
 """
 
 from __future__ import annotations
@@ -81,6 +91,9 @@ class Candidate:
     summary: str
     why_it_matters: str
     human_verdict: str | None = None
+    # The story's place in the digest, or None below the fold. What
+    # `choose_sample` prefers.
+    rank: int | None = None
 
 
 @dataclass(slots=True)
@@ -131,6 +144,7 @@ def _candidate(
         summary=summary.summary,
         why_it_matters=summary.why_it_matters,
         human_verdict=verdict,
+        rank=summary.rank,
     )
 
 
@@ -166,11 +180,24 @@ async def load_labelled(session: AsyncSession) -> list[Candidate]:
 
 
 def choose_sample(candidates: list[Candidate], sample: int, seed: int) -> list[Candidate]:
-    """`sample` candidates, the same ones for the same seed and the same run."""
+    """`sample` candidates, the same ones for the same seed and the same run.
+
+    Ranked stories first: every ranked one when they fit, a seeded draw among
+    them when they do not, and the remaining places filled by a seeded draw
+    from below the fold. Judging what the reader sees is what makes a judgement
+    and a label land on the same summary, which is the only pair calibration
+    can use.
+    """
     ordered = sorted(candidates, key=lambda c: c.summary_id)
     if sample >= len(ordered):
         return ordered
-    chosen = random.Random(seed).sample(ordered, sample)
+    ranked = [c for c in ordered if c.rank is not None]
+    unranked = [c for c in ordered if c.rank is None]
+    rng = random.Random(seed)
+    if len(ranked) >= sample:
+        chosen = rng.sample(ranked, sample)
+    else:
+        chosen = ranked + rng.sample(unranked, sample - len(ranked))
     return sorted(chosen, key=lambda c: c.summary_id)
 
 
@@ -312,6 +339,22 @@ class Calibration:
         return self.ok_passed / self.n_ok if self.n_ok else None
 
     @property
+    def n_failed(self) -> int:
+        """How many labelled summaries the judge raised its hand on."""
+        return self.wrong_caught + self.ok_failed
+
+    @property
+    def precision(self) -> float | None:
+        """Of the summaries the judge failed, the share the reader called wrong.
+
+        The number a single reader actually acts on. TPR needs the reader to
+        find what the judge missed, which takes hundreds of labels on a mostly
+        right digest; precision needs one label per judge failure, and
+        `/runs/verdicts` asks for exactly that one.
+        """
+        return self.wrong_caught / self.n_failed if self.n_failed else None
+
+    @property
     def trusted(self) -> bool:
         return min(self.n_wrong, self.n_ok) >= MIN_LABELS_PER_CLASS
 
@@ -345,6 +388,7 @@ def format_calibration(table: Calibration) -> str:
         "",
         f"TPR (wrong caught)  {pct(table.tpr)}  on {table.n_wrong} labelled wrong",
         f"TNR (ok passed)     {pct(table.tnr)}  on {table.n_ok} labelled ok",
+        f"precision           {pct(table.precision)}  on {table.n_failed} judge failures",
     ]
     if table.unparsed:
         lines.append(f"{table.unparsed} judged but unparsable, not counted")

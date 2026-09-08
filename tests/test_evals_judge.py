@@ -31,7 +31,7 @@ from ainews.evals.judge import (
     judge_run,
 )
 from ainews.pipeline.nodes import rank as rank_module
-from ainews.pipeline.state import RankedDigest
+from ainews.pipeline.state import Pick, RankedDigest
 
 
 class FakeMessage:
@@ -270,7 +270,12 @@ async def test_the_probe_shuffles_calls_and_stores_one_row(
 
     class Ranker(FakeLLM):
         def with_structured_output(self, _schema: Any, **__: object) -> FakeStructured:
-            return FakeStructured(RankedDigest(editor_note="n", order=[1, 2, 3]), calls=seen)
+            return FakeStructured(
+                RankedDigest(
+                    editor_note="n", picks=[Pick(number=n, importance=3) for n in (1, 2, 3)]
+                ),
+                calls=seen,
+            )
 
     monkeypatch.setattr(rank_module, "ranker", lambda *_: Ranker(None))
     report = await stability.rank_stability(session, run.id, times=3, seed=0, settings=settings)
@@ -296,3 +301,35 @@ async def test_a_fallback_answer_is_not_mistaken_for_stability(
     row = (await session.execute(select(EvalResult))).scalar_one()
     assert row.passed is None
     assert json.loads(row.detail or "{}")["n_fallback"] == 2
+
+
+# -- the sample follows the reader (2026-09-08) --------------------------------
+
+
+def test_the_sample_is_drawn_from_the_ranked_stories_first() -> None:
+    """The reader labels what the page shows, which is the ranked fifteen. A
+    sample drawn uniformly over ninety summaries held one or two of them, so a
+    judgement and a label almost never landed on the same story."""
+    candidates = [
+        judge_module.Candidate(
+            i, "r", i, "s", "t", "b", "sum", "why", rank=i + 1 if i < 3 else None
+        )
+        for i in range(20)
+    ]
+    chosen = choose_sample(candidates, 5, seed=0)
+    assert [c.summary_id for c in chosen if c.rank is not None] == [0, 1, 2], "every ranked one"
+    assert len(chosen) == 5, "the rest filled from below the fold"
+
+    two = choose_sample(candidates, 2, seed=0)
+    assert all(c.rank is not None for c in two), "a small sample never leaves the ranked set"
+    assert two == choose_sample(list(reversed(candidates)), 2, seed=0), "still seeded"
+
+
+def test_precision_is_the_share_of_judge_failures_the_reader_agreed_with() -> None:
+    """The number a one-reader tool acts on: when the judge raises its hand,
+    is it right. Two failures the reader confirmed, one it did not: 67%."""
+    table = calibrate([("wrong", False), ("wrong", False), ("ok", False), ("ok", True)])
+    assert table.n_failed == 3
+    assert table.precision == pytest.approx(2 / 3)
+    assert "precision" in format_calibration(table)
+    assert calibrate([("ok", True)]).precision is None, "no failures, no precision"

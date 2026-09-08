@@ -60,6 +60,7 @@ class RunReport:
     tags: dict[str, Any]
     importance: dict[int, float]
     overlap: dict[str, Any]
+    shift: dict[str, Any]
     unrepresented: list[int]
     editor_note: dict[str, Any]
     verdicts: dict[str, int]
@@ -167,23 +168,33 @@ async def _calibration(session: AsyncSession) -> tuple[Calibration | None, int]:
 
 
 async def build_report(
-    session: AsyncSession, since_days: int = 30, settings: Settings | None = None
+    session: AsyncSession,
+    since_days: int = 30,
+    settings: Settings | None = None,
+    run_id: str | None = None,
 ) -> Report:
+    """Every measured number for the runs in the window, or for one run.
+
+    `run_id` narrows the per-run sections to one run; the window still bounds
+    the spend totals and the calibration reads every label there is. It exists
+    because the record was growing by the *report* count rather than the run
+    count: three sections in `docs/evals.md` carried the 2026-09-04 run three
+    times, its deterministic rows identical in all three.
+    """
     settings = settings or get_settings()
     horizon = utcnow() - timedelta(days=since_days)
     report = Report(since_days=since_days, generated_at=utcnow().strftime("%Y-%m-%d %H:%M UTC"))
 
-    runs = list(
-        (
-            await session.execute(
-                select(Run)
-                .where(Run.kind != "collect")
-                .where(Run.n_summarized > 0)
-                .where(Run.started_at >= horizon)
-                .order_by(Run.started_at.desc())
-            )
-        ).scalars()
+    query = (
+        select(Run)
+        .where(Run.kind != "collect")
+        .where(Run.n_summarized > 0)
+        .where(Run.started_at >= horizon)
+        .order_by(Run.started_at.desc())
     )
+    if run_id is not None:
+        query = query.where(Run.id == run_id)
+    runs = list((await session.execute(query)).scalars())
     for run in runs:
         fixture = await record_run(session, run.id, settings)
         stories = fixture["stories"]
@@ -200,6 +211,7 @@ async def build_report(
                 tags=checks.tag_vocabulary(stories),
                 importance=checks.importance_distribution(stories),
                 overlap=checks.ranker_vs_fallback(stories),
+                shift=checks.editor_shift(stories),
                 unrepresented=checks.unrepresented_fives(stories),
                 editor_note=checks.editor_note_shape(run.editor_note),
                 verdicts=await _verdict_counts(session, run.id, len(stories)),
@@ -248,10 +260,15 @@ def render_run(run: RunReport) -> list[str]:
         f"| `checks.ungrounded_numerals` |",
         f"| Tag singleton share | {_pct(run.tags['singleton_share'])} of {run.tags['distinct']} "
         f"| `checks.tag_vocabulary` |",
+        f"| Tags from the preferred vocabulary | {_pct(run.tags['in_vocabulary_share'])} of uses "
+        f"| `checks.tag_vocabulary` |",
         f"| Importance 1..5 | {' / '.join(_pct(run.importance[s]) for s in range(1, 6))} "
         f"| `checks.importance_distribution` |",
         f"| Ranker vs fallback overlap | {run.overlap['overlap']} of {run.overlap['top_n']} "
         f"| `checks.ranker_vs_fallback` |",
+        f"| Editor's corrections | {run.shift['n_changed']} of {run.shift['n_ranked']} ranked "
+        f"({run.shift['up']} up, {run.shift['down']} down), mean shift "
+        f"{run.shift['mean_abs_shift']:.2f} | `checks.editor_shift` |",
         f"| Unrepresented fives | {run.unrepresented or 'none'} | `checks.unrepresented_fives` |",
         f"| Editor's note | {run.editor_note['paragraphs']} paragraph(s), "
         f"{run.editor_note['words']} words | `checks.editor_note_shape` |",
@@ -284,7 +301,15 @@ def render_run(run: RunReport) -> list[str]:
     return lines
 
 
-def render_markdown(report: Report) -> str:
+def render_markdown(report: Report, existing: str = "") -> str:
+    """The section, as it will be appended.
+
+    `existing` is the record so far. A run whose block would be byte-identical
+    to one already in it is written as one line pointing back rather than
+    repeated: the record is immutable, but an immutable record that restates
+    itself every time it is asked grows by the report count instead of the run
+    count, and after a month nobody can find the section where a number moved.
+    """
     lines = [
         f"## {report.generated_at} — last {report.since_days} days",
         "",
@@ -293,7 +318,11 @@ def render_markdown(report: Report) -> str:
         "",
     ]
     for run in report.runs:
-        lines.extend(render_run(run))
+        block = render_run(run)
+        if existing and "\n".join(block[2:]) in existing:
+            lines.extend([block[0], "", "Unchanged since an earlier section.", ""])
+        else:
+            lines.extend(block)
     if not report.runs:
         lines.extend(["No digest run in the window.", ""])
 
@@ -308,22 +337,29 @@ def render_markdown(report: Report) -> str:
     else:
         lines.append(
             f"TPR (wrong caught) {_pct(table.tpr)} on {table.n_wrong} labelled wrong; "
-            f"TNR (ok passed) {_pct(table.tnr)} on {table.n_ok} labelled ok "
+            f"TNR (ok passed) {_pct(table.tnr)} on {table.n_ok} labelled ok; "
+            f"precision {_pct(table.precision)} on {table.n_failed} judge failure(s) "
             f"(`judge.calibrate`)."
         )
         if not table.trusted:
             lines.append(
-                "Not enough labels to trust: thirty per class needed. "
+                "Not enough labels to trust TPR and TNR: thirty per class needed. "
                 f"{report.n_labels} label(s) on record in total."
             )
     lines.append("")
     return "\n".join(lines) + "\n"
 
 
+def read_record(path: Path | None = None) -> str:
+    """The record as it stands, or the header a first report starts from."""
+    path = path or DEFAULT_PATH
+    return path.read_text(encoding="utf-8") if path.exists() else HEADER
+
+
 def append_report(text: str, path: Path | None = None) -> Path:
     path = path or DEFAULT_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text(encoding="utf-8") if path.exists() else HEADER
+    existing = read_record(path)
     if not existing.endswith("\n"):
         existing += "\n"
     # This is the one file here that is never edited, so a rewrite that dies

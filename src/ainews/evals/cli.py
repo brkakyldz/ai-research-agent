@@ -74,6 +74,11 @@ def add_eval_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore[ty
         "report", help="print every number and append a dated section to docs/evals.md (no key)"
     )
     report.add_argument("--since", default="30d", help="window in days, e.g. 30d")
+    report.add_argument(
+        "--run",
+        default=None,
+        help="one run only (id, prefix or 'latest'); the spend totals keep the window",
+    )
     report.add_argument("--out", type=Path, default=None, help="file (default: docs/evals.md)")
     report.add_argument("--no-write", action="store_true", help="print only")
 
@@ -160,12 +165,22 @@ async def _stability(args: argparse.Namespace) -> int:
 
 
 async def _report(args: argparse.Namespace) -> int:
-    from ainews.evals.report import append_report, build_report, parse_since, render_markdown
+    from ainews.evals.record import resolve_run_id
+    from ainews.evals.report import (
+        append_report,
+        build_report,
+        parse_since,
+        read_record,
+        render_markdown,
+    )
 
     await init_db(get_engine())
     async with session_scope() as session:
-        report = await build_report(session, since_days=parse_since(args.since))
-    text = render_markdown(report)
+        run_id = await resolve_run_id(session, args.run) if args.run else None
+        report = await build_report(session, since_days=parse_since(args.since), run_id=run_id)
+    # Rendered against the record it will be appended to, so a run already
+    # written there in exactly these numbers is a pointer and not a repeat.
+    text = render_markdown(report, existing="" if args.no_write else read_record(args.out))
     print(text, end="")
     if not args.no_write:
         path = append_report(text, args.out)

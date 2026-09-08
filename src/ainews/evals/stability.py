@@ -9,6 +9,13 @@ $0.006 a run.
 
 tau is fifteen lines of pairwise concordance and no new dependency. Below 0.6
 across runs is the E5 trigger for permutation self-consistency in production.
+
+tau is the right number to gate on only because the page reads the ranker's
+order: it sorts by the editor's importance and breaks ties by rank, and the
+prompt asks for the importances to be monotone with the order (ADR 0025). Until
+2026-09-08 the page sorted by the summariser's score and only *selected* by
+rank, so tau measured an order nothing consumed, while the Jaccard that measured
+the consumed set was computed and ignored by `passed`.
 """
 
 from __future__ import annotations
@@ -119,6 +126,8 @@ async def load_table(
                 "summary": summary.summary,
                 "why_it_matters": summary.why_it_matters,
                 "tags": json.loads(summary.tags_json or "[]"),
+                # The summariser's score, never the editor's: the probe re-asks
+                # the question the ranker was asked, from the table it was shown.
                 "importance": summary.importance,
                 "tokens_in": 0,
                 "tokens_out": 0,
@@ -151,13 +160,11 @@ async def rank_stability(
     for i in range(times):
         shuffled = list(payloads)
         random.Random(seed + i).shuffle(shuffled)
-        ordered, note, tokens_in, tokens_out = await rank_summaries(
-            shuffled, meta, language, settings, model=model
-        )
-        report.orders.append(ordered)
-        report.tokens_in += tokens_in
-        report.tokens_out += tokens_out
-        if note == FALLBACK_NOTE.get(language, ""):
+        ranking = await rank_summaries(shuffled, meta, language, settings, model=model)
+        report.orders.append(ranking.order)
+        report.tokens_in += ranking.tokens_in
+        report.tokens_out += ranking.tokens_out
+        if ranking.editor_note == FALLBACK_NOTE.get(language, ""):
             # `rank_summaries` swallows a failed call and answers with the
             # importance order, which is perfectly stable and says nothing
             # about the model. Counted so the number is not mistaken for one.

@@ -44,14 +44,27 @@ async def _digest(
     mode: str,
     model_summarize: str | None = None,
     model_rank: str | None = None,
+    resume: str | None = None,
 ) -> int:
-    from ainews.pipeline.runner import run_digest
+    from ainews.pipeline.runner import resolve_run_id, run_digest
 
     settings = get_settings()
     if not settings.llm_configured:
         print("OPENAI_API_KEY is not set; a digest needs it.", file=sys.stderr)
         return 2
     await _prepare()
+    if resume is not None:
+        # A failed run picked up at the node that failed: the summaries it paid
+        # for are in the checkpoint, and only what is left runs (`runner.py`).
+        try:
+            async with session_scope() as session:
+                resume = await resolve_run_id(session, resume)
+            run_id = await run_digest(resume=resume)
+        except (LookupError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(f"digest run {run_id} resumed and finished")
+        return 0
     run_id = await run_digest(
         language=language,  # type: ignore[arg-type]
         mode=mode,  # type: ignore[arg-type]
@@ -141,6 +154,16 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="model for the single ranking call (default: OPENAI_MODEL)",
     )
+    digest.add_argument(
+        "--resume",
+        metavar="RUN_ID",
+        default=None,
+        help=(
+            "pick a failed run up at the node that failed, from its checkpoint; "
+            "a full id or an unambiguous prefix. The other flags are ignored: the "
+            "language and the models are in the checkpoint"
+        ),
+    )
 
     sub.add_parser("sources", help="list the seeded feeds and their last status")
     sub.add_parser("init", help="create the database and seed the feed list")
@@ -160,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
                 return await _collect()
             if args.command == "digest":
                 return await _digest(
-                    args.language, args.mode, args.model_summarize, args.model_rank
+                    args.language, args.mode, args.model_summarize, args.model_rank, args.resume
                 )
             if args.command == "sources":
                 return await _sources()

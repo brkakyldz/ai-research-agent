@@ -24,7 +24,9 @@
     <div>
       <p class="unit__h">{{ t.col_time }}</p>
       <p class="advice__n num">{{ run.started_at|stamp }}</p>
-      <p class="advice__s{% if run.status in ('error', 'partial') %} bad{% endif %}">
+      {# Colour on a failure only; `partial` is a finished run with a note
+         (see `_runs_table.html`). #}
+      <p class="advice__s{% if run.status == 'error' %} bad{% endif %}">
         {{ t['status_' + run.status] }} · <span lang="en">{{ run.kind }}</span>
       </p>
     </div>

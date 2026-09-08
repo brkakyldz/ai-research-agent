@@ -239,7 +239,7 @@ async def test_the_run_row_is_priced_at_the_models_that_ran(
     luna price. The cost column is the only record of what a press cost, and the
     press is now the thing that decides it.
     """
-    from ainews.pipeline.nodes.persist import TOKEN_CARRIER_ID, persist_run
+    from ainews.pipeline.nodes.persist import persist_run
 
     src = Source(name="Lab", url="https://lab.dev/feed")
     session.add(src)
@@ -269,8 +269,9 @@ async def test_the_run_row_is_priced_at_the_models_that_ran(
         # Both settings say luna; the run says otherwise and the run is right.
         "model_summarize": TERRA,
         "model_rank": LUNA,
-        "summaries": [payload(art.id, 1000, 100), payload(TOKEN_CARRIER_ID, 5000, 300)],
-        "ranked": [{"article_id": art.id, "rank": 1}],
+        "summaries": [payload(art.id, 1000, 100)],
+        "rank_usage": {"tokens_in": 5000, "tokens_out": 300},
+        "ranked": [{"article_id": art.id, "rank": 1, "importance": 3}],
         "errors": [],
     }
     await persist_run(session, state, settings)  # type: ignore[arg-type]
@@ -290,7 +291,7 @@ async def test_run_digest_resolves_both_models_before_it_opens_the_run(
     seen: dict[str, Any] = {}
 
     class _FakeApp:
-        async def ainvoke(self, initial: Any, config: Any) -> Any:
+        async def ainvoke(self, initial: Any, config: Any, **_: Any) -> Any:
             seen.update(initial)
             return initial
 
@@ -329,6 +330,7 @@ def test_the_cli_offers_the_same_two_choices(monkeypatch: pytest.MonkeyPatch) ->
         mode: str,
         model_summarize: str | None = None,
         model_rank: str | None = None,
+        resume: str | None = None,
     ) -> int:
         seen.append((model_summarize, model_rank))
         return 0

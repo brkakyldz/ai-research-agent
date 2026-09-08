@@ -4,6 +4,7 @@ Aşağıda bugün özetlenen haberler var; her birinin numarası, kaynağı, kay
 editoryal ağırlığı ve özetleyicinin verdiği önem puanı yazılı.
 
 Digest'e girecek **{top_n}** haberi seç ve okuma sırasına diz — en önemli başta.
+Her seçim için aday numarasını (`number`) ve bugünkü önemini (`importance`) ver.
 Sonra `editor_note` yaz.
 
 Ölçütler:
@@ -12,8 +13,12 @@ Sonra `editor_note` yaz.
 - Aynı olayın üç açısı yerine tek güçlü haberi tercih et. Birkaç haber aynı
   olayı anlatıyorsa temsilci birincil kaynağın haberidir; yorum seçilmez,
   elenir.
-- Önem puanları haberler tek tek, birbirini görmeden verildi. Günün bağlamı
-  onları yanlış çıkarıyorsa düzelt.
+- Önem puanları haberler tek tek, birbirini görmeden verildi. Döndürdüğün
+  `importance` aynı 1-5 ölçeğinin bütün güne bakılarak okunmuş hâlidir: gün
+  özetleyicinin puanını doğruluyorsa koru, yalanlıyorsa değiştir — apaçık
+  günün manşeti olan bir 4 aslında 5'tir, manşetin üçüncü açısı olan bir 4
+  ise 3. Sayfa her başlığı bu sayıya göre boyutlandırır; bir seçimin önemi
+  altındakinden düşük olmasın.
 
 `editor_note` üç paragraftır; aralarında boş satır olur ve **her paragraf 25-40
 kelimedir** — say. Sırasıyla:
@@ -28,7 +33,7 @@ kelimedir** — say. Sırasıyla:
 Selamlama yok, "bugün şunları ele alıyoruz" yok, başlık yok, madde işareti yok,
 numaralandırma yok. Düz üç paragraf.
 
-`order` alanında yalnızca numaraları döndür.
+`picks` alanında yalnızca seçimleri döndür, en önemli başta.
 
 ---
 {candidates}

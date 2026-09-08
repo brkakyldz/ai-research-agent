@@ -45,7 +45,20 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         # The question in front of the press, and it never restates the state
         # line above it: what this press will do, and what the last one cost.
         "confirm_what": "{n} kaynak taranacak ve yeni haberler özetlenecek.",
+        # How big the delta is, before it is paid for. "Bekleyen", not "will
+        # be": the poll can add to it and dedupe can take from it.
+        "confirm_waiting": (
+            "Şu an özetlenmeyi bekleyen {c} haber var; tarama yenilerini ekleyebilir."
+        ),
+        "confirm_none": (
+            "Şu an özetlenmeyi bekleyen haber yok; tarama yenisini bulmazsa bu baskı boş kalır."
+        ),
         "confirm_cost": "Son çalışma {c} tuttu.",
+        # The offer to finish a failed run from its checkpoint. `{step}` is the
+        # node it stopped at, in the run detail page's own words.
+        "resume_what": "{when} çalışması {step} adımında durdu; özetleri saklandı.",
+        "resume_yes": "Kaldığı yerden devam et",
+        "resume_gone": "Bu çalışma artık devam ettirilemez",
         # The one choice the press carries. It is asked here, next to the money,
         # because this is where the language is actually decided: the switch in
         # the bar translates the interface and nothing else (ADR 0017).
@@ -142,6 +155,28 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         # not a call: the label names the thing, and the figure is a fraction
         # because "3" on its own says nothing without the 118 under it.
         "verdicts_labelled": "Karar verilen",
+        # `/runs/verdicts`: the labels themselves, under the count. The summary
+        # line states the two figures the count states and no third one - what
+        # counts as "enough" labels is a constant in `evals/judge.py` and this
+        # layer does not import it (ADR 0019 §2).
+        "verdicts_heading": "Okurun kararları",
+        "verdicts_summary": "{n} / {total} habere karar verildi · {w} tanesine “yanlış” dendi",
+        "verdicts_empty": (
+            "Henüz bir habere karar verilmedi. Bir özetin altındaki Doğru · Yanlış "
+            "bu listeyi doldurur."
+        ),
+        "col_story": "Haber",
+        "col_verdict": "Karar",
+        # The judge's findings on the same page, above the labels. The sentence
+        # states the count and how many the reader has answered.
+        "findings_heading": "Yargıcın desteksiz bulduğu cümleler",
+        "findings_summary": "{n} bulgu · {a} tanesine karar verildi",
+        "findings_empty": (
+            "Yargıç henüz bir cümleyi desteksiz bulmadı. `ainews eval judge` bu listeyi doldurur."
+        ),
+        "labels_heading": "Bütün kararlar",
+        "col_claim": "Desteksiz cümle",
+        "col_judged": "Yargılandı",
         "more_topics": "Daha fazla",
         "topics": "Konular",
         "skip_to_content": "İçeriğe geç",
@@ -244,7 +279,15 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "run_now": "Refresh",
         "run_start": "Run now",
         "confirm_what": "{n} sources will be polled and what is new summarised.",
+        "confirm_waiting": "{c} stories are waiting to be summarised; the poll may add more.",
+        "confirm_none": (
+            "No story is waiting to be summarised; unless the poll finds one, this press "
+            "produces an empty bulletin."
+        ),
         "confirm_cost": "The last run cost {c}.",
+        "resume_what": "The run of {when} stopped at {step}; its summaries are kept.",
+        "resume_yes": "Pick up where it stopped",
+        "resume_gone": "That run can no longer be resumed",
         "out_language": "Bulletin language",
         "model_summarize": "Summary model",
         "model_rank": "Ranking model",
@@ -316,6 +359,22 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "verdict_save": "Save",
         "verdict_saved": "Saved",
         "verdicts_labelled": "With a verdict",
+        # See the note on the Turkish block.
+        "verdicts_heading": "The reader's verdicts",
+        "verdicts_summary": "{n} of {total} stories have a verdict · {w} called wrong",
+        "verdicts_empty": (
+            "No story carries a verdict yet. The Right · Wrong under a summary fills this list."
+        ),
+        "col_story": "Story",
+        "col_verdict": "Verdict",
+        "findings_heading": "Sentences the judge could not support",
+        "findings_summary": "{n} finding(s) · {a} answered",
+        "findings_empty": (
+            "The judge has not failed a sentence yet. `ainews eval judge` fills this list."
+        ),
+        "labels_heading": "Every verdict",
+        "col_claim": "Unsupported sentence",
+        "col_judged": "Judged",
         "more_topics": "More",
         "topics": "Topics",
         "skip_to_content": "Skip to content",

@@ -48,7 +48,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ainews.config import Settings, get_settings
 from ainews.db import Run, db_session
 from ainews.pipeline.llm import model_options, resolve_model
-from ainews.pipeline.runner import digest_in_flight, release_digest, try_claim_digest
+from ainews.pipeline.runner import (
+    digest_in_flight,
+    release_digest,
+    resumable_run,
+    try_claim_digest,
+)
 from ainews.web import queries
 from ainews.web.i18n import LANGUAGES, note_text, strings
 from ainews.web.views import (
@@ -91,11 +96,27 @@ async def _execute(language: str, models: tuple[str, str]) -> None:
         log.exception("manual run failed")
 
 
+async def _resume(run_id: str) -> None:
+    from ainews.pipeline.runner import run_digest
+
+    try:
+        await run_digest(resume=run_id)
+    except Exception:
+        log.exception("resumed run %s failed", run_id)
+
+
 async def _guarded(language: str, models: tuple[str, str], token: str) -> None:
     """Hold the claim for exactly as long as the run lasts, however it ends."""
 
     try:
         await _execute(language, models)
+    finally:
+        release_digest(token)
+
+
+async def _guarded_resume(run_id: str, token: str) -> None:
+    try:
+        await _resume(run_id)
     finally:
         release_digest(token)
 
@@ -134,6 +155,15 @@ async def _action_context(
     tempting. The run row keeps one token total, not a per-node split, so
     multiplying it by a new pair of prices would be a number with a decimal
     point and no basis. Two honest facts beat one invented one.
+
+    Two more facts since 2026-09-08, both only when the question is open. How
+    many articles are waiting to be summarised, because a press is a delta and
+    a delta of two stories is a bulletin of two stories - the reader should see
+    that number before paying for it, not after. And, when the last run failed
+    and its checkpoint can carry on, the offer to resume it: the summaries it
+    paid for are in the checkpoint, and finishing costs the nodes after the one
+    that failed. It is an offer inside the one press rather than a second
+    button, which is where ADR 0015 put the app's whole paid surface.
     """
     advice = await build_advice(session, language)  # type: ignore[arg-type]
     options = model_options(settings.openai_model_summarize, settings.openai_model)
@@ -146,6 +176,8 @@ async def _action_context(
         "asking": asking,
         "out": out,
         "n_sources": await count_enabled_sources(session),
+        "n_candidates": await queries.count_candidates(session) if asking else None,
+        "resume": await resumable_run(session, settings) if asking else None,
         "last_cost": advice.last.est_cost_usd if advice.last else None,
         "models": options,
         "ms": models[0],
@@ -294,6 +326,45 @@ async def start_run(
     )
 
 
+@router.post("/runs/resume", response_class=HTMLResponse)
+async def resume_run(
+    request: Request,
+    run: str,
+    lang: str | None = None,
+    session: AsyncSession = Depends(db_session),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    """Finish a failed run from its checkpoint.
+
+    The same shape as `/runs/start` - the claim, the task, the status line -
+    and the same two refusals. One more of its own: the run named has to be the
+    one the question offered, the most recent digest and a failed one, so a
+    stale fragment cannot resume a run that a later press has already
+    overtaken. The language and the models are not asked, because they are in
+    the checkpoint.
+    """
+    language = _valid(lang, language_of(request))
+    t = strings(language)  # type: ignore[arg-type]
+
+    if not settings.llm_configured:
+        return HTMLResponse(f'<span class="bad">{t["no_key"]}</span>')
+    offered = await resumable_run(session, settings)
+    if offered is None or offered.run.id != run:
+        return HTMLResponse(f'<span class="bad">{t["resume_gone"]}</span>')
+
+    token = f"resume:{run}"
+    if not await try_claim_digest(token):
+        return HTMLResponse(t["busy"])
+    task = asyncio.create_task(_guarded_resume(run, token))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+
+    return HTMLResponse(
+        f'<span hx-get="/runs/status?lang={language}" hx-trigger="every 3s" '
+        f'hx-swap="outerHTML">{t["running"]}</span>'
+    )
+
+
 @router.get("/runs/status", response_class=HTMLResponse)
 async def run_status(
     request: Request,
@@ -323,6 +394,50 @@ async def run_status(
         "<script>document.getElementById('bar').classList.remove('is-running');"
         "setTimeout(() => location.reload(), 400);</script>"
     )
+
+
+@router.get("/runs/verdicts", response_class=HTMLResponse)
+async def verdicts_page(
+    request: Request,
+    session: AsyncSession = Depends(db_session),
+) -> HTMLResponse:
+    """The labels themselves, under the count that reports them.
+
+    `/runs` states how many summaries carry a verdict; this is the list behind
+    that number, and it exists for one step that had no screen: PLAN-EVALS E5
+    rewrites the judge prompt "from the `wrong` notes", and until now the only
+    way to read a note was to open the story it was written on - or SQL. A
+    reader's sentence was being stored and never read back, which is a loop
+    with a missing half rather than a small omission.
+
+    A sub-page and not a sixth rail link, for the same reason `/runs/<id>` is
+    one: it is opened from the figure it explains, by someone who is already
+    looking at that figure, a few times a year. Nothing here is a measurement
+    being made - `evals/` is not imported and no call is made (ADR 0019 §2,
+    ADR 0023). It reads three tables the web layer already owns.
+
+    The third is `eval_results`, since 2026-09-08: the summaries the grounding
+    judge failed, with the sentence it could not support, each with the two
+    words under it. The judge's failures are the most informative thing the
+    evaluation layer produces and they had been printed once at a terminal and
+    filed; a reader who answers one of them here gives the label that measures
+    the judge's precision directly, which is the number a one-reader tool acts
+    on. Ten of those carry more than a hundred `ok`s on random stories.
+    """
+    language = language_of(request)
+    context = await shell_context(request, session, language, page="runs")
+    findings = await queries.judge_findings(session)
+    context.update(
+        {
+            "labels": await queries.labelled_stories(session),
+            "verdicts": await queries.verdict_progress(session),
+            "findings": findings,
+            "n_answered": sum(1 for f in findings if f.verdict is not None),
+        }
+    )
+    response = get_templates().TemplateResponse(request, "verdicts.html", context)
+    remember_preferences(request, response, language)
+    return response
 
 
 # Registered last on purpose. FastAPI matches routes in the order they are

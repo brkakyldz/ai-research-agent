@@ -16,7 +16,11 @@
    the reader having to guess which of the two he is looking at (ADR 0014). #}
 <ol class="feed">
   {% for story in stories %}
-  <li class="item p{{ story.importance }}">
+  {# The id is the deep link's landing point: `/runs/verdicts` names a story
+     by its summary and has to be able to put the reader on it. On the item and
+     not on the foot - `#foot-N` exists for the HTMX swap and would scroll the
+     card's last line to the top, hiding the headline the link promised. #}
+  <li class="item p{{ story.importance }}" id="story-{{ story.id }}">
     <p class="item__m">
       {# lang="en" is load-bearing, not decoration. The page is lang="tr", and
          a Turkish locale maps i to İ: any uppercasing - here, or in a future

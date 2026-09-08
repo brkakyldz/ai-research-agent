@@ -117,7 +117,9 @@ class Run(Base):
     """One execution of the pipeline.
 
     The id is a uuid hex string and doubles as the LangGraph checkpointer
-    `thread_id`, so a crashed run can be resumed by name.
+    `thread_id`, so a run that failed can be resumed by name - `ainews digest
+    --resume <id>`, or the same offer inside the confirmation on `/runs`
+    (`pipeline/runner.py`, `run_digest(resume=...)`).
     """
 
     __tablename__ = "runs"
@@ -217,6 +219,17 @@ class Summary(Base):
 
     `rank` is set only for the items that made the digest's top N; everything
     else keeps its `importance` and is reachable below the fold and in search.
+
+    Two scores (ADR 0025). `importance` is the summariser's, given with one
+    article in view and nothing else. `editor_importance` is the ranker's read
+    of the same story against the whole day, set only on ranked items; the page
+    draws it where it exists and the summariser's score where it does not. The
+    first is kept because the evaluation layer measures the summariser and the
+    ranker separately - the free importance-then-weight order the rank call is
+    compared against has to be built from the score the rank call did not
+    write. Nullable and unconstrained at the database because it was added to
+    a live archive by `ALTER TABLE` (`db/schema.py`); the schema on the model
+    holds it to 1-5 before it gets here.
     """
 
     __tablename__ = "summaries"
@@ -231,12 +244,18 @@ class Summary(Base):
     why_it_matters: Mapped[str] = mapped_column(Text)
     tags_json: Mapped[str] = mapped_column(Text, default="[]")
     importance: Mapped[int] = mapped_column(Integer, default=3)
+    editor_importance: Mapped[int | None] = mapped_column(Integer, default=None)
     rank: Mapped[int | None] = mapped_column(Integer, default=None)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     article: Mapped[Article] = relationship(back_populates="summaries")
     run: Mapped[Run] = relationship(back_populates="summaries")
+
+    @property
+    def shown_importance(self) -> int:
+        """The score the page draws: the editor's where there is one."""
+        return self.editor_importance if self.editor_importance is not None else self.importance
 
     __table_args__ = (
         UniqueConstraint("article_id", "run_id", "language", name="uq_summary_article_run_lang"),

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {# The reader's own labels, listed. `/runs` counts them; this is what the
+     count is made of.
+
+     It exists for the step PLAN-EVALS E5 describes and nothing in the app
+     supported: "rewrite the judge prompt from the `wrong` notes". A note was
+     being asked for at the moment the reader had it, written to `verdicts.note`,
+     and then read back by exactly one thing - the input it was typed into. The
+     loop had a human half with no screen.
+
+     It is the run log's own table, one column wider, and it was chosen against
+     two others (`mockups/v5/variants-verdict-notes.html`): a quote-led list
+     that read the notes as prose, and the feed's story card with the note on a
+     plate under the summary. The table won on the thing the page is for - a
+     hundred labels in one screen, sorted by when they were given - and it pays
+     for that by not showing the summary, which is one click away on the
+     headline.
+
+     Colour appears once, on a `wrong`, and it is `.bad` - the class the run log
+     already gives a failed run. Same page, same word for the same kind of fact.
+     The impact meter's red was drawn in the variant and is not used here: that
+     token means "a story scored low" (ADR 0012), and a summary the reader
+     called wrong is not a low score. #}
+  <section class="ph ph--back">
+    <h1>{{ t.verdicts_heading }}</h1>
+    <a class="back" href="/runs?lang={{ language }}">{{ t.back_to_runs }}</a>
+  </section>
+
+  {# The same two figures `/runs` states, in the sentence they came here from.
+     No third number about calibration: the threshold that decides when these
+     labels are enough lives in `evals/judge.py`, which this layer does not
+     import and must not restate (ADR 0019 §2). #}
+  <p class="labels__s">{{ t.verdicts_summary.format(n=verdicts.labelled, total=verdicts.total, w=verdicts.wrong) }}</p>
+
+  {# What the judge could not support, with the two words under each. Since
+     2026-09-08. The judge's failures are the most informative thing the
+     evaluation layer produces - each is a sentence a stronger model says the
+     article does not back - and they had been printed once at a terminal and
+     filed in `docs/evals.md`, where the reader whose verdict calibrates the
+     judge never saw them. Answering one here is one label that measures the
+     judge's precision directly (`evals/judge.py`), and precision is the number
+     a tool with one reader acts on: not "did the judge miss something", which
+     takes hundreds of labels to know, but "when it raises its hand, is it
+     right".
+
+     The same table recipe as the labels below, one column for the claim. The
+     claim is the model's sentence quoted back, so it keeps the body face like
+     the reader's note does; it is what the reader is being asked to judge. #}
+  <section class="ph"><h2>{{ t.findings_heading }}</h2></section>
+  <p class="labels__s">{{ t.findings_summary.format(n=findings|length, a=n_answered) }}</p>
+  <div class="panel">
+    {% if findings %}
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>{{ t.col_judged }}</th><th>{{ t.col_source }}</th><th>{{ t.col_story }}</th>
+            <th>{{ t.col_claim }}</th><th>{{ t.col_verdict }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in findings %}
+          <tr>
+            <td>{{ f.judged_at|clock }}</td>
+            <td lang="en">{{ f.source }}</td>
+            <td class="strong story">
+              <a href="/archive?lang={{ language }}&amp;run={{ f.run_id }}&amp;all=1#story-{{ f.summary_id }}">{{ f.title_local }}</a>
+            </td>
+            <td class="note claim">{{ f.claim }}</td>
+            {# The words swap themselves and only themselves: the target is the
+               control, not a story foot, so the row stays a row. #}
+            <td class="verdict">
+              {% with sid=f.summary_id, verdict=f.verdict, target='#vd-' ~ f.summary_id, frag='words' %}{% include "_verdict_words.html" %}{% endwith %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">{{ t.findings_empty }}</p>
+    {% endif %}
+  </div>
+
+  <section class="ph"><h2>{{ t.labels_heading }}</h2></section>
+  <div class="panel">
+    {% if labels %}
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>{{ t.col_time }}</th><th>{{ t.col_source }}</th><th>{{ t.col_story }}</th>
+            <th>{{ t.col_verdict }}</th><th>{{ t.col_note }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for label in labels %}
+          <tr>
+            <td>{{ label.decided_at|clock }}</td>
+            {# A brand, not Turkish prose - see the note in `_stories.html`. #}
+            <td lang="en">{{ label.source }}</td>
+            {# The way in is on the cell that names what it opens. The run log
+               puts its link on the time because the time identifies the run;
+               here the time identifies the *press*, and the thing worth opening
+               is the story. `all=1` because a verdict can be given on a story
+               below the fold, and the archive would otherwise render a page
+               with no such anchor in it. #}
+            <td class="strong story">
+              <a href="/archive?lang={{ language }}&amp;run={{ label.run_id }}&amp;all=1#story-{{ label.summary_id }}">{{ label.title_local }}</a>
+            </td>
+            <td class="verdict{% if label.verdict == 'wrong' %} bad{% endif %}">
+              {{ t['verdict_' ~ label.verdict] }}
+            </td>
+            {# The reader's own sentence, so it leaves the table's monospaced
+               face (ADR 0011) and is allowed to wrap. A note runs to 500
+               characters and it is the one thing on this page that has to be
+               read whole - clipping it would leave the page unable to do the
+               job it was built for. #}
+            <td class="note">{{ label.note or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">{{ t.verdicts_empty }}</p>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -142,3 +142,31 @@ def test_eval_is_a_subcommand_with_its_own_subcommands() -> None:
     with pytest.raises(SystemExit) as exc:
         main(["eval"])
     assert exc.value.code == 2
+
+
+async def test_the_fixture_names_the_models_that_ran_not_the_ones_configured(
+    session: AsyncSession, settings: Settings
+) -> None:
+    """`run_steps` has said which model each paid node used since ADR 0022; a
+    fixture cut under a changed `.env` must not name a model the run never saw."""
+    from ainews.db import RunStep
+
+    run = await _seed_run(session)
+    session.add_all(
+        [
+            RunStep(run_id=run.id, node="summarize", model="gpt-5.6-terra"),
+            RunStep(run_id=run.id, node="rank", model="gpt-5.6-sol"),
+        ]
+    )
+    await session.commit()
+    fixture = await record_run(session, run.id, settings)
+    assert (fixture["model_summarize"], fixture["model_rank"]) == ("gpt-5.6-terra", "gpt-5.6-sol")
+    assert fixture["stories"][0]["editor_importance"] is None, "recorded, null before the column"
+
+
+async def test_a_run_from_before_step_recording_falls_back_to_the_settings(
+    session: AsyncSession, settings: Settings
+) -> None:
+    run = await _seed_run(session)
+    fixture = await record_run(session, run.id, settings)
+    assert fixture["model_summarize"] == settings.openai_model_summarize

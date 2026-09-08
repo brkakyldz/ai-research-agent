@@ -29,7 +29,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
-from ainews.db import Article, Summary
+from ainews.db import Article, Source, Summary
 from ainews.db.models import utcnow
 
 log = logging.getLogger(__name__)
@@ -97,14 +97,30 @@ def _unsummarized(settings: Settings) -> Select[tuple[Article]]:
     This is what makes "Run now" a delta rather than a repeat: an article that
     already carries a summary is simply not a candidate again, so the button can
     be pressed twice in a row without paying for the same stories twice.
+
+    The order is the survivor rule. `dedupe_candidates` walks this list once
+    and the first article of a cluster is the one that stays; the rest are
+    marked `dup_of` it and never reach the ranker. Until 2026-09-08 the list
+    was newest-first, which chose the *last* outlet to write a story up: OpenAI
+    posts at 09:00 at weight 2.0, TechCrunch rewrites it at 11:00 at 1.0, and
+    the rewrite survived while the primary source was marked as its duplicate.
+    The rank prompt's rule - the representative of an event is the primary
+    source's item - could then never fire, because the primary source had been
+    dropped one node earlier. Heaviest source first, and among equals the
+    earliest published, which is the original by definition.
     """
     horizon = utcnow() - timedelta(days=settings.collect_max_age_days)
     return (
         select(Article)
+        .join(Source, Source.id == Article.source_id)
         .where(Article.dup_of.is_(None))
         .where(Article.fetched_at >= horizon)
         .where(~select(Summary.id).where(Summary.article_id == Article.id).exists())
-        .order_by(Article.published_at.desc().nullslast(), Article.id.desc())
+        .order_by(
+            Source.weight.desc(),
+            Article.published_at.asc().nullslast(),
+            Article.id.asc(),
+        )
     )
 
 

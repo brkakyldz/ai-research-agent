@@ -24,7 +24,7 @@ from ainews.config import Settings, get_settings
 from ainews.db import Article, Source
 from ainews.db.session import session_scope
 from ainews.pipeline.llm import summarizer, usage_from_message
-from ainews.pipeline.prompts import load_prompt
+from ainews.pipeline.prompts import load_prompt, tag_vocabulary_line
 from ainews.pipeline.state import ArticleSummary, PipelineState, SummarizeTask
 
 log = logging.getLogger(__name__)
@@ -44,6 +44,9 @@ def build_prompt(
         url=url,
         published=published,
         body=(body or "(no body text available - work from the title alone)")[:MAX_BODY_CHARS],
+        # The preferred tags, formatted in rather than written in the file, so
+        # the list the model is shown is the list `evals.checks` measures against.
+        tags=tag_vocabulary_line(),
     )
 
 

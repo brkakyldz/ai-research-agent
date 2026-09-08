@@ -174,11 +174,58 @@ async def test_the_cli_prints_and_writes(
     session: AsyncSession, measured_run: Run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     out = tmp_path / "evals.md"
-    args = argparse.Namespace(eval_command="report", since="30d", out=out, no_write=False)
+    args = argparse.Namespace(eval_command="report", since="30d", run=None, out=out, no_write=False)
     assert await run_eval(args) == 0
     captured = capsys.readouterr()
     assert "checks.word_budget" in captured.out
     assert out.exists() and "appended to" in captured.err
 
-    args = argparse.Namespace(eval_command="report", since="oops", out=out, no_write=True)
+    args = argparse.Namespace(eval_command="report", since="oops", run=None, out=out, no_write=True)
     assert await run_eval(args) == 2
+
+
+async def test_a_run_already_on_the_record_in_the_same_numbers_is_a_pointer_not_a_repeat(
+    session: AsyncSession, measured_run: Run, settings: Settings
+) -> None:
+    """The record grew by the report count: three sections carried one run
+    three times with identical deterministic rows. A block that is already in
+    the file byte for byte is written as one line pointing back."""
+    report = await build_report(session, since_days=30, settings=settings)
+    first = render_markdown(report)
+    assert "checks.word_budget" in first
+
+    second = render_markdown(report, existing=first)
+    assert "Unchanged since an earlier section." in second
+    assert "checks.word_budget" not in second, "the table is not repeated"
+    assert f"### Run `{measured_run.id[:8]}`" in second, "the run is still named"
+    assert "### Judge calibration" in second, "the calibration is always written"
+
+    # A changed number is a new section in full.
+    report.runs[0].verdicts["ok"] += 1
+    third = render_markdown(report, existing=first)
+    assert "checks.word_budget" in third
+
+
+async def test_the_report_can_be_narrowed_to_one_run(
+    session: AsyncSession, measured_run: Run, settings: Settings
+) -> None:
+    other = Run(kind="manual", language="en", status="ok", n_summarized=1, est_cost_usd=0.01)
+    session.add(other)
+    await session.commit()
+
+    everything = await build_report(session, since_days=30, settings=settings)
+    assert {r.run_id for r in everything.runs} == {measured_run.id, other.id}
+
+    one = await build_report(session, since_days=30, settings=settings, run_id=measured_run.id)
+    assert [r.run_id for r in one.runs] == [measured_run.id]
+    assert one.product_cost == pytest.approx(0.05), "the per-run rows narrow"
+    assert one.eval_cost == pytest.approx(everything.eval_cost), "the window's spend does not"
+
+
+async def test_the_report_names_the_editors_corrections_and_the_vocabulary(
+    session: AsyncSession, measured_run: Run, settings: Settings
+) -> None:
+    text = render_markdown(await build_report(session, since_days=30, settings=settings))
+    assert "`checks.editor_shift`" in text
+    assert "Tags from the preferred vocabulary" in text
+    assert "precision" in text

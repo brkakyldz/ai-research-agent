@@ -23,7 +23,7 @@ from ainews.pipeline import graph as graph_module
 from ainews.pipeline import steps as steps_module
 from ainews.pipeline.nodes import rank as rank_module
 from ainews.pipeline.nodes import summarize as summarize_module
-from ainews.pipeline.state import RankedDigest
+from ainews.pipeline.state import Pick, RankedDigest
 from ainews.pipeline.steps import step
 from ainews.web.app import create_app
 from ainews.web.i18n import note_text, strings
@@ -32,7 +32,6 @@ from test_graph import SUMMARY, FakeLLM, _no_collect, _no_enrich, _seed_articles
 
 INITIAL: dict[str, Any] = {
     "language": "tr",
-    "mode": "manual",
     "candidate_ids": [],
     "summaries": [],
     "ranked": [],
@@ -54,7 +53,16 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         rank_module,
         "ranker",
-        lambda *_: FakeLLM(RankedDigest(editor_note="Ucuz modeller gunu.", order=[2, 1, 3])),
+        lambda *_: FakeLLM(
+            RankedDigest(
+                editor_note="Ucuz modeller gunu.",
+                picks=[
+                    Pick(number=2, importance=5),
+                    Pick(number=1, importance=4),
+                    Pick(number=3, importance=3),
+                ],
+            )
+        ),
     )
 
 
@@ -175,18 +183,6 @@ async def test_the_costs_add_up_when_the_state_carries_no_model(
     assert by_node["rank"].model == settings.openai_model
 
 
-def test_the_two_carrier_ids_are_one_number() -> None:
-    """`TOKEN_CARRIER_ID` is written twice on purpose - `steps.py` says why, and
-    the reason (keeping the persist path out of `runner.py`'s import graph) is
-    sound. Nothing else holds the two in step, and a divergence would be silent
-    in the worst way: `record_fan_out` would count the rank node's carrier
-    payload as a summary and report one more branch than `persist_run` wrote,
-    with no error anywhere."""
-    from ainews.pipeline.nodes.persist import TOKEN_CARRIER_ID as in_persist
-
-    assert in_persist == steps_module.TOKEN_CARRIER_ID
-
-
 async def test_the_counts_are_the_nodes_own(
     session: AsyncSession, settings: Settings, fake_llm: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -196,7 +192,7 @@ async def test_the_counts_are_the_nodes_own(
     assert by_node["dedupe"].n_in == 3 and by_node["dedupe"].n_out == 3
     assert by_node["summarize"].n_in == 3 and by_node["summarize"].n_out == 3
     assert by_node["rank"].n_in == 3 and by_node["rank"].n_out == 3
-    # The carrier payload the rank node rides its tokens back on is not a summary.
+    # The rank call's tokens are on their own channel, not on a fake summary.
     assert by_node["persist"].n_in == 3
 
 
@@ -209,7 +205,12 @@ async def test_a_partly_failed_fan_out_says_so(
     monkeypatch.setattr(
         rank_module,
         "ranker",
-        lambda *_: FakeLLM(RankedDigest(editor_note="Gun ozeti.", order=[1, 2])),
+        lambda *_: FakeLLM(
+            RankedDigest(
+                editor_note="Gun ozeti.",
+                picks=[Pick(number=1, importance=4), Pick(number=2, importance=3)],
+            )
+        ),
     )
     run = await _run_the_graph(session, monkeypatch, language="en")
     by_node = {r.node: r for r in await _rows(session, run.id)}

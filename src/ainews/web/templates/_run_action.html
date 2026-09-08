@@ -13,9 +13,43 @@
 <div id="run-action" class="act">
   {% if asking %}
   <p class="act__q">{{ t.confirm_what.format(n=n_sources) }}</p>
+  {# What is waiting to be summarised, counted the way the dedupe node will
+     count it. A press is a delta, and until 2026-09-08 the question did not say
+     how big the delta was: a second press ten minutes after the first paid for
+     a bulletin of two stories and then put it on the front page. The count is
+     "waiting" rather than "will be" because the poll that opens a run can add
+     to it and dedupe can take from it; with nothing waiting the sentence says
+     what the press would then produce, and still lets it be pressed. #}
+  <p class="act__c">
+    {%- if n_candidates %}{{ t.confirm_waiting.format(c=n_candidates) }}
+    {%- else %}{{ t.confirm_none }}{% endif -%}
+  </p>
   {%- if last_cost %}
   <p class="act__c">{{ t.confirm_cost.format(c=last_cost|money) }}</p>
   {%- endif %}
+
+  {% if resume %}
+  {# The last run failed and its checkpoint can carry on. Offered here, inside
+     the one press, rather than as a button on the failed row: ADR 0015 put the
+     app's whole paid surface behind this question, and finishing a run is the
+     same press finishing the same job. The sentence names the node it stopped
+     at, because that is what the price of resuming depends on - a run that
+     died at `persist` costs nothing to finish, one that died at `rank` costs
+     one call. The language and the models are not asked again; they are in the
+     checkpoint, and a run finished by a different model from the one that
+     started it would be priced as neither. #}
+  <div class="act__resume">
+    <p class="act__c">{{ t.resume_what.format(when=resume.run.started_at|stamp, step=t['step_' ~ resume.next_node]) }}</p>
+    <button class="btn btn--pri"
+            hx-post="/runs/resume?lang={{ language }}&amp;run={{ resume.run.id }}"
+            hx-target="#run-status" hx-swap="innerHTML"
+            hx-disabled-elt="this"
+            hx-on::before-request="document.getElementById('bar').classList.add('is-running')"
+            hx-on::after-request="htmx.ajax('GET', '/runs/action?lang={{ language }}', {target: '#run-action', swap: 'outerHTML'})">
+      {{ t.resume_yes }}
+    </button>
+  </div>
+  {% endif %}
 
   {# The three choices the press carries, in one grid so their labels share a
      column and their controls start on one edge. They were three separate rows

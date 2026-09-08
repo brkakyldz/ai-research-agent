@@ -1,6 +1,6 @@
 # ai-research-agent
 
-A local-first LangGraph agent that reads the day's AI news so you don't have to
+A local-first LangGraph pipeline that reads the day's AI news so you don't have to
 open sixteen tabs. It polls RSS feeds every three hours, throws away the same
 story told by five outlets, summarises what is left with `gpt-5.6-luna`, ranks
 the whole day in one pass, and serves the result as a page you read over coffee.
@@ -48,6 +48,10 @@ Six nodes, and each one exists because of a specific problem:
 | **rank** | Importance was scored one article at a time, blind to the rest of the day. This is the only step that sees all of it. |
 | **persist** | Writes the summaries and closes the run row with tokens, cost and status. |
 
+The repository is named *agent* and the graph is not one in the tool-calling
+sense: nothing in it decides which node runs next. A bulletin needs a fixed
+line of six nodes, one fan-out and structured output, and that is what it is.
+
 Every node also writes down what it did — counts in and out, model, tokens, cost,
 duration — so a slow or expensive run can be read step by step at `/runs/<id>`.
 
@@ -74,7 +78,9 @@ After that the feeds keep being polled every three hours and nothing else happen
 by itself. `/runs` leads with when the last bulletin landed and a countdown to
 when another one is worth starting. It advises and never refuses: a second run
 the same day only summarises what arrived since the first, so pressing twice
-costs nothing the second time.
+costs nothing the second time — and the question says how many stories are
+waiting before you answer it. A run that failed part-way offers to finish from
+its checkpoint inside the same question, rather than summarising the day again.
 
 Without Docker:
 
@@ -90,6 +96,7 @@ call — there is no second implementation:
 ```bash
 uv run ainews collect     # poll the feeds; no LLM, no cost
 uv run ainews digest      # the full pipeline
+uv run ainews digest --resume <run>   # finish a failed run from its checkpoint
 uv run ainews sources     # what is being polled and what it last said
 ```
 
@@ -103,6 +110,7 @@ uv run ainews sources     # what is being polled and what it last said
 | `/sources` | Enable, disable or add a feed; last status per source. |
 | `/runs` | The advice block and the press, spend for today / 7 days / 30 days, the week's story counts, and every run with its cost, duration and errors. |
 | `/runs/<id>` | One run, node by node: which step took the time, which took the money, which model wrote it. |
+| `/runs/verdicts` | The sentences the grounding judge could not find in the article, each with the reader's two words under it, and the reader's own labels. |
 
 ![Runs](docs/screenshots/runs.png)
 
@@ -158,12 +166,14 @@ uv run ainews eval record --run latest          # a run → a JSON fixture; no k
 uv run ainews eval judge --run latest           # 12 sampled summaries, grounding, ~$0.05
 uv run ainews eval rank-stability --run latest  # 3 shuffled rank calls, Kendall τ, ~$0.01
 uv run ainews eval report                       # every number, appended to docs/evals.md
+uv run ainews eval report --run <id>            # one run; unchanged numbers fold to a line
 ```
 
 The first measurements are in [`docs/evals.md`](docs/evals.md): 4.4% of summaries
 over the word budget, two ungrounded figures, and a rank stability of **τ 0.47
 and 0.50** on the two real runs — both under the 0.6 that triggers a change to
-the ranker, which is why the ranker has not changed yet.
+the ranker. Both were measured while the page ignored the ranker's order
+(ADR 0025 fixed that); the next real run is the first honest reading.
 
 ![How the evaluation works](docs/eval-architecture.png)
 
@@ -177,7 +187,8 @@ the ranker, which is why the ranker has not changed yet.
   seven-day horizon and nothing older.
 - **One worker, forever.** A second uvicorn worker means a second scheduler, a
   second feed poll, and two writers on a database that has room for one.
-- **No migrations in v1.** A schema change after the archive is worth keeping
+- **No migration tool in v1.** Startup adds a missing nullable column and nothing
+  else (ADR 0025); any other schema change after the archive is worth keeping
   means writing an Alembic baseline first.
 - **Feeds rot.** Anthropic has no official feed, so the seed list uses a
   community mirror; Reddit rate-limits. A source that fails five times running
@@ -191,7 +202,7 @@ the ranker, which is why the ranker has not changed yet.
 
 ```bash
 uv sync
-uv run pytest          # 361 tests, no API key, no network
+uv run pytest          # 384 tests, no API key, no network
 uv run ruff check .
 uv run pre-commit install
 ```

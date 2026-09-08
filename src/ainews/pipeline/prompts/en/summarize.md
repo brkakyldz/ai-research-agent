@@ -15,9 +15,12 @@ Rules:
 - `why_it_matters` is **one sentence, at most 20 words**, about the consequence
   for someone building with AI. If there is no real consequence, say so plainly.
   Do not restate a sentence from the summary.
-- `importance` is honest, not generous. Most items are 2 or 3.
-- `tags` are two to four lowercase English topic tags, e.g. `openai`, `agents`,
-  `open-source`, `funding`, `policy`, `research`.
+- `importance` is 1 to 5, honest, not generous: 5 = a major lab ships or
+  announces something that changes what is buildable; 4 = a significant
+  release, funding round or research result; 3 = worth knowing; 2 =
+  incremental; 1 = noise, opinion or a rehash. Most items are 2 or 3.
+- `tags` are two to four lowercase English topic tags. Prefer these:
+  {tags}. Add a tag of your own only when none of them fits.
 
 ---
 Source: {source}

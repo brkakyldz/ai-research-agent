@@ -15,14 +15,18 @@ Kurallar:
 - `why_it_matters` **tek cümle, en fazla 20 kelime**: yapay zekâ ile geliştirme
   yapan biri için sonucu ne. Gerçek bir sonucu yoksa bunu açıkça söyle.
   Özetteki bir cümleyi tekrarlama.
-- `importance` dürüst olsun, cömert değil. Haberlerin çoğu 2 ya da 3'tür.
+- `importance` 1-5 arası, dürüst, cömert değil: 5 = büyük bir laboratuvar
+  inşa edilebilecek şeyleri değiştiren bir şey yayımladı ya da duyurdu; 4 =
+  önemli bir sürüm, yatırım turu ya da araştırma sonucu; 3 = bilinmeye değer;
+  2 = küçük bir adım; 1 = gürültü, görüş yazısı ya da tekrar. Haberlerin çoğu
+  2 ya da 3'tür.
 - `title_local` başlığın Türkçesi olacak: düz, olgusal, tık tuzağı değil.
   En fazla 10 kelime; başlık tek satırda durmalı.
 - Teknik terimleri zorlama çevirme — "model", "agent", "open-source", "fine-tune"
   yerleşik kullanımlarıyla kalsın.
-- `tags` iki ila dört adet, küçük harfli ve **İngilizce** konu etiketi:
-  `openai`, `agents`, `open-source`, `funding`, `policy`, `research` gibi.
-  Etiketler filtre anahtarı; dil değiştirince bozulmamaları için İngilizce.
+- `tags` iki ila dört adet, küçük harfli ve **İngilizce** konu etiketi. Şunları
+  tercih et: {tags}. Hiçbiri uymuyorsa bir tane ekle. Etiketler filtre
+  anahtarı; dil değiştirince bozulmamaları için İngilizce.
 
 ---
 Kaynak: {source}

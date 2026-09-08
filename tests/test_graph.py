@@ -22,7 +22,7 @@ from ainews.pipeline.llm import PRICES, estimate_cost, price_for, usage_from_mes
 from ainews.pipeline.nodes import rank as rank_module
 from ainews.pipeline.nodes import summarize as summarize_module
 from ainews.pipeline.prompts import available_languages, load_prompt
-from ainews.pipeline.state import ArticleSummary, RankedDigest
+from ainews.pipeline.state import ArticleSummary, Pick, RankedDigest
 
 
 class FakeMessage:
@@ -68,7 +68,16 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         rank_module,
         "ranker",
-        lambda *_: FakeLLM(RankedDigest(editor_note="Ucuz modeller gunu.", order=[2, 1, 3])),
+        lambda *_: FakeLLM(
+            RankedDigest(
+                editor_note="Ucuz modeller gunu.",
+                picks=[
+                    Pick(number=2, importance=5),
+                    Pick(number=1, importance=4),
+                    Pick(number=3, importance=3),
+                ],
+            )
+        ),
     )
 
 
@@ -223,7 +232,6 @@ async def test_a_full_run_fans_out_ranks_and_persists(
         {
             "run_id": run.id,
             "language": "tr",
-            "mode": "manual",
             "candidate_ids": [],
             "summaries": [],
             "ranked": [],
@@ -232,8 +240,9 @@ async def test_a_full_run_fans_out_ranks_and_persists(
         config={"recursion_limit": 50},
     )
 
-    assert len([s for s in result["summaries"] if s["article_id"] > 0]) == 3
+    assert len(result["summaries"]) == 3, "no carrier payload among the summaries"
     assert [r["rank"] for r in result["ranked"]] == [1, 2, 3]
+    assert result["rank_usage"] == {"tokens_in": 100, "tokens_out": 40}
 
     stored = list((await session.execute(select(Summary))).scalars())
     assert len(stored) == 3
@@ -243,11 +252,16 @@ async def test_a_full_run_fans_out_ranks_and_persists(
     # The ranker answered with candidate numbers 2, 1, 3 against the table it was
     # shown, so the ranks have to follow that table's order rather than the order
     # articles happen to sit in the database.
-    shown = [s["article_id"] for s in result["summaries"] if s["article_id"] > 0]
+    shown = [s["article_id"] for s in result["summaries"]]
     by_article = {s.article_id: s.rank for s in stored}
     assert by_article[shown[1]] == 1
     assert by_article[shown[0]] == 2
     assert by_article[shown[2]] == 3
+    # And the editor's score travels with the pick (ADR 0025): the summariser
+    # said 4 for every story, the ranker said 5, 4, 3 for its three picks.
+    editor = {s.article_id: s.editor_importance for s in stored}
+    assert (editor[shown[1]], editor[shown[0]], editor[shown[2]]) == (5, 4, 3)
+    assert all(s.importance == 4 for s in stored), "the summariser's own score is untouched"
 
     await session.refresh(run)
     assert run.status == "ok"
@@ -270,7 +284,12 @@ async def test_one_failing_article_does_not_fail_the_run(
     monkeypatch.setattr(
         rank_module,
         "ranker",
-        lambda *_: FakeLLM(RankedDigest(editor_note="Gun ozeti.", order=[1, 2])),
+        lambda *_: FakeLLM(
+            RankedDigest(
+                editor_note="Gun ozeti.",
+                picks=[Pick(number=1, importance=4), Pick(number=2, importance=3)],
+            )
+        ),
     )
 
     run = Run(kind="manual", language="en")
@@ -282,7 +301,6 @@ async def test_one_failing_article_does_not_fail_the_run(
         {
             "run_id": run.id,
             "language": "en",
-            "mode": "manual",
             "candidate_ids": [],
             "summaries": [],
             "ranked": [],
@@ -313,7 +331,6 @@ async def test_a_run_with_nothing_to_summarise_still_closes(
         {
             "run_id": run.id,
             "language": "tr",
-            "mode": "digest",
             "candidate_ids": [],
             "summaries": [],
             "ranked": [],
@@ -334,7 +351,7 @@ async def test_rank_tokens_are_priced_at_the_rank_model(
     """The two model knobs can differ (ADR 0001); the run's cost has to know
     which tokens went where. Until 2026-09-06 everything was priced as the
     summariser, which was right only by coincidence."""
-    from ainews.pipeline.nodes.persist import TOKEN_CARRIER_ID, persist_run
+    from ainews.pipeline.nodes.persist import persist_run
 
     src = Source(name="Lab", url="https://lab.dev/feed")
     session.add(src)
@@ -363,18 +380,9 @@ async def test_rank_tokens_are_priced_at_the_rank_model(
                 "tokens_in": 1000,
                 "tokens_out": 100,
             },
-            {
-                "article_id": TOKEN_CARRIER_ID,
-                "title_local": "",
-                "summary": "",
-                "why_it_matters": "",
-                "tags": [],
-                "importance": 3,
-                "tokens_in": 5000,
-                "tokens_out": 300,
-            },
         ],
-        "ranked": [{"article_id": art.id, "rank": 1}],
+        "rank_usage": {"tokens_in": 5000, "tokens_out": 300},
+        "ranked": [{"article_id": art.id, "rank": 1, "importance": 3}],
         "errors": [],
     }
     await persist_run(session, state, split)  # type: ignore[arg-type]
@@ -408,11 +416,12 @@ async def test_ranking_falls_back_to_importance_when_the_model_fails(
         {"article_id": 3, "importance": 3, "title_local": "c", "summary": "s"},
     ]
     meta = {1: ("A", 1.0), 2: ("B", 1.0), 3: ("C", 1.0)}
-    order, note, tin, tout = await rank_module.rank_summaries(summaries, meta, "tr")  # type: ignore[arg-type]
+    ranking = await rank_module.rank_summaries(summaries, meta, "tr")  # type: ignore[arg-type]
 
-    assert order == [2, 3, 1]
-    assert "modelsiz" in note
-    assert (tin, tout) == (0, 0)
+    assert ranking.order == [2, 3, 1]
+    assert ranking.importance == {2: 5, 3: 3, 1: 2}, "the summariser's scores stand"
+    assert "modelsiz" in ranking.editor_note
+    assert (ranking.tokens_in, ranking.tokens_out) == (0, 0)
 
 
 async def test_out_of_range_positions_from_the_model_are_dropped(
@@ -422,16 +431,21 @@ async def test_out_of_range_positions_from_the_model_are_dropped(
     monkeypatch.setattr(
         rank_module,
         "ranker",
-        lambda *_: FakeLLM(RankedDigest(editor_note="n", order=[2, 99, 2, 1])),
+        lambda *_: FakeLLM(
+            RankedDigest(
+                editor_note="n",
+                picks=[Pick(number=n, importance=3) for n in (2, 99, 2, 1)],
+            )
+        ),
     )
     summaries = [
         {"article_id": 10, "importance": 3, "title_local": "a", "summary": "s"},
         {"article_id": 20, "importance": 3, "title_local": "b", "summary": "s"},
     ]
     meta = {10: ("A", 1.0), 20: ("B", 1.0)}
-    order, _, _, _ = await rank_module.rank_summaries(summaries, meta, "en")  # type: ignore[arg-type]
+    ranking = await rank_module.rank_summaries(summaries, meta, "en")  # type: ignore[arg-type]
 
-    assert order == [20, 10], "99 is out of range and the repeated 2 is a duplicate"
+    assert ranking.order == [20, 10], "99 is out of range and the repeated 2 is a duplicate"
 
 
 # -- stubs --------------------------------------------------------------------

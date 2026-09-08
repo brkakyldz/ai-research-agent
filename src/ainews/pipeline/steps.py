@@ -65,11 +65,6 @@ from ainews.pipeline.state import PipelineState
 
 log = logging.getLogger(__name__)
 
-# The rank node reports its tokens on a payload with this id. It is defined in
-# `nodes/persist.py` too; importing that module here would pull the whole persist
-# path into `runner.py`'s import graph for one integer.
-TOKEN_CARRIER_ID = -1
-
 MAX_DETAIL_CHARS = 300
 
 
@@ -191,7 +186,7 @@ async def record_fan_out(state: PipelineState) -> None:
 
 async def _fan_out_row(state: PipelineState) -> None:
     run_id = state["run_id"]
-    payloads = [s for s in (state.get("summaries") or []) if s["article_id"] != TOKEN_CARRIER_ID]
+    payloads = state.get("summaries") or []
     n_in = len(state.get("candidate_ids") or [])
     if not n_in:
         # The conditional edge jumped straight to `persist`: nothing was

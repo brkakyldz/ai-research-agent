@@ -23,11 +23,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import PROJECT_ROOT, Settings, get_settings
-from ainews.db import Article, Run, Source, Summary
+from ainews.db import Article, Run, RunStep, Source, Summary
 from ainews.evals.checks import numeral_values
 from ainews.pipeline.nodes.summarize import MAX_BODY_CHARS
 
-SCHEMA = 1
+# Moved to the runner on 2026-09-08, when `ainews digest --resume` needed the
+# same prefix lookup; re-exported so the eval commands keep their import.
+from ainews.pipeline.runner import resolve_run_id
+
+__all__ = ["FIXTURE_DIR", "record_run", "resolve_run_id", "write_fixture"]
+
+# Bumped when a story gains a field. 2 added `editor_importance` (ADR 0025).
+SCHEMA = 2
 FIXTURE_DIR = PROJECT_ROOT / "tests" / "fixtures" / "runs"
 
 # A capitalised token: a word starting with an uppercase letter in either
@@ -37,27 +44,23 @@ _CAPITALISED = re.compile(r"\b[A-ZÇĞİÖŞÜ][\w\-']{1,}", re.UNICODE)
 MAX_CAPITALISED = 80
 
 
-async def resolve_run_id(session: AsyncSession, ref: str) -> str:
-    """`latest`, a full id, or an unambiguous prefix of one."""
-    if ref == "latest":
-        run = (
-            await session.execute(
-                select(Run)
-                .where(Run.kind != "collect")
-                .where(Run.n_summarized > 0)
-                .order_by(Run.started_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if run is None:
-            raise LookupError("no digest run with summaries in the database")
-        return run.id
-    rows = list((await session.execute(select(Run.id).where(Run.id.like(f"{ref}%")))).scalars())
-    if not rows:
-        raise LookupError(f"no run starts with {ref!r}")
-    if len(rows) > 1:
-        raise LookupError(f"{ref!r} is ambiguous: {', '.join(rows)}")
-    return rows[0]
+async def _models_that_ran(session: AsyncSession, run_id: str) -> dict[str, str]:
+    """Which model each paid node actually used, off `run_steps` (ADR 0022).
+
+    The fixture used to write the settings' two model knobs here, with a note
+    that the run row does not store the model. It still does not, but the step
+    rows have since ADR 0022, and a fixture cut a week after the run under a
+    changed `.env` would otherwise name a model the run never saw.
+    """
+    rows = (
+        await session.execute(
+            select(RunStep.node, RunStep.model)
+            .where(RunStep.run_id == run_id)
+            .where(RunStep.model != "")
+            .order_by(RunStep.started_at)
+        )
+    ).all()
+    return dict(rows)
 
 
 def capitalised_tokens(body: str | None) -> list[str]:
@@ -103,7 +106,11 @@ async def record_run(
                 "summary": summary.summary,
                 "why_it_matters": summary.why_it_matters,
                 "tags": tags,
+                # The summariser's score, and the ranker's where it gave one.
+                # `checks` reads the first for the free ordering and the
+                # distribution, the second for how far the editor moved things.
                 "importance": summary.importance,
+                "editor_importance": summary.editor_importance,
                 "rank": summary.rank,
                 "body_numerals": sorted(numeral_values(seen)),
                 "body_capitalised": capitalised_tokens(seen),
@@ -125,16 +132,17 @@ async def record_run(
         for dup in sorted(dup_rows, key=lambda a: a.id)
     ]
 
+    # A run recorded before ADR 0022 has no step rows; the settings' knobs are
+    # then what was believed when the fixture was cut, as they always were.
+    models = await _models_that_ran(session, run.id)
     return {
         "schema": SCHEMA,
         "run_id": run.id,
         "language": run.language,
         "run_started_at": run.started_at.isoformat() if run.started_at else None,
         "run_finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        # The run row does not store which models wrote it; these are the knobs
-        # at recording time, which is what was believed when the fixture was cut.
-        "model_summarize": settings.openai_model_summarize,
-        "model_rank": settings.openai_model,
+        "model_summarize": models.get("summarize", settings.openai_model_summarize),
+        "model_rank": models.get("rank", settings.openai_model),
         "top_n": settings.digest_top_n,
         "editor_note": run.editor_note,
         "stories": stories,

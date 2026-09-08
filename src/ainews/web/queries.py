@@ -15,8 +15,8 @@ from typing import Any
 from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ainews.config import Language, get_settings
-from ainews.db import Article, Run, RunStep, Source, Summary, Verdict
+from ainews.config import Language, Settings, get_settings
+from ainews.db import Article, EvalResult, Run, RunStep, Source, Summary, Verdict
 
 
 @dataclass(slots=True)
@@ -35,8 +35,18 @@ class Story:
     verdict_note: str | None = None
 
 
-async def latest_digest_run(session: AsyncSession) -> Run | None:
-    """The most recent finished digest, whatever language it was written in.
+def _finished_digests() -> Any:
+    return (
+        select(Run)
+        .where(Run.kind != "collect")
+        .where(Run.status.in_(("ok", "partial")))
+        .where(Run.n_summarized > 0)
+        .order_by(Run.started_at.desc())
+    )
+
+
+async def latest_digest_run(session: AsyncSession, settings: Settings | None = None) -> Run | None:
+    """The bulletin the front page shows, whatever language it was written in.
 
     It used to be "the most recent digest in the page's language", which made
     the shell's TR/EN switch a content filter: a reader on a Turkish page who
@@ -46,17 +56,40 @@ async def latest_digest_run(session: AsyncSession) -> Run | None:
     where it is paid for - the press on `/runs` (ADR 0017). The bar names the
     bulletin's language when it differs from the page's, so a Turkish shell
     around English stories is labelled rather than silently served.
+
+    And it is not simply the newest. Every press is a delta - only what has not
+    been summarised is a candidate - so a second press ten minutes after a
+    fifteen-story bulletin summarises the two stories that arrived in between,
+    ranks them, and writes a three-paragraph note about a day of two stories.
+    Until 2026-09-08 that two-story run became the front page and the morning's
+    bulletin dropped into the archive. A run that summarised fewer than half of
+    `digest_top_n` is a supplement: the page shows the last full bulletin from
+    the same bulletin-day instead - within `digest_suggest_after_hours`, the
+    interval `/runs` already counts a day by - and the supplement stays in the
+    archive. When the last full one is older than that, the small run is the
+    day's bulletin and is shown, because a stale full page would be worse.
     """
-    return (
+    settings = settings or get_settings()
+    latest = (await session.execute(_finished_digests().limit(1))).scalar_one_or_none()
+    if latest is None:
+        return None
+    floor = max(1, settings.digest_top_n // 2)
+    if latest.n_summarized >= floor:
+        return latest
+    started = latest.started_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    since = started - timedelta(hours=settings.digest_suggest_after_hours)
+    fuller = (
         await session.execute(
-            select(Run)
-            .where(Run.kind != "collect")
-            .where(Run.status.in_(("ok", "partial")))
-            .where(Run.n_summarized > 0)
-            .order_by(Run.started_at.desc())
+            _finished_digests()
+            .where(Run.n_summarized >= floor)
+            .where(Run.started_at >= since)
+            .where(Run.started_at < latest.started_at)
             .limit(1)
         )
     ).scalar_one_or_none()
+    return fuller or latest
 
 
 def _to_story(
@@ -77,7 +110,9 @@ def _to_story(
         title_local=summary.title_local,
         summary=summary.summary,
         why_it_matters=summary.why_it_matters,
-        importance=summary.importance,
+        # The editor's score where the ranker gave one, the summariser's where
+        # it did not (ADR 0025). The headline size is drawn from this.
+        importance=summary.shown_importance,
         tags=tags,
         age=age,
         verdict=verdict.verdict if verdict else None,
@@ -104,6 +139,14 @@ async def stories_for_run(
     on a page whose only ranking indicator is the size of the headline (ADR
     0014) reads as no order at all: the stories read as randomly arranged.
 
+    Whose importance is the second half of that fix (ADR 0025, the same day).
+    Sorting by the summariser's score meant the one node that sees the whole
+    day - and is told to correct the isolated scores - had its corrections
+    thrown away, because the schema gave it nowhere to put them. It has now:
+    `editor_importance`, set on every ranked story, and this sort reads it
+    where it exists. The summariser's score still orders the stories below the
+    fold and every run from before the column.
+
     `rank` still decides *which* stories are here - `ranked_only` is the top-N
     filter, and that is the job it was written for. What it no longer does is
     decide the order they are read in, which is what the typography is already
@@ -126,7 +169,7 @@ async def stories_for_run(
     if ranked_only:
         query = query.where(Summary.rank.isnot(None))
     query = query.order_by(
-        Summary.importance.desc(),
+        func.coalesce(Summary.editor_importance, Summary.importance).desc(),
         Summary.rank.asc().nullslast(),
         Summary.id.asc(),
     )
@@ -458,6 +501,146 @@ async def verdict_progress(session: AsyncSession) -> VerdictProgress:
     # a denominator that shrank overnight would be a number that goes backwards.
     total = (await session.execute(select(func.count(Summary.id)))).scalar_one()
     return VerdictProgress(labelled=labelled, wrong=wrong, total=total)
+
+
+@dataclass(slots=True)
+class LabelledStory:
+    """One row of `/runs/verdicts`: a verdict, and enough of the story to place it.
+
+    Not a `Story`. That shape is the reading - a summary, a why-it-matters, a
+    tag list - and this table draws none of it: the column that matters here is
+    the reader's own sentence, and the story is the address it was written at.
+    """
+
+    summary_id: int
+    run_id: str
+    decided_at: datetime
+    source: str
+    title_local: str
+    verdict: str
+    note: str | None
+
+
+async def labelled_stories(session: AsyncSession, limit: int = 200) -> list[LabelledStory]:
+    """Every verdict the reader has given, newest press first.
+
+    Both words, not only `wrong`. The count this page hangs off says "karar
+    verilen 4/118", so a list that answered with two rows would be a second
+    number disagreeing with the first one - and the calibration the labels are
+    for needs both classes, TPR against `wrong` and TNR against `ok`
+    (`evals/judge.py`). The notes are what E5 rewrites a prompt from and they
+    only ever sit on a `wrong`, which is why that column is mostly a dash and
+    that is not a fault in it.
+
+    Sorted by when the verdict was given rather than by what it says. It is the
+    first column, it is a log, and a hidden "wrong first" rule would make the
+    times read as unsorted. `limit` is a ceiling on a page with no paging: 200
+    labels is twice what E5 asks for and this list has four rows.
+    """
+    rows = (
+        await session.execute(
+            select(Verdict, Summary, Source.name)
+            .join(Summary, Summary.id == Verdict.summary_id)
+            .join(Article, Article.id == Summary.article_id)
+            .join(Source, Source.id == Article.source_id)
+            .order_by(Verdict.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    return [
+        LabelledStory(
+            summary_id=summary.id,
+            run_id=summary.run_id,
+            decided_at=verdict.created_at,
+            source=source_name,
+            title_local=summary.title_local,
+            verdict=verdict.verdict,
+            note=verdict.note,
+        )
+        for verdict, summary, source_name in rows
+    ]
+
+
+@dataclass(slots=True)
+class Finding:
+    """One summary the grounding judge failed, and whether the reader has answered.
+
+    The judge's most information-dense output - the sentence it could not
+    support - was written to `eval_results.detail`, printed once by the command
+    that produced it, and never put in front of the person whose verdict it is
+    calibrated against. This is that row, shaped for `/runs/verdicts`.
+    """
+
+    summary_id: int
+    run_id: str
+    judged_at: datetime
+    model: str
+    source: str
+    title_local: str
+    claim: str
+    verdict: str | None
+
+
+async def judge_findings(session: AsyncSession, limit: int = 200) -> list[Finding]:
+    """Every summary whose latest judgement is a FAIL, newest judgement first.
+
+    Read off `eval_results` and `verdicts` - tables `db/models.py` owns - and
+    not through `evals/`, which this layer does not import (ADR 0019 §2): a
+    recorded measurement is not a measurement being made. The latest row per
+    summary, because a summary can be judged twice on two tiers and only the
+    last word stands; a summary whose latest judgement passed is not listed
+    even if an earlier one failed.
+    """
+    rows = (
+        await session.execute(
+            select(EvalResult, Summary, Source.name, Verdict)
+            .join(Summary, Summary.id == EvalResult.summary_id)
+            .join(Article, Article.id == Summary.article_id)
+            .join(Source, Source.id == Article.source_id)
+            .outerjoin(Verdict, Verdict.summary_id == Summary.id)
+            .where(EvalResult.kind == "grounding")
+            .order_by(EvalResult.created_at.desc(), EvalResult.id.desc())
+        )
+    ).all()
+    seen: set[int] = set()
+    findings: list[Finding] = []
+    for result, summary, source_name, verdict in rows:
+        if summary.id in seen:
+            continue
+        seen.add(summary.id)
+        if result.passed is not False or not result.detail:
+            continue
+        findings.append(
+            Finding(
+                summary_id=summary.id,
+                run_id=summary.run_id,
+                judged_at=result.created_at,
+                model=result.model,
+                source=source_name,
+                title_local=summary.title_local,
+                claim=result.detail,
+                verdict=verdict.verdict if verdict else None,
+            )
+        )
+        if len(findings) == limit:
+            break
+    return findings
+
+
+async def count_candidates(session: AsyncSession) -> int:
+    """How many articles the next press would summarise, before it is pressed.
+
+    The same selection the dedupe node makes, run read-only for the question on
+    `/runs`. It answers the case ADR 0017's second language slot opened without
+    saying so: a Turkish bulletin at 09:00, `English` picked at 09:10, and a
+    press that summarises the two articles that arrived in between - a paid
+    run that produces a two-story bulletin. The count is what is waiting now;
+    the poll that opens a run can add to it, and dedupe can take from it, so
+    the sentence around it says "waiting", not "will be".
+    """
+    from ainews.pipeline.nodes.dedupe import select_candidates
+
+    return len(await select_candidates(session))
 
 
 async def run_by_id(session: AsyncSession, run_id: str) -> Run | None:

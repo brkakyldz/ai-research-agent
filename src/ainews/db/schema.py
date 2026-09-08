@@ -1,11 +1,16 @@
 """Schema creation, including the parts SQLAlchemy will not model.
 
-The ORM owns the seven real tables. The FTS5 index over `summaries` is a virtual
-table plus three triggers, which is DDL the ORM has no vocabulary for, so it is
-written out here and applied in the same idempotent `init_db()` call.
+The ORM owns the real tables. The FTS5 index over `summaries` is a virtual table
+plus three triggers, which is DDL the ORM has no vocabulary for, so it is written
+out here and applied in the same idempotent `init_db()` call.
 
 There is no migration tool in v1 - see `docs/decisions/0005-no-alembic-in-v1.md`.
-Adding one later is `alembic init` plus one autogenerate against these models.
+`create_all` adds tables and never columns, which held until the archive was
+worth keeping and a column was needed on it (ADR 0025). `ADDED_COLUMNS` is the
+narrow answer: additive, nullable, applied only when `PRAGMA table_info` says
+the column is missing, and listed here so the whole history of the schema
+outside `create_all` is one list. Adding one later is still `alembic init` plus
+one autogenerate against these models.
 """
 
 from __future__ import annotations
@@ -50,6 +55,14 @@ FTS_DDL = [
     """,
 ]
 
+# (table, column, SQL type). Every entry is a column that `create_all` created
+# on a fresh database and that a database created earlier lacks. Nullable, no
+# default, no constraint - the three things SQLite's `ADD COLUMN` and a live
+# archive both tolerate.
+ADDED_COLUMNS: list[tuple[str, str, str]] = [
+    ("summaries", "editor_importance", "INTEGER"),  # ADR 0025, 2026-09-08
+]
+
 
 async def init_db(engine: AsyncEngine) -> None:
     """Create every table, index and trigger. Safe to call on every start."""
@@ -57,6 +70,12 @@ async def init_db(engine: AsyncEngine) -> None:
         await conn.run_sync(Base.metadata.create_all)
         for statement in FTS_DDL:
             await conn.execute(text(statement))
+        for table, column, sql_type in ADDED_COLUMNS:
+            present = {
+                row[1] for row in (await conn.execute(text(f"PRAGMA table_info({table})"))).all()
+            }
+            if column not in present:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
 
 
 async def drop_all(engine: AsyncEngine) -> None:

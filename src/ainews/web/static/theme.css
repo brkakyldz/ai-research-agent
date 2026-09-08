@@ -1509,6 +1509,21 @@ kbd {
 
 .act__r { display: flex; gap: 9px; }
 .act__r .btn { padding: 9px 16px; font-size: 13px; }
+/* The offer to finish a failed run, inside the question (2026-09-08). One
+   sentence and the same primary button the press uses: it is the same press
+   finishing the same job, so it borrows the press's shape rather than getting
+   one of its own. A hairline above sets it apart from the fresh-run choices
+   under it, which do not apply to it. */
+.act__resume {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  align-self: stretch;
+}
+.act__resume .btn { padding: 9px 16px; font-size: 13px; }
 
 /* The state is a sentence at headline size and it carries no colour of its own:
    the ranked feed already spends the page's ink budget on typography, and a
@@ -1544,6 +1559,10 @@ kbd {
    for that reason - a 21px "/ 118" would read as two numbers of equal weight.
    Drawn against variants; this one shipped. */
 .totals__n small { font-size: 13px; color: var(--ink-3); }
+/* The figure is a link since 2026-09-08 - it opens the labels it counts. Drawn
+   as the figure it already was: colour is rationed on this page to a failed
+   run, so the affordance is the underline, and only under the pointer. */
+.totals__n a:hover { text-decoration: underline; text-underline-offset: 4px; }
 
 /* ---------- tables ---------- */
 
@@ -1598,6 +1617,34 @@ td.strong { color: var(--ink-0); }
    reading - which is the same bargain the row hover already makes. */
 td.strong a { color: inherit; }
 tr:hover td.strong a { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- the reader's labels ---------- */
+
+/* `/runs/verdicts`: the run log's table with a column for a sentence a person
+   wrote. Three rules, no colours of its own - `wrong` takes `.bad`, which is
+   what a failure already wears one page up.
+
+   Two cells leave the mono face, and for the same reason in both: a headline
+   and a note are prose. Everything around them - the press time, the source -
+   is machine output and stays where it was (ADR 0011). */
+.labels__s { margin: 0 2px 14px; font-size: 12.5px; color: var(--ink-3); }
+td.story { white-space: normal; font-family: var(--sans); font-size: 13px; max-width: 320px; }
+/* The one cell allowed to be tall. A 500-character note wraps rather than
+   truncates: this column is the whole reason the page exists, and half a
+   sentence cannot be the thing a prompt is rewritten from. */
+td.note {
+  white-space: normal;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  color: var(--ink-1);
+  max-width: 400px;
+}
+td.verdict { font-family: var(--sans); font-size: 12px; font-weight: 600; }
+/* The two words in a table cell (the judge's findings, 2026-09-08). On a
+   story card they are drawn under the pointer; in a table there is no card to
+   hover, and a control the reader cannot see is not a control, so here they
+   are always painted and start at the cell's edge. */
+td.verdict .vd { opacity: 1; margin-left: 0; }
 
 /* ---------- one run, node by node ---------- */
 

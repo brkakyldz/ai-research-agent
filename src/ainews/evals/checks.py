@@ -23,6 +23,7 @@ from collections import Counter
 from typing import Any
 
 from ainews.pipeline.nodes.dedupe import normalize_title, titles_match
+from ainews.pipeline.prompts import TAG_VOCABULARY
 
 Story = dict[str, Any]
 
@@ -176,14 +177,25 @@ def word_budget(stories: list[Story]) -> dict[str, Any]:
 
 
 def tag_vocabulary(stories: list[Story], top: int = 10) -> dict[str, Any]:
+    """How much of a filter the tags make.
+
+    `singleton_share` is the share of distinct tags used exactly once - a tag
+    that filters to one story filters nothing. `in_vocabulary_share` is the
+    share of tag *uses* drawn from the list the prompt asks the model to prefer
+    (`prompts.TAG_VOCABULARY`, since 2026-09-08); on a run recorded before the
+    list existed it reports how the model's own words happened to overlap it.
+    """
     counts: Counter[str] = Counter()
     for story in stories:
         counts.update(story.get("tags") or [])
     distinct = len(counts)
     singletons = sum(1 for c in counts.values() if c == 1)
+    uses = sum(counts.values())
+    in_vocabulary = sum(n for tag, n in counts.items() if tag in TAG_VOCABULARY)
     return {
         "distinct": distinct,
         "singleton_share": (singletons / distinct) if distinct else 0.0,
+        "in_vocabulary_share": (in_vocabulary / uses) if uses else 0.0,
         "top": counts.most_common(top),
     }
 
@@ -224,6 +236,32 @@ def ranker_vs_fallback(stories: list[Story], top_n: int | None = None) -> dict[s
     fallback = fallback_order(stories, n)
     overlap = len(set(ranked[:n]) & set(fallback))
     return {"top_n": n, "overlap": overlap, "ranked": ranked[:n], "fallback": fallback}
+
+
+def editor_shift(stories: list[Story]) -> dict[str, Any]:
+    """How far the ranker moved the summariser's scores on the stories it kept.
+
+    Reported, never asserted. The rank call has been asked since 2026-09-05 to
+    correct the isolated scores where the day makes them wrong, and since ADR
+    0025 its corrections reach the page. This says whether it uses the power: a
+    `n_changed` of zero on every run means the prompt line is decoration, and
+    a mean shift near two means the summariser's scale and the ranker's are not
+    the same scale. Stories with no `editor_importance` - unranked, or from a
+    run before the column existed - are not counted.
+    """
+    shifts = [
+        int(s["editor_importance"]) - int(s.get("importance", 0))
+        for s in stories
+        if s.get("rank") is not None and s.get("editor_importance") is not None
+    ]
+    changed = [d for d in shifts if d]
+    return {
+        "n_ranked": len(shifts),
+        "n_changed": len(changed),
+        "up": sum(1 for d in changed if d > 0),
+        "down": sum(1 for d in changed if d < 0),
+        "mean_abs_shift": (sum(abs(d) for d in changed) / len(shifts)) if shifts else 0.0,
+    }
 
 
 def unrepresented_fives(stories: list[Story], threshold: int = 85) -> list[int]:

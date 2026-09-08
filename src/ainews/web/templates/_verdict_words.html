@@ -1,0 +1,30 @@
+{# The reader's two words on one summary, and nothing else.
+
+   Split out of `_story_foot.html` on 2026-09-08 so the same control can sit in
+   a table cell on `/runs/verdicts`, under a sentence the judge could not
+   support. One control, two places, one file: the story's foot includes this
+   with the foot as the swap target, so a "wrong" grows its note line; the
+   findings table includes it with the words themselves as the target and
+   `frag=words`, so `POST /verdict` answers with this fragment alone and the
+   table row stays a row.
+
+   It takes `sid` and `verdict` rather than a story, because the two callers
+   hold different shapes - a `Story` on the feed, a `Finding` on the table -
+   and the control needs exactly two facts from either.
+
+   Two words, the chips' face and size, the chosen one in full ink with a check
+   after it. No fill and no colour: the accent's jobs are taken, and a verdict
+   is the reader's own note, not a state of the machine. #}
+<span class="vd{% if verdict %} vd--on{% endif %}" role="group" id="vd-{{ sid }}">
+  {%- for value in ('ok', 'wrong') %}
+  <button type="button"
+          {# Both states are written, not just the pressed one: a toggle that
+             drops the attribute when it is off announces itself as an ordinary
+             button, so a screen reader is told the word is a control only after
+             it has been chosen. #}
+          aria-pressed="{{ 'true' if verdict == value else 'false' }}"
+          hx-post="/verdict?lang={{ language }}"
+          hx-vals='{"summary_id": {{ sid }}, "verdict": "{{ value }}"{% if frag %}, "frag": "{{ frag }}"{% endif %}}'
+          hx-target="{{ target }}" hx-swap="outerHTML">{{ t['verdict_' ~ value] }}</button>
+  {%- endfor %}
+</span>

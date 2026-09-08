@@ -7,14 +7,16 @@ conditional edge returning a list of `Send` objects, one per surviving candidate
 which is LangGraph's map-reduce - a hundred independent branches in a single
 superstep, each writing into a state key with an `operator.add` reducer.
 
-Two limits have to be raised for that to work at all. `recursion_limit` counts
-supersteps and defaults to 25, which a hundred-item fan-out blows through, so the
-runner raises it. And a hundred simultaneous requests will collect 429s, so
-`max_concurrency` throttles them to `SUMMARIZE_BATCH_SIZE` at a time.
+Two settings on the invoke matter. A hundred simultaneous requests will collect
+429s, so `max_concurrency` throttles them to `SUMMARIZE_BATCH_SIZE` at a time.
+And `recursion_limit` counts supersteps: a `Send` fan-out is one superstep
+however wide it is, so the real depth here is six and the default of 25 would
+do - the runner raises it anyway as insurance against a future node that loops.
 
 Checkpoints go to their own SQLite file, not the application database. They are
 machine state with a different lifecycle: deleting them costs nothing, while
-deleting `app.db` costs the archive.
+deleting `app.db` costs the archive. They are also what a failed run resumes
+from (`runner.run_digest(resume=...)`), which is the one thing they are read for.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ from ainews.pipeline.nodes.persist import persist_run
 from ainews.pipeline.nodes.rank import rank_summaries
 from ainews.pipeline.nodes.summarize import summarize_article
 from ainews.pipeline.state import PipelineState, SummaryPayload
-from ainews.pipeline.steps import TOKEN_CARRIER_ID, StepRecord, record_fan_out, step
+from ainews.pipeline.steps import StepRecord, record_fan_out, step
 
 log = logging.getLogger(__name__)
 
@@ -139,30 +141,24 @@ async def _rank(
                 source.weight if source else 1.0,
             )
 
-    ordered, note, tokens_in, tokens_out = await rank_summaries(
+    ranking = await rank_summaries(
         summaries, meta, state["language"], model=state.get("model_rank")
     )
-    s.counts(len(summaries), len(ordered))
+    s.counts(len(summaries), len(ranking.order))
     # `persist_run`'s fallback, not an empty string: see the note in
     # `steps.record_fan_out`. The two have to price the same tokens the same way.
-    s.spend(state.get("model_rank") or get_settings().openai_model, tokens_in, tokens_out)
+    s.spend(
+        state.get("model_rank") or get_settings().openai_model,
+        ranking.tokens_in,
+        ranking.tokens_out,
+    )
     return {
-        "ranked": [{"article_id": aid, "rank": i} for i, aid in enumerate(ordered, start=1)],
-        "editor_note": note,
-        # The ranking call's tokens ride on a synthetic entry so `persist` can
-        # add them to the run's total without a second channel.
-        "summaries": [
-            {
-                "article_id": -1,
-                "title_local": "",
-                "summary": "",
-                "why_it_matters": "",
-                "tags": [],
-                "importance": 3,
-                "tokens_in": tokens_in,
-                "tokens_out": tokens_out,
-            }
+        "ranked": [
+            {"article_id": aid, "rank": i, "importance": ranking.importance[aid]}
+            for i, aid in enumerate(ranking.order, start=1)
         ],
+        "editor_note": ranking.editor_note,
+        "rank_usage": {"tokens_in": ranking.tokens_in, "tokens_out": ranking.tokens_out},
     }
 
 
@@ -173,12 +169,7 @@ async def persist_node(state: PipelineState) -> PipelineState:
         await record_fan_out(state)
         async with session_scope() as session:
             run = await persist_run(session, state)
-        # The carrier payload the rank node rides its tokens back on is not a
-        # summary and must not be counted as one.
-        payloads = [
-            p for p in (state.get("summaries") or []) if p["article_id"] != TOKEN_CARRIER_ID
-        ]
-        s.counts(len(payloads), run.n_summarized)
+        s.counts(len(state.get("summaries") or []), run.n_summarized)
         return {}
 
 

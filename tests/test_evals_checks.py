@@ -246,3 +246,42 @@ def test_editor_note_shape_counts_paragraphs_and_words() -> None:
     note = "one two three\n\nfour five\n\n\nsix"
     assert checks.editor_note_shape(note) == {"paragraphs": 3, "words": [3, 2, 1]}
     assert checks.editor_note_shape(None) == {"paragraphs": 0, "words": []}
+
+
+# -- the editor's corrections (ADR 0025) ---------------------------------------
+
+
+def test_editor_shift_counts_how_far_the_ranker_moved_the_scores() -> None:
+    stories = [
+        {"article_id": 1, "importance": 4, "editor_importance": 5, "rank": 1},
+        {"article_id": 2, "importance": 4, "editor_importance": 4, "rank": 2},
+        {"article_id": 3, "importance": 4, "editor_importance": 2, "rank": 3},
+        {"article_id": 4, "importance": 5, "editor_importance": None, "rank": None},
+        {"article_id": 5, "importance": 3, "rank": 4},  # before the column existed
+    ]
+    assert checks.editor_shift(stories) == {
+        "n_ranked": 3,
+        "n_changed": 2,
+        "up": 1,
+        "down": 1,
+        "mean_abs_shift": pytest.approx(1.0),
+    }
+    assert checks.editor_shift([])["n_ranked"] == 0
+
+
+def test_the_tag_vocabulary_share_reads_the_prompts_own_list() -> None:
+    from ainews.pipeline.prompts import TAG_VOCABULARY
+
+    stories = [{"tags": ["openai", "agents", "my-own-words"]}, {"tags": ["openai"]}]
+    vocabulary = checks.tag_vocabulary(stories)
+    assert "openai" in TAG_VOCABULARY and "my-own-words" not in TAG_VOCABULARY
+    assert vocabulary["in_vocabulary_share"] == pytest.approx(3 / 4)
+
+
+@pytest.mark.parametrize("fixture", _fixtures())
+def test_the_vocabulary_share_is_reported_not_asserted(fixture: dict[str, Any]) -> None:
+    """Both fixtures predate the list; the number says how the model's own
+    words overlapped it, which is the baseline the next recording is read
+    against."""
+    share = checks.tag_vocabulary(fixture["stories"])["in_vocabulary_share"]
+    assert 0.0 <= share <= 1.0

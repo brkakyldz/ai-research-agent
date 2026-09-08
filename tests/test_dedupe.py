@@ -470,3 +470,49 @@ def test_dedupe_golden_pairs(
         normalize_title(title_a), normalize_title(title_b), settings.dedupe_score_threshold
     )
     assert verdict is should_merge
+
+
+# -- the survivor rule (2026-09-08) --------------------------------------------
+
+
+async def test_the_primary_source_survives_the_rewrite(
+    session: AsyncSession, settings: Settings
+) -> None:
+    """OpenAI posts at 09:00 at weight 2.0; TechCrunch rewrites it at 11:00 at 1.0.
+
+    The candidate list used to be newest-first, so the rewrite was the first of
+    the pair the loop saw, survived, and the primary source was marked as *its*
+    duplicate. The rank prompt's rule - the representative of an event is the
+    primary source's item - then had nothing to apply to, because the primary
+    source never reached the ranker.
+    """
+    lab = await _source(session, "OpenAI", weight=2.0)
+    press = await _source(session, "TechCrunch", weight=1.0)
+    original = await _article(session, lab, "OpenAI ships GPT-5.6 Luna, its cheapest model", "1")
+    rewrite = await _article(
+        session, press, "OpenAI ships GPT-5.6 Luna, its cheapest model yet", "2", age_hours=0.5
+    )
+    await session.commit()
+
+    survivors, stats = await dedupe_candidates(session, settings)
+
+    assert survivors == [original.id]
+    assert stats.n_duplicates == 1
+    await session.refresh(rewrite)
+    assert rewrite.dup_of == original.id
+
+
+async def test_among_equal_sources_the_earliest_write_up_survives(
+    session: AsyncSession, settings: Settings
+) -> None:
+    """Same weight: the original is the one that was published first."""
+    a = await _source(session, "A")
+    b = await _source(session, "B")
+    first = await _article(session, a, "Meta open-sources a new speech model", "1", age_hours=3)
+    later = await _article(session, b, "Meta open sources new speech model", "2", age_hours=1)
+    await session.commit()
+
+    survivors, _ = await dedupe_candidates(session, settings)
+    assert survivors == [first.id]
+    await session.refresh(later)
+    assert later.dup_of == first.id
