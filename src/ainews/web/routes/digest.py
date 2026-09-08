@@ -6,6 +6,8 @@ template family: they all render the same story list, read at different times.
 
 from __future__ import annotations
 
+from urllib.parse import quote_plus
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
@@ -96,6 +98,7 @@ async def archive(
     request: Request,
     run: str | None = None,
     all: bool = Query(False, description="show everything summarised, not just the ranked top N"),
+    limit: int | None = Query(None, description="how many bulletins to list"),
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     """One past bulletin, and the list of the others.
@@ -107,15 +110,22 @@ async def archive(
     on, which is a dead anchor rather than a visible error.
     """
     language = language_of(request)
-    runs = await queries.digest_runs(session)
+    runs = await queries.digest_runs(session, limit=queries.page_limit(limit, 30))
     selected: Run | None = None
     if runs:
-        selected = next((r for r in runs if r.id == run), runs[0])
+        # A bulletin named in the URL but past the window is still fetched by id:
+        # a link into the archive must not depend on how far the list was opened.
+        selected = next((r for r in runs if r.id == run), None)
+        if selected is None:
+            selected = (await queries.run_by_id(session, run) if run else None) or runs.rows[0]
 
     context = await shell_context(request, session, language, page="archive", run=selected)
     context.update(
         {
             "runs": runs,
+            "more_url": f"/archive?lang={language}"
+            + (f"&run={selected.id}" if selected else "")
+            + "&limit=",
             "selected": selected,
             "stories": (
                 await queries.stories_for_run(
@@ -135,14 +145,22 @@ async def archive(
 async def search(
     request: Request,
     q: str = "",
+    limit: int | None = Query(None, description="how many hits to draw; the rest are behind it"),
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     language = language_of(request)
+    window = queries.page_limit(limit, 60)
+    hits = (
+        await queries.search_stories(session, q, language, limit=window)
+        if q.strip()
+        else queries.Page(rows=[], total=0, limit=window)
+    )
     context = await shell_context(request, session, language, page="search")
     context.update(
         {
             "query": q,
-            "stories": await queries.search_stories(session, q, language) if q.strip() else [],
+            "stories": hits,
+            "more_url": f"/search?lang={language}&q={quote_plus(q)}&limit=",
         }
     )
     response = get_templates(request).TemplateResponse(request, "search.html", context)

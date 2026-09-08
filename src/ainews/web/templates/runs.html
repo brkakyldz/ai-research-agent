@@ -122,6 +122,7 @@
 
   <section class="panel">
     <div class="scroll">{% include "_runs_table.html" %}</div>
+    {% with page = runs %}{% include "_more.html" %}{% endwith %}
   </section>
 
   {% if failures %}

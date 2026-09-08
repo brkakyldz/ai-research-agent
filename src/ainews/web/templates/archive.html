@@ -23,6 +23,7 @@
            {% if selected and r.id == selected.id %}aria-current="true"{% endif %}>{{ r.started_at|clock }}{% if r.language != language %} · <span lang="{{ r.language }}">{{ t['lang_' ~ r.language] }}</span>{% endif %}</a>
         {% endfor %}
       </div>
+      {% with page = runs %}{% include "_more.html" %}{% endwith %}
     </div>
 
     {% if selected %}{% include "_stories.html" %}{% endif %}

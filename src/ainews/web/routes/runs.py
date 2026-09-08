@@ -248,14 +248,16 @@ async def run_confirm(
 @router.get("/runs", response_class=HTMLResponse)
 async def runs_page(
     request: Request,
+    limit: int | None = None,
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     language = language_of(request)
-    runs = await queries.recent_runs(session, limit=40)
+    runs = await queries.recent_runs(session, limit=queries.page_limit(limit, 40))
     context = await shell_context(request, session, language, page="runs")
     context.update(
         {
             "runs": runs,
+            "more_url": f"/runs?lang={language}&limit=",
             "failures": [r for r in runs if r.error][:8],
             # The spend totals used to head the digest's side column. They are
             # execution metrics, which ADR 0009 put on this page and this page
@@ -412,6 +414,7 @@ async def run_status(
 @router.get("/runs/verdicts", response_class=HTMLResponse)
 async def verdicts_page(
     request: Request,
+    limit: int | None = None,
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     """The labels themselves, under the count that reports them.
@@ -442,7 +445,8 @@ async def verdicts_page(
     findings = await queries.judge_findings(session)
     context.update(
         {
-            "labels": await queries.labelled_stories(session),
+            "labels": await queries.labelled_stories(session, limit=queries.page_limit(limit, 200)),
+            "more_url": f"/runs/verdicts?lang={language}&limit=",
             "verdicts": await queries.verdict_progress(session),
             "findings": findings,
             "n_answered": sum(1 for f in findings if f.verdict is not None),

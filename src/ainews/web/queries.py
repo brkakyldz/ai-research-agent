@@ -27,6 +27,56 @@ from ainews.web.format import relative_age, to_local
 
 
 @dataclass(slots=True)
+class Page[T]:
+    """One screenful of a list that has more behind it, and how much more.
+
+    Four lists were capped and silent: the archive at 30, search at 60, the
+    verdicts at 200, the run log at 40. A page that shows thirty of forty-seven
+    and says nothing is not a page with a limit on it, it is a page that is
+    wrong - the reader has no way to tell a short list from a truncated one, and
+    the app is a record whose whole point is that the archive is kept.
+
+    Not offset paging. This is a single-reader tool and the question is "is there
+    more", not "take me to page four": `more` says so and `next_limit` doubles
+    the window, so a reader who wants everything presses twice and a reader who
+    does not pays for thirty rows.
+    """
+
+    rows: list[T]
+    total: int
+    limit: int
+
+    @property
+    def more(self) -> bool:
+        return self.total > len(self.rows)
+
+    @property
+    def next_limit(self) -> int:
+        return max(self.limit * 2, len(self.rows) + 1)
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __bool__(self) -> bool:
+        return bool(self.rows)
+
+
+# A ceiling on `?limit=`, so a typed or pasted URL cannot ask for a million rows
+# and turn a read into a table scan the page then tries to render.
+LIMIT_CEILING = 2000
+
+
+def page_limit(raw: int | None, default: int) -> int:
+    """`?limit=` from the query string, clamped to something a page can draw."""
+    if raw is None or raw < 1:
+        return default
+    return min(raw, LIMIT_CEILING)
+
+
+@dataclass(slots=True)
 class Story:
     id: int
     source: str
@@ -304,18 +354,23 @@ async def run_history(session: AsyncSession) -> RunHistory:
     )
 
 
-async def recent_runs(session: AsyncSession, limit: int = 12) -> list[Run]:
-    return list(
+async def recent_runs(session: AsyncSession, limit: int = 12) -> Page[Run]:
+    """The run log: polls and bulletins together, because the log is about the
+    machine rather than about the reading."""
+    rows = list(
         (await session.execute(select(Run).order_by(Run.started_at.desc()).limit(limit))).scalars()
     )
+    total = (await session.execute(select(func.count()).select_from(Run))).scalar_one()
+    return Page(rows=rows, total=total, limit=limit)
 
 
-async def digest_runs(session: AsyncSession, limit: int = 30) -> list[Run]:
+async def digest_runs(session: AsyncSession, limit: int = 30) -> Page[Run]:
     """Every bulletin there is, newest first - the archive does not filter by
     language for the same reason the digest does not (ADR 0017); each row in the
     picker carries its own language, so a mixed archive reads as a list of
     bulletins rather than as a page that lost half its history."""
-    return list((await session.execute(archive_runs().limit(limit))).scalars())
+    rows = list((await session.execute(archive_runs().limit(limit))).scalars())
+    return Page(rows=rows, total=await count_archive(session), limit=limit)
 
 
 async def count_archive(session: AsyncSession) -> int:
@@ -341,7 +396,7 @@ def _fts_query(raw: str) -> str:
 
 async def search_stories(
     session: AsyncSession, raw_query: str, language: Language, limit: int = 60
-) -> list[Story]:
+) -> Page[Story]:
     """Full-text hits across every bulletin, in every language.
 
     `language` reaches only the age string. The index is not filtered by it: a
@@ -351,8 +406,16 @@ async def search_stories(
     """
     expression = _fts_query(raw_query)
     if not expression:
-        return []
+        return Page(rows=[], total=0, limit=limit)
 
+    # The count first, because "60 of 214 hits" is the sentence a search box owes
+    # its reader, and FTS5 answers it without materialising the rows.
+    total = (
+        await session.execute(
+            text("SELECT count(*) FROM summaries_fts WHERE summaries_fts MATCH :q"),
+            {"q": expression},
+        )
+    ).scalar_one()
     hits = (
         await session.execute(
             text(
@@ -364,7 +427,7 @@ async def search_stories(
     ).scalars()
     ids = list(hits)
     if not ids:
-        return []
+        return Page(rows=[], total=total, limit=limit)
 
     rows = (
         await session.execute(
@@ -377,10 +440,14 @@ async def search_stories(
         )
     ).all()
 
-    return [
-        _to_story(summary, article, name, relative_age(article.published_at, language), verdict)
-        for summary, article, name, verdict in rows
-    ]
+    return Page(
+        rows=[
+            _to_story(summary, article, name, relative_age(article.published_at, language), verdict)
+            for summary, article, name, verdict in rows
+        ],
+        total=total,
+        limit=limit,
+    )
 
 
 @dataclass(slots=True)
@@ -528,7 +595,7 @@ class LabelledStory:
     note: str | None
 
 
-async def labelled_stories(session: AsyncSession, limit: int = 200) -> list[LabelledStory]:
+async def labelled_stories(session: AsyncSession, limit: int = 200) -> Page[LabelledStory]:
     """Every verdict the reader has given, newest press first.
 
     Both words, not only `wrong`. The count this page hangs off says "karar
@@ -541,8 +608,8 @@ async def labelled_stories(session: AsyncSession, limit: int = 200) -> list[Labe
 
     Sorted by when the verdict was given rather than by what it says. It is the
     first column, it is a log, and a hidden "wrong first" rule would make the
-    times read as unsorted. `limit` is a ceiling on a page with no paging: 200
-    labels is twice what E5 asks for and this list has four rows.
+    times read as unsorted. 200 is a window rather than a cap now: the page says
+    how many labels there are and offers the rest (`Page`).
     """
     rows = (
         await session.execute(
@@ -554,18 +621,23 @@ async def labelled_stories(session: AsyncSession, limit: int = 200) -> list[Labe
             .limit(limit)
         )
     ).all()
-    return [
-        LabelledStory(
-            summary_id=summary.id,
-            run_id=summary.run_id,
-            decided_at=verdict.created_at,
-            source=source_name,
-            title_local=summary.title_local,
-            verdict=verdict.verdict,
-            note=verdict.note,
-        )
-        for verdict, summary, source_name in rows
-    ]
+    total = (await session.execute(select(func.count(Verdict.id)))).scalar_one()
+    return Page(
+        rows=[
+            LabelledStory(
+                summary_id=summary.id,
+                run_id=summary.run_id,
+                decided_at=verdict.created_at,
+                source=source_name,
+                title_local=summary.title_local,
+                verdict=verdict.verdict,
+                note=verdict.note,
+            )
+            for verdict, summary, source_name in rows
+        ],
+        total=total,
+        limit=limit,
+    )
 
 
 @dataclass(slots=True)

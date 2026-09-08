@@ -1,0 +1,21 @@
+{# What a capped list owes its reader: how much of it is on screen, and a way to
+   the rest.
+
+   Four lists were capped and silent - the archive at 30, search at 60, the
+   verdicts at 200, the run log at 40. A page showing thirty of forty-seven with
+   no line saying so is not a page with a limit, it is a page that is wrong: the
+   reader cannot tell a short list from a truncated one, in an app whose whole
+   argument is that the archive is kept.
+
+   Not a pager. One reader, one question - "is there more" - so the link doubles
+   the window and keeps every other parameter, and there is no page four to be
+   lost on. #}
+{% if page.more %}
+<p class="more">
+  {# Not `.mono`: that recipe uppercases, and ADR 0016 took the shouting off
+     everything in the shell that is not the reading. The face and the tabular
+     figures are what this line wants from it, not the capitals. #}
+  <span class="more__n">{{ t.showing_of.format(n=page.rows|length, total=page.total) }}</span>
+  <a class="lnk" href="{{ more_url }}{{ page.next_limit }}">{{ t.show_more }}</a>
+</p>
+{% endif %}

@@ -1652,6 +1652,20 @@ td.strong { color: var(--ink-0); }
 td.strong a { color: inherit; }
 tr:hover td.strong a { text-decoration: underline; text-underline-offset: 3px; }
 
+/* The line a capped list owes its reader: how much is on screen, and the way to
+   the rest. Quiet on purpose - it is a footnote about the list, not an item in
+   it - so the count takes the machine face at the shell's floor size (ADR 0016)
+   and the link is the `.lnk` recipe every other in-place action uses. */
+.more {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 20px 2px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.more__n { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
 /* ---------- the reader's labels ---------- */
 
 /* `/runs/verdicts`: the run log's table with a column for a sentence a person

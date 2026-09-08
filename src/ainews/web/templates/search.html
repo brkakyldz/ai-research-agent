@@ -17,6 +17,7 @@
 
     {% if stories %}
       {% include "_stories.html" %}
+      {% with page = stories %}{% include "_more.html" %}{% endwith %}
     {% else %}
       <p class="empty">{{ t.empty_search }}</p>
     {% endif %}
