@@ -37,6 +37,9 @@ _BLANKS = re.compile(r"\n{3,}")
 MAX_BODY_CHARS = 6000
 # Below this a "body" is a headline restated, and enrichment is worth trying.
 MIN_USABLE_CHARS = 400
+# Above this a body is long enough that a trailing ellipsis is the author's,
+# or the cut at `MAX_BODY_CHARS`. Below it, it is the feed's.
+TEASER_MAX_CHARS = 800
 
 
 def _tidy(text: str) -> str:
@@ -76,8 +79,39 @@ def clean_html(raw: str | None) -> str:
     return _tidy(stripped)
 
 
+def looks_truncated(body: str) -> bool:
+    """Whether the feed cut this text off rather than ending it.
+
+    The mark is an ellipsis, and only an ellipsis. "Does not end in a full
+    stop" was tried and is too broad by half: a linkblog's post ends on its
+    tag line or its related-posts list, with no punctuation and nothing
+    missing, and thirteen of Simon Willison's complete posts matched it
+    alongside sixteen genuine Verge teasers. Re-fetching a complete post
+    returns the same text and then falls through to a paid search.
+    """
+    text = body.rstrip()
+    return text.endswith(("…", "...", "[…]", "[...]", "(...)", "[Read more]"))
+
+
 def is_usable(body: str | None) -> bool:
-    return bool(body) and len(body.strip()) >= MIN_USABLE_CHARS
+    """Whether this body is worth summarising as it stands.
+
+    Two ways to fail. Under `MIN_USABLE_CHARS` it is a headline restated. Under
+    `TEASER_MAX_CHARS` *and* cut off, it is a teaser: The Verge serves 634-650
+    characters on every item and ends sixteen of seventeen on an ellipsis, two
+    hundred characters clear of the old length bar - so tier 2 never fetched for
+    it, and every one of its stories was summarised from ninety words plus
+    inference, three confident sentences with nothing on the page to say the
+    model had not read the article.
+
+    The length bound is what keeps this off a whole article. Measured over the
+    archive it moves sixteen bodies from usable to worth fetching, all sixteen
+    of them The Verge's, which is the outcome it was written for.
+    """
+    text = (body or "").strip()
+    if len(text) < MIN_USABLE_CHARS:
+        return False
+    return not (len(text) < TEASER_MAX_CHARS and looks_truncated(text))
 
 
 async def fetch_article(

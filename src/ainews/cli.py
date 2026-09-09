@@ -95,6 +95,57 @@ async def _prune(dry_run: bool) -> int:
     return 0
 
 
+async def _resummarize(
+    article_ids: list[int], unattributed: bool, model: str | None, dry_run: bool
+) -> int:
+    """Re-fetch a body and rewrite the summaries written from it.
+
+    Spends money, so it says how much before it does and does nothing without
+    ids. There is no confirmation prompt: unlike the press this is a terminal
+    command with the article numbers typed into it, and the ids *are* the
+    confirmation.
+    """
+    from ainews.pipeline.pricing import SUMMARIZE_TOKENS_PER_ARTICLE, estimate_cost, resolve_model
+    from ainews.pipeline.repair import resummarize, source_of, unattributed_articles
+
+    settings = get_settings()
+    if not settings.llm_configured:
+        print("OPENAI_API_KEY is not set; a rewrite needs it.", file=sys.stderr)
+        return 2
+    await _prepare()
+
+    async with session_scope() as session:
+        targets = list(article_ids)
+        if unattributed:
+            targets += [i for i in await unattributed_articles(session) if i not in targets]
+        if not targets:
+            print("nothing to do: pass article ids or --unattributed", file=sys.stderr)
+            return 2
+
+        chosen = resolve_model(model, settings.openai_model_summarize)
+        tokens_in, tokens_out = SUMMARIZE_TOKENS_PER_ARTICLE
+        estimate = estimate_cost(chosen, len(targets) * tokens_in, len(targets) * tokens_out)
+        print(f"{len(targets)} article(s) on {chosen}, about ${estimate:.4f}")
+
+        if dry_run:
+            for article_id in targets:
+                print(f"  {article_id}  {await source_of(session, article_id)}")
+            return 0
+
+        failed = 0
+        for article_id in targets:
+            result = await resummarize(session, article_id, settings, model=chosen)
+            if result.ok:
+                print(
+                    f"  {article_id}: {result.summaries_rewritten} summary(ies) rewritten"
+                    f" from a {result.body_source} body"
+                )
+            else:
+                failed += 1
+                print(f"  {article_id}: {result.error}", file=sys.stderr)
+    return 1 if failed else 0
+
+
 async def _sources() -> int:
     from sqlalchemy import select
 
@@ -189,6 +240,36 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="count what would go and delete nothing",
     )
+    repairing = sub.add_parser(
+        "resummarize",
+        help="re-fetch an article's body and rewrite its summaries",
+    )
+    repairing.add_argument(
+        "article_ids",
+        nargs="*",
+        type=int,
+        metavar="ARTICLE_ID",
+        help="articles to repair; omit and pass --unattributed instead",
+    )
+    repairing.add_argument(
+        "--unattributed",
+        action="store_true",
+        help=(
+            "every summarised article whose body provenance is unknown - the rows "
+            "written before the article and the web context were separated"
+        ),
+    )
+    repairing.add_argument(
+        "--model",
+        choices=MODEL_NAMES,
+        default=None,
+        help="model for the rewrite (default: OPENAI_MODEL_SUMMARIZE)",
+    )
+    repairing.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list what would be repaired and spend nothing",
+    )
     sub.add_parser("init", help="create the database and seed the feed list")
     sub.add_parser("serve", help="run the dashboard on HOST:PORT from the environment")
     add_eval_parser(sub)
@@ -212,6 +293,10 @@ def main(argv: list[str] | None = None) -> int:
                 return await _sources()
             if args.command == "prune":
                 return await _prune(args.dry_run)
+            if args.command == "resummarize":
+                return await _resummarize(
+                    args.article_ids, args.unattributed, args.model, args.dry_run
+                )
             if args.command == "eval":
                 return await run_eval(args)
             await _prepare()

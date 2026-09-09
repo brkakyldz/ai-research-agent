@@ -459,6 +459,68 @@ GOLDEN_PAIRS = [
         True,
         marks=_BEYOND_FUZZY,
     ),
+    # -- must not merge: two stories that share their vocabulary and disagree
+    #
+    # Every score below was measured against this repository's own matcher at
+    # the configured threshold of 85, and every one of them merged before
+    # `contradicts` existed. They are the precision half of the golden set: the
+    # rows above ask whether one event written twice is recognised, these ask
+    # whether two events written alike are kept apart.
+    #
+    # A merge here is silent and expensive. The later article is marked
+    # `dup_of` and never summarised, and the survivor is the heaviest source -
+    # so the lab's announcement of the first model silences the press's report
+    # of the second, and a claim silences its own denial.
+    (
+        "OpenAI releases GPT-5.6 Luna, its cheapest model yet",
+        "OpenAI releases GPT-5.7 Luna, its cheapest model yet",
+        False,
+    ),  # 98.0
+    (
+        "Anthropic raises $5B at a $60B valuation",
+        "Anthropic raises $15B at a $160B valuation",
+        False,
+    ),  # 97.4
+    (
+        "Last Week in AI #343: Astra, the wiki incident, and more",
+        "Last Week in AI #342: Astra, the wiki incident, and more",
+        False,
+    ),  # 86.9
+    (
+        "Microsoft confirms it will buy the remaining stake",
+        "Microsoft denies it will buy the remaining stake",
+        False,
+    ),  # 93.2
+    (
+        "OpenAI launches GPT-6 Astra to Plus users today",
+        "OpenAI pulls GPT-6 Astra from Plus users today",
+        False,
+    ),  # 87.1
+    (
+        "Meta open-sources Llama 5 under a permissive licence",
+        "Meta will not open-source Llama 5 under a permissive licence",
+        False,
+    ),  # 90.5
+    # And the two the guard deliberately does not reach, marked so the gap is a
+    # measurement rather than a surprise. Identical numbers, no negation: only
+    # the product name and the subject differ, which is a recall problem for an
+    # embedding rather than a precision problem for a string comparison.
+    pytest.param(
+        "Google ships Gemini 3.8 Flash for developers",
+        "Google ships Gemini 3.8 Pro for developers",
+        False,
+        marks=pytest.mark.xfail(
+            strict=True, reason="one word apart, no number and no negation to catch (E5)"
+        ),
+    ),
+    pytest.param(
+        "EU fines OpenAI 100 million euros over data protection",
+        "EU fines Meta 100 million euros over data protection",
+        False,
+        marks=pytest.mark.xfail(
+            strict=True, reason="same verb, different subject: nothing lexical to catch (E5)"
+        ),
+    ),
 ]
 
 

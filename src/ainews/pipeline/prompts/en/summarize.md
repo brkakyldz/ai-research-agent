@@ -21,6 +21,13 @@ Rules:
   incremental; 1 = noise, opinion or a rehash. Most items are 2 or 3.
 - `tags` are two to four lowercase English topic tags. Prefer these:
   {tags}. Add a tag of your own only when none of them fits.
+- Anything under `--- WEB CONTEXT: NOT THE ARTICLE ---` is not this
+  article. It is whatever a web search for the title returned, and it is
+  there only because the article itself arrived nearly empty. Use it to
+  understand what the article is about; never state something found only
+  there as a fact the article reports. If the article says almost nothing
+  and the web context is about something else, summarise the little the
+  article does say.
 
 ---
 Source: {source}
@@ -29,4 +36,4 @@ Title: {title}
 URL: {url}
 
 Body:
-{body}
+{body}{extra}

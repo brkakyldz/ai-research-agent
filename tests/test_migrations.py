@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Connection, text
@@ -43,6 +44,23 @@ def _diff(connection: Connection) -> list[object]:
     ]
 
 
+async def _archive_as_it_was(path: Path) -> AsyncEngine:
+    """A database in the shape the real archive is in: every table the baseline
+    describes, and no version stamp.
+
+    Built by running the baseline and then removing the stamp, rather than by
+    `create_all`, which would build the *current* models - a database that has
+    already had every later revision applied to it and would then have them
+    applied again.
+    """
+    engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+    async with engine.begin() as connection:
+        await connection.run_sync(lambda c: command.upgrade(alembic_config(c), BASELINE))
+    async with engine.begin() as connection:
+        await connection.execute(text("DROP TABLE alembic_version"))
+    return engine
+
+
 async def test_a_migrated_database_matches_the_models(engine: AsyncEngine) -> None:
     """The whole point. `init_db` ran the chain; nothing should be outstanding."""
     async with engine.connect() as connection:
@@ -66,17 +84,12 @@ async def test_an_archive_from_before_migrations_is_stamped_not_rebuilt(
 ) -> None:
     """The upgrade path for the one database that already exists.
 
-    A file created by `create_all` has every table and no version stamp.
+    The archive has every table the baseline describes and no version stamp.
     Applying the baseline to it would try to create tables that are there; the
-    truthful move is to record that it is already at the baseline. This builds
-    that shape the way it was really built - from the models - and then asks
-    `init_db` to take it over.
+    truthful move is to record that it is already at that point and carry on.
     """
-    url = f"sqlite+aiosqlite:///{tmp_path / 'archive.db'}"
-    engine = create_async_engine(url)
+    engine = await _archive_as_it_was(tmp_path / "archive.db")
     try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
         assert await current_revision(engine) is None
 
         await init_db(engine)
@@ -101,11 +114,9 @@ async def test_an_archive_from_before_migrations_is_stamped_not_rebuilt(
 async def test_a_stamped_archive_keeps_its_rows(tmp_path: Path) -> None:
     """The failure this guards against is data loss, so it is worth stating with
     a row rather than with a table name."""
-    url = f"sqlite+aiosqlite:///{tmp_path / 'archive.db'}"
-    engine = create_async_engine(url)
+    engine = await _archive_as_it_was(tmp_path / "archive.db")
     try:
         async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
             await connection.execute(
                 text(
                     "INSERT INTO runs (id, kind, language, status, started_at, n_collected,"
@@ -119,6 +130,55 @@ async def test_a_stamped_archive_keeps_its_rows(tmp_path: Path) -> None:
         async with engine.begin() as connection:
             kept = (await connection.execute(text("SELECT id FROM runs"))).scalar_one()
         assert kept == "abc"
+    finally:
+        await engine.dispose()
+
+
+async def test_the_manual_run_kind_is_rewritten_on_an_old_archive(tmp_path: Path) -> None:
+    """Migration `0002`, and the reason a data revision is worth having.
+
+    `manual` distinguished a pressed digest from a scheduled one and stopped
+    meaning anything when ADR 0015 took the clock off (ADR 0026). Rows carrying
+    it are filtered out by every reader, so leaving them is a bulletin history
+    that silently empties. The rewrite used to be a statement executed on every
+    start for the rest of the project's life.
+    """
+    engine = await _archive_as_it_was(tmp_path / "archive.db")
+    try:
+        async with engine.begin() as connection:
+            # `runs` is rebuilt with the CHECK a real archive still carries.
+            # SQLite bakes the constraint into the table at creation, so a file
+            # made before ADR 0026 admits `manual` and a file made after it does
+            # not - the difference the baseline's docstring accepts rather than
+            # repairs. Without this the row cannot be inserted at all, and the
+            # revision would be tested against a database that never needed it.
+            await connection.execute(text("DROP TABLE runs"))
+            await connection.execute(
+                text(
+                    "CREATE TABLE runs (id VARCHAR(32) PRIMARY KEY, kind VARCHAR(20), "
+                    "language VARCHAR(2), status VARCHAR(20), started_at DATETIME, "
+                    "finished_at DATETIME, n_collected INTEGER DEFAULT 0, "
+                    "n_new INTEGER DEFAULT 0, n_summarized INTEGER DEFAULT 0, "
+                    "tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0, "
+                    "est_cost_usd FLOAT DEFAULT 0, model_summarize VARCHAR(60), "
+                    "model_rank VARCHAR(60), editor_note TEXT, error TEXT, "
+                    "CHECK (kind in ('collect', 'digest', 'manual')))"
+                )
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO runs (id, kind, language, status, started_at, n_summarized)"
+                    " VALUES ('old1', 'manual', 'tr', 'ok', '2026-09-05T08:00:00', 15)"
+                )
+            )
+
+        await init_db(engine)
+
+        async with engine.begin() as connection:
+            kind = (
+                await connection.execute(text("SELECT kind FROM runs WHERE id = 'old1'"))
+            ).scalar_one()
+        assert kind == "digest"
     finally:
         await engine.dispose()
 

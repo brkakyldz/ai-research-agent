@@ -54,6 +54,45 @@ _SPACE = re.compile(r"\s+")
 # those words at 100. Such a title matches only its exact twin.
 MIN_TITLE_TOKENS = 4
 
+# How many matches above the threshold to consider before giving up on a
+# candidate. Five, because the veto below can refuse the best one and the story
+# a headline really duplicates is not usually its sixth-closest neighbour.
+MATCH_CANDIDATES = 5
+
+# Words that reverse a headline. Normalisation strips punctuation and lowercases,
+# so `won't` arrives as `won t` and the bare `t` is not worth matching on; the
+# `not` in "will not" carries it instead.
+_NEGATIONS = frozenset(
+    {
+        "no",
+        "not",
+        "never",
+        "without",
+        "deny",
+        "denies",
+        "denied",
+        "reject",
+        "rejects",
+        "rejected",
+        "pull",
+        "pulls",
+        "pulled",
+        "halt",
+        "halts",
+        "halted",
+        "cancel",
+        "cancels",
+        "cancelled",
+        "canceled",
+        "abandon",
+        "abandons",
+        "abandoned",
+        "delay",
+        "delays",
+        "delayed",
+    }
+)
+
 
 def normalize_title(title: str) -> str:
     """Reduce a headline to the words that carry the story."""
@@ -69,18 +108,62 @@ def is_short_title(normalized: str) -> bool:
     return len(normalized.split()) < MIN_TITLE_TOKENS
 
 
+def _numeric_tokens(normalized: str) -> set[str]:
+    return {token for token in normalized.split() if any(c.isdigit() for c in token)}
+
+
+def contradicts(a: str, b: str) -> bool:
+    """Whether two *normalised* titles disagree about a fact, however alike.
+
+    `token_set_ratio` measures shared vocabulary, and two headlines about
+    opposite events share almost all of it. Measured against this repository's
+    own matcher at the configured threshold of 85: a version bump scores 98
+    ("GPT-5.6 Luna" against "GPT-5.7 Luna"), a funding round 97 ("$5B at $60B"
+    against "$15B at $160B"), a denial 93 ("confirms it will buy" against
+    "denies it will buy"), a withdrawal 87 ("launches to Plus users" against
+    "pulls from Plus users") and consecutive issues of a newsletter 87. In every
+    one the later article was marked a duplicate and never summarised, and the
+    survivor is the heaviest source - so a lab's announcement of the first model
+    silenced the press's report of the second, and a claim silenced its denial.
+
+    Two vetoes, both cheap:
+
+    **Numbers that conflict.** Not "the numbers differ": one headline naming a
+    figure the other omits is the ordinary case of two outlets covering one
+    event, so a subset is allowed. A veto needs each side to carry a number the
+    other does not - `{5, 6}` against `{5, 7}`, `{343}` against `{342}`.
+
+    **A negation on one side only.** "denies", "not", "pulls" and their kin
+    appearing in one title and not the other.
+
+    What it does not catch is worth naming, because a guard read as complete is
+    worse than one read as partial: "Gemini 3.8 Flash" against "Gemini 3.8 Pro"
+    has identical numbers and no negation, and "EU fines OpenAI 100 million"
+    against "EU fines Meta 100 million" differs only by subject. Both still
+    merge. Those are recall problems for an embedding, not precision problems
+    for a string comparison.
+    """
+    numbers_a, numbers_b = _numeric_tokens(a), _numeric_tokens(b)
+    if not (numbers_a <= numbers_b or numbers_b <= numbers_a):
+        return True
+    words_a, words_b = set(a.split()), set(b.split())
+    return (_NEGATIONS & words_a) != (_NEGATIONS & words_b)
+
+
 def titles_match(a: str, b: str, threshold: int) -> bool:
     """The pairwise decision, on two *normalised* titles.
 
-    The loop below asks the same question through `process.extractOne` for
-    speed; this function is the reference the golden-pair test holds it to.
-    A short title on either side is only ever its own duplicate: the fuzzy
-    score is a subset test in disguise there.
+    The loop below asks the same question through `process.extract` for speed;
+    this function is the reference the golden-pair test holds it to. A short
+    title on either side is only ever its own duplicate: the fuzzy score is a
+    subset test in disguise there.
     """
     if not a or not b:
         return False
     if is_short_title(a) or is_short_title(b):
         return a == b
+    if contradicts(a, b):
+        return False
     return fuzz.token_set_ratio(a, b) >= threshold
 
 
@@ -211,17 +294,28 @@ async def dedupe_candidates(
             short_refs[title] = article.id
             continue
 
-        match = process.extractOne(
+        # `extract` rather than `extractOne`, so a vetoed best match does not
+        # hide a valid weaker one: "GPT-5.7 Luna released" scores highest
+        # against last week's "GPT-5.6 Luna released", which `contradicts`
+        # refuses, and second against this morning's "OpenAI ships GPT-5.7
+        # Luna", which is the merge that should happen.
+        matches = process.extract(
             title,
             ref_titles,
             scorer=fuzz.token_set_ratio,
             score_cutoff=settings.dedupe_score_threshold,
+            limit=MATCH_CANDIDATES,
         )
-        if match is not None:
-            _, score, index = match
+        merged = False
+        for candidate_title, score, index in matches:
+            if contradicts(title, candidate_title):
+                continue
             article.dup_of = ref_ids[index]
             stats.n_duplicates += 1
             stats.pairs.append((article.id, ref_ids[index], score))
+            merged = True
+            break
+        if merged:
             continue
 
         # The survivor joins the reference set, so the third outlet covering the

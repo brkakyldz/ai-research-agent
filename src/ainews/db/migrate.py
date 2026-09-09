@@ -31,6 +31,27 @@ MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 # it already existed; see the migration's own docstring.
 BASELINE = "0001_baseline"
 
+# The FTS5 index and the four shadow tables SQLite creates beside it. They are
+# in the database and deliberately not in the models - a virtual table is DDL
+# SQLAlchemy has no vocabulary for - so autogenerate sees them as tables to
+# drop and writes `op.drop_table('summaries_fts')` into the next revision
+# anybody generates. That would delete the search index on the next upgrade,
+# quietly, as a side effect of an unrelated change.
+FTS_TABLES = frozenset(
+    {
+        "summaries_fts",
+        "summaries_fts_data",
+        "summaries_fts_idx",
+        "summaries_fts_docsize",
+        "summaries_fts_config",
+    }
+)
+
+
+def is_ours(name: str | None, type_: str) -> bool:
+    """Whether autogenerate should compare this object against the models."""
+    return not (type_ == "table" and name in FTS_TABLES)
+
 
 def alembic_config(connection: Connection | None = None) -> Config:
     """A Config built in code rather than read from `alembic.ini`.

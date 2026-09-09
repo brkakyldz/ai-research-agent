@@ -95,6 +95,12 @@ class Candidate:
     # The story's place in the digest, or None below the fold. What
     # `choose_sample` prefers.
     rank: int | None = None
+    # Where `body` came from: `feed`, `fetch`, or `unknown` for a row written
+    # before the article and the web context were separated (ADR 0029). A pass
+    # over an `unknown` body is not evidence of grounding - it may be a pass
+    # over search results appended to the article with no marker - so it is
+    # recorded on the result rather than counted as if it were.
+    body_source: str | None = None
 
 
 @dataclass(slots=True)
@@ -146,6 +152,7 @@ def _candidate(
         why_it_matters=summary.why_it_matters,
         human_verdict=verdict,
         rank=summary.rank,
+        body_source=article.body_source,
     )
 
 
@@ -241,6 +248,25 @@ async def judge_one(candidate: Candidate, settings: Settings, model: str | None 
     return Outcome(candidate, bool(parsed.passed), claim, usage.tokens_in, usage.tokens_out)
 
 
+UNATTRIBUTED = "body provenance unknown; this pass is not evidence of grounding"
+
+
+def _detail(outcome: Outcome) -> str | None:
+    """What goes on the `EvalResult` row.
+
+    A failure names the claim; an error names itself. A *pass* over a body
+    nothing can attribute says so, because that is the one case where the
+    number and its meaning come apart: before the split, `body_text` could hold
+    the article or the article with a week's search results appended, and a
+    judge reading the second and passing it has confirmed nothing.
+    """
+    if outcome.claim or outcome.error:
+        return outcome.claim or outcome.error
+    if outcome.passed and outcome.candidate.body_source not in ("feed", "fetch"):
+        return UNATTRIBUTED
+    return None
+
+
 async def judge_candidates(
     session: AsyncSession,
     candidates: list[Candidate],
@@ -273,7 +299,7 @@ async def judge_candidates(
                 summary_id=candidate.summary_id,
                 kind="grounding",
                 passed=outcome.passed,
-                detail=outcome.claim or outcome.error,
+                detail=_detail(outcome),
                 model=model,
                 tokens_in=outcome.tokens_in,
                 tokens_out=outcome.tokens_out,

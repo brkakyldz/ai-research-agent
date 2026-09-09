@@ -32,10 +32,26 @@ log = logging.getLogger(__name__)
 # The model's context is over a million tokens, but a news summary does not need
 # a whole page and a longer prompt is a slower, dearer one.
 MAX_BODY_CHARS = 5000
+# Web context is a fallback for an article that arrived nearly empty, so it gets
+# a smaller share than the article itself.
+MAX_EXTRA_CHARS = 2000
+
+# The line that separates the article from text found by searching for its
+# title. One constant, in English in both prompts, because it is a delimiter
+# rather than prose: each prompt file explains in its own language what the
+# marker means, and neither has to keep a translation of it in step.
+WEB_CONTEXT_MARKER = "--- WEB CONTEXT: NOT THE ARTICLE ---"
 
 
 def build_prompt(
-    language: str, *, source: str, title: str, url: str, published: str, body: str
+    language: str,
+    *,
+    source: str,
+    title: str,
+    url: str,
+    published: str,
+    body: str,
+    extra: str = "",
 ) -> str:
     template = load_prompt("summarize", language)
     return template.format(
@@ -44,6 +60,12 @@ def build_prompt(
         url=url,
         published=published,
         body=(body or "(no body text available - work from the title alone)")[:MAX_BODY_CHARS],
+        # Empty when there is none, so the ordinary call carries no marker and
+        # no empty heading. A prompt that announces a section and then shows
+        # nothing invites the model to fill it in.
+        extra=(
+            f"\n\n{WEB_CONTEXT_MARKER}\n{extra[:MAX_EXTRA_CHARS]}" if (extra or "").strip() else ""
+        ),
         # The preferred tags, formatted in rather than written in the file, so
         # the list the model is shown is the list `evals.checks` measures against.
         tags=tag_vocabulary_line(),
@@ -70,6 +92,7 @@ async def summarize_article(
             url=article.url,
             published=article.published_at.isoformat() if article.published_at else "unknown",
             body=article.body_text or "",
+            extra=article.extra_text or "",
         )
 
     try:

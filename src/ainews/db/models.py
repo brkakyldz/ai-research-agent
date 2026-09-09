@@ -158,7 +158,20 @@ class Article(Base):
     url: Mapped[str] = mapped_column(String(1000))
     title: Mapped[str] = mapped_column(Text)
     published_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    # The article, and only the article. Tavily's snippets used to be appended
+    # here with no marker, which made `body_text` "the article plus whatever a
+    # search for its title returned this week" - and the grounding judge reads
+    # this field as "the text the summariser was shown". A claim that came from
+    # a bad snippet was therefore judged grounded (ADR 0029).
     body_text: Mapped[str | None] = mapped_column(Text, default=None)
+    # Third-party text found by searching for the title. The summariser is shown
+    # it, labelled; the judge and the fixture recorder never are.
+    extra_text: Mapped[str | None] = mapped_column(Text, default=None)
+    # Where `body_text` came from: `feed`, `fetch`, or `unknown`. `unknown` is
+    # not a failure state, it is the truthful value for every row written before
+    # the split - their bodies may or may not carry search text and there is no
+    # marker to tell, so nothing downstream may claim they are article text.
+    body_source: Mapped[str | None] = mapped_column(String(10), default=None)
     fetched_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     # Set when this article was judged a restatement of an earlier one.
     dup_of: Mapped[int | None] = mapped_column(ForeignKey("articles.id"), default=None)

@@ -113,6 +113,12 @@ async def record_run(
                 "rank": summary.rank,
                 "body_numerals": sorted(numeral_values(seen)),
                 "body_capitalised": capitalised_tokens(seen),
+                # Where the text those two were taken from came from. `unknown`
+                # is every row written before the article and the web context
+                # were separated (ADR 0029): its numerals may include figures
+                # from a search result rather than from the article, so a
+                # grounding floor computed over it is an upper bound.
+                "body_source": article.body_source,
             }
         )
 

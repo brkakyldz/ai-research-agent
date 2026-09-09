@@ -27,6 +27,13 @@ Kurallar:
 - `tags` iki ila dört adet, küçük harfli ve **İngilizce** konu etiketi. Şunları
   tercih et: {tags}. Hiçbiri uymuyorsa bir tane ekle. Etiketler filtre
   anahtarı; dil değiştirince bozulmamaları için İngilizce.
+- `--- WEB CONTEXT: NOT THE ARTICLE ---` işaretinden sonrası bu haber
+  değildir. Başlıkla yapılmış bir web aramasının döndürdüğü metindir ve
+  yalnızca haberin gövdesi neredeyse boş geldiği için oradadır. Haberin ne
+  hakkında olduğunu anlamak için kullan; yalnızca orada geçen bir bilgiyi
+  haberin verdiği bir bilgi gibi yazma. Haber neredeyse hiçbir şey
+  söylemiyorsa ve web metni başka bir konudaysa, haberin söylediği o azı
+  özetle.
 
 ---
 Kaynak: {source}
@@ -35,4 +42,4 @@ Başlık: {title}
 URL: {url}
 
 Gövde:
-{body}
+{body}{extra}

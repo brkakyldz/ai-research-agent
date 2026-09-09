@@ -21,6 +21,7 @@ from sqlalchemy import Connection, pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from ainews.config import get_settings
+from ainews.db.migrate import is_ours
 from ainews.db.models import Base
 
 config = context.config
@@ -52,6 +53,10 @@ def _configure(**kwargs: object) -> None:
         target_metadata=target_metadata,
         render_as_batch=True,
         render_item=_render_item,
+        # Without this, autogenerate proposes dropping the FTS5 index and
+        # its shadow tables on every revision, because they are in the
+        # database and not in the models. `migrate.is_ours` says why.
+        include_name=lambda name, type_, _parents: is_ours(name, type_),
         # A column whose Python type changed should show up in an autogenerate
         # diff. SQLite's type affinity makes this noisier than on other
         # backends, which is why it is off by default; the noise is worth the

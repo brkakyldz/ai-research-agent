@@ -83,10 +83,12 @@ async def enrich_articles(
         cleaned = clean_html(article.body_text)
         if is_usable(cleaned):
             article.body_text = cleaned
+            article.body_source = "feed"
             stats.n_from_feed += 1
             continue
         # Keep the teaser: it is the fallback if the next two tiers fail.
         article.body_text = cleaned or None
+        article.body_source = "feed" if cleaned else None
         needs_fetch.append((article, weight))
     await session.commit()
 
@@ -108,10 +110,12 @@ async def enrich_articles(
         for article, body in fetched:
             if is_usable(body):
                 article.body_text = body
+                article.body_source = "fetch"
                 stats.n_fetched += 1
             else:
                 if body and len(body) > len(article.body_text or ""):
                     article.body_text = body
+                    article.body_source = "fetch"
                 still_thin.append((article, weights[article.id]))
         await session.commit()
 
@@ -122,7 +126,13 @@ async def enrich_articles(
             continue
         extra = await tavily.enrich(session, article.title, settings)
         if extra:
-            article.body_text = f"{article.body_text or ''}\n\n{extra}".strip()
+            # Its own column, never appended to the body. Joined onto
+            # `body_text` this text became indistinguishable from the article:
+            # the grounding judge reads that field as "the text the summariser
+            # was shown" and would pass a claim taken from a snippet about
+            # something else entirely (ADR 0029). The summariser still sees it,
+            # labelled as not being the article.
+            article.extra_text = extra
             stats.n_tavily += 1
         else:
             stats.n_still_empty += 1

@@ -1,6 +1,6 @@
 """The strict xfails, counted and named in one place.
 
-There are twelve, and finding 16 of the 2026-09-08 audit called them "permanent
+There are fourteen, and finding 16 of the 2026-09-08 audit called them "permanent
 fixtures instead of tracked issues". They are not permanent — `strict=True` is
 what makes them temporary, because the day a gap closes the mark fails loudly
 rather than passing silently — but the audit's real complaint stands: nothing
@@ -13,10 +13,15 @@ the number in the diff.
 
 The two sources:
 
-- `test_dedupe.py::_BEYOND_FUZZY` — nine golden pairs from the 2026-09-04 run
-  that `token_set_ratio` cannot reach: the same event written up by different
-  outlets in different words. They *are* the E5 trigger ("golden pairs keep
-  failing on new outlets → embedding dedupe"), so the mark is the measurement.
+- `test_dedupe.py`, recall — nine golden pairs from the 2026-09-04 run that
+  `token_set_ratio` cannot reach: the same event written up by different outlets
+  in different words. They *are* the E5 trigger ("golden pairs keep failing on
+  new outlets → embedding dedupe"), so the mark is the measurement.
+- `test_dedupe.py`, precision — two pairs that share every number and carry no
+  negation, so `contradicts` has nothing lexical to refuse them on: one product
+  name apart, and one subject apart. Counted separately because they wait on the
+  same embedding for the opposite reason - the recall gaps are merges that do
+  not happen, these are merges that should not.
 - `test_evals_checks.py::KNOWN_GAPS` — three checks the 2026-09-04 fixture
   cannot meet because it was recorded before the fix each one exists for. They
   come off when a newer run is recorded, which is a fact about that file rather
@@ -28,7 +33,8 @@ from __future__ import annotations
 # The number of `xfail(strict=True)` outcomes the suite is expected to produce,
 # and where each group comes from. Change this line and say why in the commit.
 EXPECTED = {
-    "golden dedupe pairs beyond token_set_ratio (E5 trigger)": 9,
+    "golden pairs that should merge and cannot (E5 trigger)": 9,
+    "golden pairs that should not merge and do (E5 trigger)": 2,
     "checks the 2026-09-04 fixture predates": 3,
 }
 
@@ -40,14 +46,19 @@ def test_the_known_gaps_are_the_number_we_think_they_are() -> None:
     from test_dedupe import GOLDEN_PAIRS
     from test_evals_checks import KNOWN_GAPS
 
-    beyond_fuzzy = sum(1 for row in GOLDEN_PAIRS if getattr(row, "marks", ()))
+    marked = [row for row in GOLDEN_PAIRS if getattr(row, "marks", ())]
+    # The third value of the row is `should_merge`, which is what separates a
+    # missed duplicate from a wrong one.
+    missed = sum(1 for row in marked if row.values[2])
+    wrong = sum(1 for row in marked if not row.values[2])
     fixtures = {p.name for p in FIXTURE_DIR.glob("*.json")}
     # A gap declared against a fixture that is no longer recorded is not a gap.
     predated = sum(len(gaps) for name, gaps in KNOWN_GAPS.items() if name in fixtures)
 
-    assert beyond_fuzzy == EXPECTED["golden dedupe pairs beyond token_set_ratio (E5 trigger)"]
+    assert missed == EXPECTED["golden pairs that should merge and cannot (E5 trigger)"]
+    assert wrong == EXPECTED["golden pairs that should not merge and do (E5 trigger)"]
     assert predated == EXPECTED["checks the 2026-09-04 fixture predates"]
-    assert beyond_fuzzy + predated == sum(EXPECTED.values()) == 12
+    assert missed + wrong + predated == sum(EXPECTED.values()) == 14
 
 
 def test_every_known_gap_states_what_it_is_waiting_on() -> None:
