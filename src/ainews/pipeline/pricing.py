@@ -56,6 +56,59 @@ def estimate_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     return (tokens_in * price_in + tokens_out * price_out) / 1_000_000
 
 
+# What one candidate costs in tokens, measured on the runs this repository has
+# actually made and checked in for the same reason `PRICES` is: a guard whose
+# arithmetic is fetched at runtime cannot be tested offline, and a fresh
+# installation - the case the guard exists for - has no history to fetch.
+#
+# Summarize is per article: 28,755 in and 10,264 out over 20 branches. Rank is
+# one call whose table grows with the day: 3,440 in and 2,099 out over the same
+# 20 candidates. Across all three runs on record the totals agree to within a
+# few percent (1,421 in and 498 out per article, rank included).
+#
+# These are means, not worst cases, and that is deliberate. The guard is here to
+# catch an order-of-magnitude mistake - the expensive tier over a week's backlog
+# is fifty times the usual press - and a five percent error either way does not
+# change whether it fires.
+SUMMARIZE_TOKENS_PER_ARTICLE = (1438, 513)
+RANK_TOKENS_PER_CANDIDATE = (172, 105)
+
+
+class CostCeiling(RuntimeError):
+    """A press estimated above `DIGEST_MAX_COST_USD`, refused before it spent.
+
+    Carries the numbers rather than only a sentence: the run row shows this text
+    verbatim (ADR 0011), and "too expensive" without the estimate, the ceiling
+    and the candidate count leaves the reader with no way to decide whether to
+    raise the cap or wait for a smaller day.
+    """
+
+    def __init__(self, estimate: float, ceiling: float, n_candidates: int) -> None:
+        super().__init__(
+            f"{n_candidates} candidates estimated at ${estimate:.2f}, over the "
+            f"DIGEST_MAX_COST_USD ceiling of ${ceiling:.2f}; raise the ceiling, "
+            "choose a cheaper model, or press again when the backlog is smaller"
+        )
+        self.estimate = estimate
+        self.ceiling = ceiling
+        self.n_candidates = n_candidates
+
+
+def estimate_digest_cost(n_candidates: int, model_summarize: str, model_rank: str) -> float:
+    """What a press over `n_candidates` articles is expected to cost.
+
+    Priced per node at the model that will run it, because since ADR 0020 the
+    two may differ by an order of magnitude - summarising on the cheap tier
+    while ranking on the expensive one is a legitimate press, and one blended
+    number would misprice both halves of it.
+    """
+    summarize_in, summarize_out = SUMMARIZE_TOKENS_PER_ARTICLE
+    rank_in, rank_out = RANK_TOKENS_PER_CANDIDATE
+    return estimate_cost(
+        model_summarize, n_candidates * summarize_in, n_candidates * summarize_out
+    ) + estimate_cost(model_rank, n_candidates * rank_in, n_candidates * rank_out)
+
+
 @dataclass(frozen=True, slots=True)
 class ModelChoice:
     """One offerable model: what to send, what to draw, what it costs."""

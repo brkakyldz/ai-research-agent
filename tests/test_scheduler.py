@@ -42,6 +42,29 @@ def test_collect_fires_on_the_configured_interval(monkeypatch: pytest.MonkeyPatc
     assert second - first == timedelta(hours=3)
 
 
+async def test_the_first_poll_is_immediate(settings: Settings) -> None:
+    """Without a `start_date` an interval trigger waits a full interval first.
+
+    On a machine booted each morning and shut down each night that is at most
+    two polls a day, and the first bulletin is written from whatever the last
+    session happened to leave behind. The poll is free and conditional-GET, so
+    an extra one at boot costs a handful of 304s.
+    """
+    now = datetime.now(UTC)
+    scheduler = build_scheduler(settings)
+    # Paused, for the reason the catch-up test gives: a job that never left the
+    # pending list has not had its schedule applied yet.
+    scheduler.start(paused=True)
+    try:
+        job = scheduler.get_job(COLLECT_JOB_ID)
+        assert job.next_run_time - now < timedelta(seconds=5)
+        # And only the first one: the interval still governs everything after.
+        second = job.trigger.get_next_fire_time(job.next_run_time, job.next_run_time)
+        assert second - job.next_run_time == timedelta(hours=settings.collect_interval_hours)
+    finally:
+        scheduler.shutdown(wait=False)
+
+
 async def test_a_sleeping_laptop_produces_one_catch_up_not_four(settings: Settings) -> None:
     """`coalesce` is the whole reason this is safe on a machine that suspends.
 

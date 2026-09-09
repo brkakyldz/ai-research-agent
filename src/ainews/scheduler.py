@@ -15,6 +15,7 @@ being overlapped by the next one.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -61,6 +62,16 @@ def build_scheduler(settings: Settings | None = None) -> AsyncIOScheduler:
         id=COLLECT_JOB_ID,
         name="collect feeds",
         replace_existing=True,
+        # An interval trigger's first fire is one whole interval away, so a
+        # machine booted in the morning and shut down at night polls at most
+        # twice a day and the first bulletin is written from whatever the last
+        # session left behind. `next_run_time` overrides that first fire only;
+        # every one after it is the interval again. The poll is free and the
+        # feeds are conditional-GET, so an extra one at boot costs a handful of
+        # 304s. Not `start_date`, which is read as "no earlier than" - set to
+        # now it is already past, and the trigger skips to the next boundary,
+        # which is the behaviour being fixed.
+        next_run_time=datetime.now(UTC),
     )
     return scheduler
 

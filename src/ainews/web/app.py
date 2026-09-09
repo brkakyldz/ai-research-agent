@@ -23,6 +23,7 @@ from ainews.db import dispose_engine, get_engine, init_db
 from ainews.db.session import checkpoint_wal, session_scope
 from ainews.logging_conf import configure_logging
 from ainews.observability import enable_tracing
+from ainews.pipeline.api import reconcile_orphaned_runs
 from ainews.scheduler import start_scheduler
 from ainews.sources.seed import sync_sources
 from ainews.web.format import build_templates
@@ -49,6 +50,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # additive so nothing the operator changed is touched.
     async with session_scope() as session:
         await sync_sources(session)
+
+    # Before the scheduler winds, and before a request can be served: a run row
+    # left `running` by a killed process is a run nothing will ever close, and
+    # the advice block on `/runs` reads the state of the last one.
+    await reconcile_orphaned_runs()
 
     scheduler = None
     if settings.scheduler_enabled:

@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     # -- Digest ---------------------------------------------------------------
     digest_language: Language = "tr"
     digest_top_n: int = Field(default=15, ge=1, le=100)
+    # The one guard on the one press that spends money. ADR 0020 declined a
+    # ceiling on the grounds that the price line under the button was the whole
+    # guard, which holds while the only person who can press it is the person
+    # who wrote the price line. It does not hold for someone running this with
+    # their own key: the expensive tier over a week's backlog is about $5 - half
+    # a month's budget - one click after the question, and the first press on a
+    # fresh installation is exactly that case. A dollar is roughly forty times
+    # an ordinary press, so a run that trips this has gone wrong rather than
+    # gone large.
+    digest_max_cost_usd: float = Field(default=1.00, ge=0)
     dedupe_score_threshold: int = Field(default=85, ge=0, le=100)
     dedupe_lookback_hours: int = Field(default=72, ge=1)
     tavily_daily_cap: int = Field(default=30, ge=0)

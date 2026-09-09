@@ -38,6 +38,7 @@ from ainews.pipeline.nodes.enrich import enrich_articles
 from ainews.pipeline.nodes.persist import persist_run
 from ainews.pipeline.nodes.rank import rank_summaries
 from ainews.pipeline.nodes.summarize import summarize_article
+from ainews.pipeline.pricing import CostCeiling, estimate_digest_cost
 from ainews.pipeline.state import PipelineState, SummaryPayload
 from ainews.pipeline.steps import StepRecord, record_fan_out, step
 
@@ -64,11 +65,14 @@ async def collect_node(state: PipelineState) -> PipelineState:
         if stats.errors:
             s.status = "partial"
             s.note("; ".join(stats.errors))
-        return {
-            "n_collected": stats.n_seen,
-            "n_new": stats.n_new,
-            "errors": list(stats.errors or []),
-        }
+        # A dead feed marks this step partial and stops there. It used to be
+        # copied into `state["errors"]`, which `persist_run` reads to decide the
+        # whole run's status - so one rotting feed made every bulletin for the
+        # next five polls `partial`, and the word stopped telling the reader
+        # anything. `partial` on a digest means candidates went unsummarised;
+        # which feeds answered is a property of the poll, and it is on the step
+        # row above, where the run detail page already reads it.
+        return {"n_collected": stats.n_seen, "n_new": stats.n_new}
 
 
 async def dedupe_node(state: PipelineState) -> PipelineState:
@@ -77,7 +81,34 @@ async def dedupe_node(state: PipelineState) -> PipelineState:
             candidate_ids, stats = await dedupe_candidates(session)
         s.counts(stats.n_candidates, len(candidate_ids))
         s.note_key("dedupe", dropped=stats.n_duplicates)
+        _guard_cost(state, len(candidate_ids))
         return {"candidate_ids": candidate_ids}
+
+
+def _guard_cost(state: PipelineState, n_candidates: int) -> None:
+    """Refuse a press that would cost more than the ceiling, before it spends.
+
+    Here and not at the press, because here is the first moment the real number
+    is known. `/runs` counts candidates to write the question, but a fresh
+    installation has collected nothing when the button is first pressed: the
+    count is zero, `collect` then brings in a week of backlog, and the press
+    that most needs a ceiling is the one a pre-flight check waves through.
+
+    After `dedupe` and before `enrich` is also the last free moment. Enrichment
+    spends Tavily credits and the fan-out spends tokens; everything up to here
+    is feed polling and string comparison.
+    """
+    settings = get_settings()
+    ceiling = settings.digest_max_cost_usd
+    if not ceiling or not n_candidates:
+        return
+    estimate = estimate_digest_cost(
+        n_candidates,
+        state.get("model_summarize") or settings.openai_model_summarize,
+        state.get("model_rank") or settings.openai_model,
+    )
+    if estimate > ceiling:
+        raise CostCeiling(estimate, ceiling, n_candidates)
 
 
 async def enrich_node(state: PipelineState) -> PipelineState:

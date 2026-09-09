@@ -171,6 +171,34 @@ async def _fail_run(run_id: str, error: str) -> None:
         run.error = error[:2000]
 
 
+async def reconcile_orphaned_runs() -> int:
+    """Close run rows that a killed process left open. Returns how many.
+
+    `_fail_run` closes a run that *raised*. A process that is killed does not
+    raise: a closed laptop, `docker compose down`, Ctrl-C at a terminal. The row
+    keeps `status='running'` and `finished_at` NULL forever, the run log shows a
+    poll that has been going for a day, and a digest killed that way is never
+    offered for resume, because resume asks for `status='error'` and the status
+    never becomes one.
+
+    Called from the web application's startup, which is the moment the claim
+    below is true: the run slot is module state (`_slot_holders`), so a process
+    that has just started holds nothing, and one process owns the runs (ADR
+    0004). A digest running at a terminal while the server restarts would be
+    closed here while it is still working - the price of a single-user tool
+    having two entry points, and cheaper than a row that nothing can ever close.
+    """
+    async with session_scope() as session:
+        rows = list((await session.execute(select(Run).where(Run.status == "running"))).scalars())
+        for run in rows:
+            run.status = "error"
+            run.error = "process ended before the run did"
+            run.finished_at = utcnow()
+    if rows:
+        log.warning("closed %d run(s) left open by a previous process", len(rows))
+    return len(rows)
+
+
 async def run_collect(
     settings: Settings | None = None, *, reserved_token: str | None = None
 ) -> str:

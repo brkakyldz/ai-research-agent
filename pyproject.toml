@@ -7,8 +7,16 @@ requires-python = ">=3.12"
 dependencies = [
     "langgraph>=1.2,<2",
     "langgraph-checkpoint-sqlite>=2.0",
-    "langchain-core>=0.3",
-    "langchain-openai>=0.3",
+    # Upper bounds on the two that own the structured-output contract, because
+    # `>=0.3` on a library now at 1.6 is not a pin. The pipeline reads three
+    # keys off `with_structured_output(..., include_raw=True)`; the mechanism
+    # behind them has already moved once under that floor - from function
+    # calling to `response_format: json_schema` - and a move back would make
+    # every branch of the fan-out return nothing, silently, after the calls were
+    # paid for. `tests/test_model_contract.py` is what notices; this is what
+    # stops it happening on an unrelated `uv sync`.
+    "langchain-core>=1.6,<2",
+    "langchain-openai>=1.6,<2",
     "langchain-tavily>=0.2",
     "feedparser>=6.0.11",
     "trafilatura>=2.0",
