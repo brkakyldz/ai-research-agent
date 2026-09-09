@@ -210,9 +210,10 @@ right.
   resumed, and articles past the collect horizon that were never summarised.
   `--dry-run` counts them first. It is a command and not a schedule, for the same
   reason the digest is (ADR 0015).
-- **No migration tool in v1.** Startup adds a missing nullable column and nothing
-  else (ADR 0025); any other schema change after the archive is worth keeping
-  means writing an Alembic baseline first.
+- **The schema migrates itself at startup.** Since ADR 0028 it is an Alembic
+  chain applied by `init_db()`; an archive created before migrations is stamped
+  at the baseline rather than rebuilt, and the takeover was rehearsed on a copy
+  of the real one. A schema change is a revision, not a deleted database.
 - **Feeds rot.** Anthropic has no official feed, so the seed list uses a
   community mirror; Reddit rate-limits. A source that fails five times running
   disables itself and says so on `/sources`.

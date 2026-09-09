@@ -109,8 +109,12 @@ still ships:
 | The WAL pragma | A warning, and the rollback journal |
 | Bookkeeping (`run_steps`, tracing) | Swallowed and logged — a paid run is never killed by its own instrumentation |
 
-`partial` is a real run status and not a soft failure: one feed 404ed, three
-articles would not summarise, and the other ninety-seven are still a bulletin.
+`partial` is a real run status and not a soft failure: three articles would not
+summarise and the other ninety-seven are still a bulletin. It means that and
+only that. A feed that 404ed is recorded on the collect step's row and does not
+reach the run's status — when it did, one rotting mirror marked every bulletin
+degraded until the source auto-disabled, and the word stopped carrying
+information.
 
 ### 2.4 The machine has to be able to explain itself
 
@@ -285,9 +289,10 @@ page sorts by and sizes from. The two are kept apart because the evaluation laye
 measures them apart. `rank` is set only for the items that made the digest's top
 N; everything else keeps its importance and remains reachable below the fold and
 in search. The unique constraint `(article_id, run_id, language)` is what forces
-the deduplication in `persist` described in §7.7. `editor_importance` was added to
-a live archive by `ADDED_COLUMNS` in `db/schema.py` — the one exception to
-"`create_all` adds tables, never columns" (ADR 0005).
+the deduplication in `persist` described in §7.7. The table's shape, like every
+other, is whatever the migration chain in `db/migrations/` has built: since ADR
+0028 the schema is a sequence of revisions applied at startup, and `create_all`
+is gone.
 
 **`verdicts`** (`models.py`) — the reader's own call on one summary, `ok` or
 `wrong`, with an optional free-text reason. One row per summary; a later verdict
@@ -304,14 +309,16 @@ cap, as described in §2.2.
 `content=''` (contentless: the text lives once, in `summaries`, and the index
 stores only terms) plus three triggers that keep it in step on insert, delete and
 update. `rowid` is the summary id, so a hit joins straight back. This is DDL
-SQLAlchemy has no vocabulary for, which is why it is raw SQL applied by the same
-idempotent `init_db()` (`schema.py`) that creates the tables.
+SQLAlchemy has no vocabulary for, which is why it is raw SQL, written out in the
+baseline revision that creates the tables it indexes.
 
-There is no Alembic (ADR 0005). The schema is created idempotently at every
-start; adding migrations later is `alembic init` plus one autogenerate. The
-practical consequence is real and named in the README: `create_all` adds tables,
-not columns, so a new *column* today means deleting `data/app.db` and
-re-collecting.
+The schema is an Alembic chain (ADR 0028). `init_db()` (`schema.py`) still runs
+at every start and is still idempotent; what it does is upgrade to head. A
+database with a version stamp is upgraded, one with our tables and no stamp is
+stamped at the baseline and then upgraded — that is the archive built before
+migrations existed — and an empty file gets every revision in order. A new
+column is a revision, and so is a changed constraint, which SQLite can only do
+by rebuilding the table (`render_as_batch`).
 
 ### Connection setup
 

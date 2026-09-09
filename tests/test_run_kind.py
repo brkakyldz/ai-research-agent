@@ -72,12 +72,20 @@ async def test_a_collect_is_never_a_bulletin(session: AsyncSession, engine: Asyn
 async def test_an_existing_archive_of_manual_rows_is_carried_over(
     session: AsyncSession, engine: AsyncEngine
 ) -> None:
-    """The data half of the change. `create_all` never rewrites a row, so a
-    database written before today would keep an archive of runs that every
-    reader now filters out - a bulletin history that silently emptied.
+    """The data half of the change, now carried by migration 0002.
+
+    A database written before ADR 0026 keeps an archive of runs that every
+    reader filters out - a bulletin history that silently emptied. The rewrite
+    was an entry in `DATA_FIXUPS`, applied on every start; it is a revision now,
+    applied once and recorded.
+
+    The table is rebuilt in the shape a real archive has: the CHECK still admits
+    `manual`, because SQLite bakes it into the DDL at creation and no existing
+    file has been rebuilt, while the two model columns are present, because the
+    code that added them ran on every start from ADR 0025 until migrations
+    arrived. A database older than that shape cannot exist on any machine that
+    has run this project, and the baseline says so.
     """
-    # Written the way a pre-ADR-0026 install holds it: straight SQL, because the
-    # model no longer admits the value and the CHECK on a fresh table refuses it.
     await session.execute(text("DROP TABLE runs"))
     await session.execute(
         text(
@@ -86,6 +94,7 @@ async def test_an_existing_archive_of_manual_rows_is_carried_over(
             "finished_at DATETIME, n_collected INTEGER DEFAULT 0, n_new INTEGER DEFAULT 0, "
             "n_summarized INTEGER DEFAULT 0, tokens_in INTEGER DEFAULT 0, "
             "tokens_out INTEGER DEFAULT 0, est_cost_usd FLOAT DEFAULT 0, "
+            "model_summarize VARCHAR(60), model_rank VARCHAR(60), "
             "editor_note TEXT, error TEXT)"
         )
     )
@@ -95,6 +104,8 @@ async def test_an_existing_archive_of_manual_rows_is_carried_over(
             "VALUES ('old1', 'manual', 'tr', 'ok', '2026-09-05 08:00:00', 15)"
         )
     )
+    # The version stamp goes too: this is a database that predates migrations.
+    await session.execute(text("DROP TABLE IF EXISTS alembic_version"))
     await session.commit()
 
     await init_db(engine)

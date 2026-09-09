@@ -32,6 +32,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "pyyaml>=6.0",
     "python-multipart>=0.0.20",
+    "alembic>=1.19.2",
 ]
 
 [project.scripts]

@@ -118,20 +118,3 @@ def test_a_filesystem_without_shared_memory_degrades_instead_of_crashing() -> No
     assert any("journal_mode=WAL" in sql for sql in executed)
     assert any("foreign_keys=ON" in sql for sql in executed)
     assert any("busy_timeout" in sql for sql in executed)
-
-
-async def test_a_column_added_after_the_archive_is_added_on_start(engine: AsyncEngine) -> None:
-    """`create_all` adds tables and never columns (ADR 0005). `editor_importance`
-    was added to `summaries` on a live archive (ADR 0025), so `init_db` has to
-    put it on a database that predates it - and do nothing on one that has it."""
-    await init_db(engine)
-    async with engine.begin() as conn:
-        await conn.execute(text("ALTER TABLE summaries DROP COLUMN editor_importance"))
-        before = {r[1] for r in (await conn.execute(text("PRAGMA table_info(summaries)"))).all()}
-    assert "editor_importance" not in before
-
-    await init_db(engine)
-    await init_db(engine)  # and again: idempotent
-    async with engine.begin() as conn:
-        after = {r[1] for r in (await conn.execute(text("PRAGMA table_info(summaries)"))).all()}
-    assert "editor_importance" in after
