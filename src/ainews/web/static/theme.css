@@ -1277,7 +1277,7 @@ kbd {
 }
 .vd-why__b:hover, .vd-why__b[aria-pressed="true"] { color: var(--ink-0); }
 .vd-why__b[aria-pressed="true"]::after { content: " ✓"; }
-.vd-why__b + .vd-why__b::before { content: " b7"; margin-right: 7px; color: var(--line); }
+.vd-why__b + .vd-why__b::before { content: "·"; margin-right: 7px; color: var(--line); }
 
 /* The reader's own words, when the verdict is "wrong": a third row, as quiet
    as the two above it. No box (ADR 0013) - an underlined field and one word to
@@ -1432,11 +1432,18 @@ kbd {
    to its left. Inside the row it is one more item until it is opened, and
    opening it makes it claim a full line so the remaining topics have somewhere
    to lay out. */
-.more { flex: none; }
-.more[open] { flex: 1 1 100%; }
+/* The class is its own, not the pager's `.more` (`_more.html`): two unrelated
+   recipes under one name are separated by nothing but source order, and the
+   pager's - a baseline flex row with `12px 20px 2px` of padding - lands on
+   this chip, insetting it 20px from the pill before it, dropping it 12px
+   below the row's line and stretching every pill beside it to the height its
+   padding makes. Open, `[open]`'s extra specificity wins back the `flex` and
+   the damage reads as ordinary spacing, which is why it is only visible shut. */
+.tag-more { flex: none; }
+.tag-more[open] { flex: 1 1 100%; }
 /* The same chip as the topics beside it - it is one more item in the row until
    it is opened, so it is drawn as one. */
-.more summary {
+.tag-more summary {
   list-style: none;
   cursor: pointer;
   width: fit-content;
@@ -1449,11 +1456,11 @@ kbd {
   white-space: nowrap;
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.more summary:hover { background: var(--chip-hover); color: var(--ink-0); }
-.more summary::-webkit-details-marker { display: none; }
-.more summary::after { content: " +"; }
-.more[open] summary::after { content: " −"; }
-.more .tags { margin-top: 8px; }
+.tag-more summary:hover { background: var(--chip-hover); color: var(--ink-0); }
+.tag-more summary::-webkit-details-marker { display: none; }
+.tag-more summary::after { content: " +"; }
+.tag-more[open] summary::after { content: " −"; }
+.tag-more .tags { margin-top: 8px; }
 
 /* ---------- the advice to run ---------- */
 

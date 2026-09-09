@@ -576,7 +576,7 @@ async def test_the_digest_draws_a_three_paragraph_brief(
 
 def test_a_short_topic_list_needs_no_disclosure(client: TestClient, digest: Bulletin) -> None:
     """Three tags is a filter. The disclosure only earns its place past six."""
-    assert '<details class="more"' not in client.get("/").text
+    assert '<details class="tag-more"' not in client.get("/").text
 
 
 async def test_a_long_topic_list_folds_after_six(
@@ -588,8 +588,8 @@ async def test_a_long_topic_list_folds_after_six(
     await session.commit()
 
     body = client.get("/").text
-    assert '<details class="more"' in body
-    head, folded = body.split('<details class="more"', 1)
+    assert '<details class="tag-more"' in body
+    head, folded = body.split('<details class="tag-more"', 1)
     assert head.count("&amp;tag=") == 6, "six topics before the fold"
     assert "topic8" in folded, "and the rest are still reachable"
 

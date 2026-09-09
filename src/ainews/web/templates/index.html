@@ -39,7 +39,7 @@
            {% if tag == name %}aria-current="true"{% endif %}>{{ name }} <b>{{ count }}</b></a>
         {% endfor %}
         {% if tags|length > 6 %}
-        <details class="more"{% if tag and tag not in tags[:6]|map(attribute=0)|list %} open{% endif %}>
+        <details class="tag-more"{% if tag and tag not in tags[:6]|map(attribute=0)|list %} open{% endif %}>
           <summary>{{ t.more_topics }}</summary>
           <div class="tags">
             {% for name, count in tags[6:] %}
