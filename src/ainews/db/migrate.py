@@ -95,8 +95,47 @@ def _bring_to_head(connection: Connection) -> None:
 
 
 async def upgrade_to_head(engine: AsyncEngine) -> None:
-    async with engine.begin() as connection:
-        await connection.run_sync(_bring_to_head)
+    """Bring the database to head with foreign keys off for the duration.
+
+    Alembic rebuilds a SQLite table by copying it, dropping the original and
+    renaming the copy back over it. Under `PRAGMA foreign_keys=ON` - which
+    `session.py` sets on every application connection - the drop is refused the
+    moment another table holds a row pointing at it, so a revision that passes
+    on an empty database fails on the operator's: `verdicts` and `eval_results`
+    both reference `summaries`, and 0004 rebuilds it.
+
+    `defer_foreign_keys` is not the lighter alternative it looks like. It moves
+    the check to the commit but still *counts* the drop's implicit deletes, and
+    renaming the copy back into place inserts nothing, so the count never comes
+    down and the commit fails with the table whole and every reference intact.
+
+    Off is therefore the only setting that works, and it has to be set before
+    the transaction opens, because inside one the pragma is silently a no-op.
+    What replaces the enforcement is `PRAGMA foreign_key_check` afterwards: a
+    migration that really did strand a row is then loud rather than committed
+    in silence, which is the trade the pragma would otherwise make for us.
+    """
+    async with engine.connect() as connection:
+        # A statement autobegins a SQLAlchemy transaction even when the SQLite
+        # driver has emitted no BEGIN of its own; the rollback clears that
+        # bookkeeping so `begin()` below is allowed. It does not touch the
+        # pragma, which is connection state rather than transaction state.
+        await connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        await connection.rollback()
+        try:
+            async with connection.begin():
+                await connection.run_sync(_bring_to_head)
+            stranded = (await connection.exec_driver_sql("PRAGMA foreign_key_check")).fetchall()
+        finally:
+            await connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            await connection.rollback()
+        if stranded:
+            raise RuntimeError(
+                "the migration left rows pointing at parents that no longer exist: "
+                + "; ".join(
+                    f"{table}.rowid={rowid} -> {parent}" for table, rowid, parent, _ in stranded
+                )
+            )
 
 
 async def current_revision(engine: AsyncEngine) -> str | None:

@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from ainews.db.migrate import BASELINE, alembic_config, current_revision, head_revision
 from ainews.db.models import Base
 from ainews.db.schema import init_db
+from ainews.db.session import create_engine
 
 
 def _diff(connection: Connection) -> list[object]:
@@ -356,6 +357,57 @@ async def test_the_summaries_survive_the_rebuild_with_their_text(tmp_path: Path)
             ).all()
         assert len(rows) == 4
         assert rows[0] == (1, "Baslik 1", 1, "news", 0.0)
+    finally:
+        await engine.dispose()
+
+
+async def test_a_row_pointing_at_a_summary_does_not_block_the_rebuild(tmp_path: Path) -> None:
+    """The rebuild is a copy, a drop and a rename, and `verdicts` and
+    `eval_results` both point at the table being dropped. Under
+    `PRAGMA foreign_keys=ON` SQLite refuses that drop while a single child row
+    exists, so this revision passed on every empty database and failed on the
+    one archive that had been read and evaluated.
+
+    The archive is reopened through `create_engine` rather than kept on the one
+    the builder returned: the pragma is set by that factory's connect handler
+    and nowhere else, and SQLite's own default is off, so a raw engine cannot
+    see this failure at all.
+    """
+    path = tmp_path / "archive.db"
+    engine = await _archive_with_a_published_run(path)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO verdicts (id, summary_id, verdict, note, created_at)"
+                " VALUES (1, 1, 'ok', NULL, '2026-09-07 08:00:00')"
+            )
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO eval_results (id, run_id, summary_id, kind, passed, detail,"
+                " model, tokens_in, tokens_out, est_cost_usd, created_at)"
+                " VALUES (1, 'run1', 2, 'grounding', 1, NULL, 'gpt-5.6-luna', 800, 40,"
+                " 0.0011, '2026-09-07 08:05:00')"
+            )
+        )
+    await engine.dispose()
+
+    engine = create_engine(url=f"sqlite+aiosqlite:///{path}")
+    try:
+        await init_db(engine)
+        assert await current_revision(engine) == head_revision()
+
+        async with engine.connect() as connection:
+            # The rows still point at the summaries they were written about,
+            # which is what turning the enforcement off has to be paid for with.
+            assert (await connection.execute(text("SELECT summary_id FROM verdicts"))).scalar() == 1
+            assert (
+                await connection.execute(text("SELECT summary_id FROM eval_results"))
+            ).scalar() == 2
+            stranded = (await connection.exec_driver_sql("PRAGMA foreign_key_check")).fetchall()
+            assert stranded == []
+            # And the connection the application goes on to use has them back on.
+            assert (await connection.exec_driver_sql("PRAGMA foreign_keys")).scalar() == 1
     finally:
         await engine.dispose()
 
