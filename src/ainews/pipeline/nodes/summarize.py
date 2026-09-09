@@ -60,8 +60,16 @@ def build_prompt(
     published: str,
     body: str,
     extra: str = "",
+    template: str | None = None,
 ) -> str:
-    template = load_prompt("summarize", language)
+    """The summarise prompt, filled in.
+
+    `template` overrides the file on disk. That exists for `ainews eval compare`,
+    which runs a candidate prompt against the shipped one over the same bodies:
+    the candidate has to be filled in by *this* function, or the comparison would
+    be measuring two prompt builders as much as two prompts.
+    """
+    template = template if template is not None else load_prompt("summarize", language)
     return template.format(
         source=source,
         title=title,
@@ -75,7 +83,8 @@ def build_prompt(
             f"\n\n{WEB_CONTEXT_MARKER}\n{extra[:MAX_EXTRA_CHARS]}" if (extra or "").strip() else ""
         ),
         # The preferred tags, formatted in rather than written in the file, so
-        # the list the model is shown is the list `evals.checks` measures against.
+        # the list the model is shown is the list `quality.checks` measures
+        # against.
         tags=tag_vocabulary_line(),
     )
 

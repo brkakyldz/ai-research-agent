@@ -76,6 +76,36 @@ def add_eval_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore[ty
         help="model to probe (default: OPENAI_MODEL, the ranker)",
     )
 
+    corpus = evals.add_parser(
+        "corpus", help="freeze N article bodies for prompt comparison (no key, gitignored)"
+    )
+    corpus.add_argument("--size", type=int, default=40, help="how many bodies (default 40)")
+    corpus.add_argument("--seed", type=int, default=0, help="same seed, same corpus")
+    corpus.add_argument("--out", type=Path, default=None, help="file (default: data/corpus)")
+
+    compare = evals.add_parser(
+        "compare",
+        help="summarise the frozen corpus with two prompts and print the checks side by side",
+    )
+    compare.add_argument(
+        "--prompt-a",
+        type=Path,
+        default=None,
+        help="the baseline prompt file (default: the one that ships)",
+    )
+    compare.add_argument("--prompt-b", type=Path, required=True, help="the candidate prompt file")
+    compare.add_argument("--language", default=None, help="tr or en (default: DIGEST_LANGUAGE)")
+    compare.add_argument("--corpus", type=Path, default=None, help="corpus file")
+    compare.add_argument(
+        "--max-cost", type=float, default=0.10, help="refuse above this estimate, USD"
+    )
+    compare.add_argument(
+        "--model",
+        choices=MODEL_NAMES,
+        default=None,
+        help="model to summarise with (default: OPENAI_MODEL_SUMMARIZE)",
+    )
+
     report = evals.add_parser(
         "report", help="print every number and append a dated section to docs/evals.md (no key)"
     )
@@ -171,6 +201,48 @@ async def _stability(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _corpus(args: argparse.Namespace) -> int:
+    from ainews.evals.compare import freeze_corpus, write_corpus
+
+    await init_db(get_engine())
+    async with session_scope() as session:
+        items = await freeze_corpus(session, size=args.size, seed=args.seed)
+    if not items:
+        print(
+            "no article in the archive has an attributable body; press the button once first",
+            file=sys.stderr,
+        )
+        return 2
+    path = write_corpus(items, args.out)
+    print(f"froze {len(items)} bodies to {path} (gitignored: they are other people's text)")
+    return 0
+
+
+async def _compare(args: argparse.Namespace) -> int:
+    from ainews.evals.compare import CostGuard, compare, format_comparison, read_corpus
+
+    settings = get_settings()
+    if not settings.llm_configured:
+        print(NO_KEY.replace("the judge", "the comparison"), file=sys.stderr)
+        return 2
+    items = read_corpus(args.corpus)
+    try:
+        result = await compare(
+            items,
+            prompt_a=args.prompt_a,
+            prompt_b=args.prompt_b,
+            language=args.language or settings.digest_language,
+            model=args.model,
+            max_cost=args.max_cost,
+            settings=settings,
+        )
+    except CostGuard as exc:
+        print(str(exc), file=sys.stderr)
+        return 3
+    print(format_comparison(result))
+    return 0
+
+
 async def _report(args: argparse.Namespace) -> int:
     from ainews.evals.report import (
         append_report,
@@ -203,6 +275,10 @@ async def run_eval(args: argparse.Namespace) -> int:
             return await _judge(args)
         if args.eval_command == "rank-stability":
             return await _stability(args)
+        if args.eval_command == "corpus":
+            return await _corpus(args)
+        if args.eval_command == "compare":
+            return await _compare(args)
         if args.eval_command == "report":
             return await _report(args)
     except ValueError as exc:
