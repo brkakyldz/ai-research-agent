@@ -287,8 +287,8 @@ def test_the_theme_links_keep_the_rest_of_the_query(client: TestClient, digest: 
 def test_a_story_names_its_impact_band(client: TestClient, digest: Bulletin) -> None:
     """The bars are a shape; the word beside them is what makes it a scale."""
     body = client.get("/").text
-    assert "Yüksek ilgi" in body, "the 5 and the 4 are the high band"
-    assert "Orta ilgi" in body, "the 3 is the middle one"
+    assert "Yüksek etki" in body, "the 5 and the 4 are the high band"
+    assert "Orta etki" in body, "the 3 is the middle one"
 
 
 def test_the_impact_meter_lights_one_bar_per_step_of_the_band(

@@ -124,7 +124,7 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "group_discover": "Keşfet",
         "group_record": "Kayıt",
         "brief_label": "Bugünün özeti",
-        "impact_spread": "İlgi dağılımı",
+        "impact_spread": "Etki dağılımı",
         "week_stories": "Son 7 günün haberleri",
         "last_run": "Son çalışma",
         "cost_today": "Bugün",
@@ -135,9 +135,13 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "day_stories": "{d}: {n} haber",
         "brief_meta": "{n} haber · {s} kaynak · {g} konu",
         "why_label": "Neden önemli",
-        "impact_high": "Yüksek ilgi",
-        "impact_mid": "Orta ilgi",
-        "impact_low": "Düşük ilgi",
+        # The three band names, and the spread's label above. The Turkish is
+        # *etki* because what the bands report is the story's weight in the
+        # field; *ilgi* names the reader's own curiosity, which nothing here
+        # measures. The keys, the CSS classes and `impact_band()` stay English.
+        "impact_high": "Yüksek etki",
+        "impact_mid": "Orta etki",
+        "impact_low": "Düşük etki",
         "open_source": "Kaynağa git",
         # The reader's verdict on a summary (PLAN-EVALS E2). Two words, no
         # question mark: they sit on the foot line beside the other actions.
