@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings
 from ainews.db import Article, Source, Summary
-from ainews.db.models import Run
 from ainews.pipeline.nodes.dedupe import (
     dedupe_candidates,
     normalize_title,
@@ -111,13 +110,9 @@ async def test_a_candidate_matching_an_already_summarised_article_is_dropped(
     a = await _source(session, "A")
     b = await _source(session, "B")
     old = await _article(session, a, "Google DeepMind announces Gemini 4", "1", age_hours=20)
-    run = Run(kind="digest", language="tr")
-    session.add(run)
-    await session.flush()
     session.add(
         Summary(
             article_id=old.id,
-            run_id=run.id,
             language="tr",
             title_local="x",
             summary="y",
@@ -145,13 +140,9 @@ async def test_articles_outside_the_lookback_window_do_not_suppress_new_ones(
         "1",
         age_hours=settings.dedupe_lookback_hours + 24,
     )
-    run = Run(kind="digest", language="tr")
-    session.add(run)
-    await session.flush()
     session.add(
         Summary(
             article_id=stale.id,
-            run_id=run.id,
             language="tr",
             title_local="x",
             summary="y",
@@ -178,13 +169,9 @@ async def test_already_summarised_articles_are_never_candidates_again(
 
     assert [a.id for a in await select_candidates(session, settings)] == [art.id]
 
-    run = Run(kind="digest", language="tr")
-    session.add(run)
-    await session.flush()
     session.add(
         Summary(
             article_id=art.id,
-            run_id=run.id,
             language="tr",
             title_local="x",
             summary="y",

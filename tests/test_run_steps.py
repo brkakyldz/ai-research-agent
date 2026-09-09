@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from ainews.clock import local_day
 from ainews.config import Settings
 from ainews.db import Run, RunStep
 from ainews.db.models import utcnow
@@ -31,6 +32,7 @@ from test_graph import SUMMARY, FakeLLM, _no_collect, _no_enrich, _seed_articles
 
 INITIAL: dict[str, Any] = {
     "language": "tr",
+    "day": local_day(),
     "candidate_ids": [],
     "summaries": [],
     "ranked": [],
@@ -51,9 +53,9 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> None:
             RankedDigest(
                 editor_note="Ucuz modeller gunu.",
                 picks=[
-                    Pick(number=2, importance=5),
-                    Pick(number=1, importance=4),
-                    Pick(number=3, importance=3),
+                    Pick(number=2, tier="lead"),
+                    Pick(number=1, tier="major"),
+                    Pick(number=3, tier="notable"),
                 ],
             )
         ),
@@ -161,7 +163,7 @@ async def test_the_costs_add_up_when_the_state_carries_no_model(
     run = Run(kind="digest", language="tr")
     session.add(run)
     await session.commit()
-    # The shape a checkpoint written before ADR 0020 resumes with.
+    # A state with no model chosen at the press: the nodes read the settings.
     await (
         graph_module.build_graph()
         .compile()
@@ -202,7 +204,7 @@ async def test_a_partly_failed_fan_out_says_so(
         lambda *_: FakeLLM(
             RankedDigest(
                 editor_note="Gun ozeti.",
-                picks=[Pick(number=1, importance=4), Pick(number=2, importance=3)],
+                picks=[Pick(number=1, tier="lead"), Pick(number=2, tier="major")],
             )
         ),
     )

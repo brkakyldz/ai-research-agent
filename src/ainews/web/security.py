@@ -4,9 +4,9 @@ There is no login here and there should not be: it is a personal tool on
 loopback (ADR 0002, README "Known limits"). But loopback is not a boundary a
 browser respects. Any page open in the same browser can `fetch` or submit a form
 at `http://localhost:8000/runs/start` — the request goes out with the reader's
-cookies, and the two POSTs that matter spend money (`/runs/start`,
-`/runs/resume`), one writes evaluation labels (`/verdict`), and one makes this
-server fetch a URL of the sender's choosing (`/sources/add`).
+cookies, and the POST that matters spends money (`/runs/start`), one writes
+evaluation labels (`/verdict`), and one makes this server fetch a URL of the
+sender's choosing (`/sources/add`).
 
 A token in every form would be the general answer. It is not the proportionate
 one for a single-user app with no login to hang a session on: the whole attack

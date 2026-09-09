@@ -46,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import bulletin_runs, db_session
-from ainews.pipeline.api import count_candidates, digest_in_flight, resumable_run
+from ainews.pipeline.api import count_candidates, digest_in_flight
 from ainews.pipeline.pricing import model_options, resolve_model
 from ainews.pipeline.runner import release_slot, reserve_slot
 from ainews.web import queries
@@ -100,17 +100,6 @@ async def _guarded(language: str, models: tuple[str, str], token: str) -> None:
         release_slot(token)
 
 
-async def _guarded_resume(run_id: str, token: str) -> None:
-    from ainews.pipeline.runner import run_digest
-
-    try:
-        await run_digest(resume=run_id, reserved_token=token)
-    except Exception:
-        log.exception("resumed run %s failed", run_id)
-    finally:
-        release_slot(token)
-
-
 def _valid(value: str | None, fallback: str) -> str:
     return value if value in LANGUAGES else fallback
 
@@ -146,14 +135,11 @@ async def _action_context(
     multiplying it by a new pair of prices would be a number with a decimal
     point and no basis. Two honest facts beat one invented one.
 
-    Two more facts, both only when the question is open. How
-    many articles are waiting to be summarised, because a press is a delta and
-    a delta of two stories is a bulletin of two stories - the reader should see
-    that number before paying for it, not after. And, when the last run failed
-    and its checkpoint can carry on, the offer to resume it: the summaries it
-    paid for are in the checkpoint, and finishing costs the nodes after the one
-    that failed. It is an offer inside the one press rather than a second
-    button, which is where ADR 0015 put the app's whole paid surface.
+    One more fact, only when the question is open: how many articles are
+    waiting to be summarised. A press pays for those and then re-ranks the whole
+    day around them (ADR 0030), so the number is what the press *costs* rather
+    than the length of the bulletin it produces - a press that buys two
+    summaries still republishes the day.
     """
     advice = await build_advice(session, language)  # type: ignore[arg-type]
     options = model_options(settings.openai_model_summarize, settings.openai_model)
@@ -167,7 +153,6 @@ async def _action_context(
         "out": out,
         "n_sources": await count_enabled_sources(session),
         "n_candidates": await count_candidates(session) if asking else None,
-        "resume": await resumable_run(session, settings) if asking else None,
         "last_cost": advice.last.est_cost_usd if advice.last else None,
         "models": options,
         "ms": models[0],
@@ -319,45 +304,6 @@ async def start_run(
     )
 
 
-@router.post("/runs/resume", response_class=HTMLResponse)
-async def resume_run(
-    request: Request,
-    run: str,
-    lang: str | None = None,
-    session: AsyncSession = Depends(db_session),
-    settings: Settings = Depends(get_settings),
-) -> HTMLResponse:
-    """Finish a failed run from its checkpoint.
-
-    The same shape as `/runs/start` - the claim, the task, the status line -
-    and the same two refusals. One more of its own: the run named has to be the
-    one the question offered, the most recent digest and a failed one, so a
-    stale fragment cannot resume a run that a later press has already
-    overtaken. The language and the models are not asked, because they are in
-    the checkpoint.
-    """
-    language = _valid(lang, language_of(request))
-    t = strings(language)  # type: ignore[arg-type]
-
-    if not settings.llm_configured:
-        return HTMLResponse(f'<span class="bad">{t["no_key"]}</span>')
-    offered = await resumable_run(session, settings)
-    if offered is None or offered.run.id != run:
-        return HTMLResponse(f'<span class="bad">{t["resume_gone"]}</span>')
-
-    token = f"resume:{run}"
-    if not await reserve_slot(token, "digest"):
-        return HTMLResponse(t["busy"])
-    task = asyncio.create_task(_guarded_resume(run, token))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
-
-    return HTMLResponse(
-        f'<span hx-get="/runs/status?lang={language}" hx-trigger="every 3s" '
-        f'hx-swap="outerHTML">{t["running"]}</span>'
-    )
-
-
 @router.get("/runs/countdown", response_class=HTMLResponse)
 async def run_countdown(
     request: Request,
@@ -398,8 +344,8 @@ async def run_status(
         )
 
     # Every bulletin run, not just the pressed ones. This read `kind == "manual"`
-    # until ADR 0026 collapsed the kinds, so a resumed run or one started at a
-    # terminal never reported its error on the strip that is polling for it.
+    # until ADR 0026 collapsed the kinds, so a run started at a terminal never
+    # reported its error on the strip that is polling for it.
     latest = (await session.execute(bulletin_runs().limit(1))).scalar_one_or_none()
 
     label = t["status_error"] if latest is not None and latest.status == "error" else ""

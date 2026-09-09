@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ainews.config import Settings, get_settings
-from ainews.db import Run
+from ainews.db import Bulletin
 from ainews.web.app import create_app
 
 # -- run now ------------------------------------------------------------------
@@ -69,7 +69,7 @@ def test_run_now_starts_one_run_and_refuses_a_second(
     assert started == 1
 
 
-def test_the_template_environment_is_built_once(client: TestClient, digest: Run) -> None:
+def test_the_template_environment_is_built_once(client: TestClient, digest: Bulletin) -> None:
     """One environment for twelve call sites: each building its own throws away
     the compile cache the render before it filled."""
     from ainews.web.views import get_templates

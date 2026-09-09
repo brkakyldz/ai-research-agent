@@ -79,6 +79,10 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+# `.` as well as `src`: the tests import their own helpers as `tests.factories`,
+# which reads unambiguously and, unlike a bare `factories`, cannot collide with
+# an installed package. `python -m pytest` puts the cwd on the path and a bare
+# `pytest` does not, so it is stated here rather than left to the invocation.
+pythonpath = ["src", "."]
 asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning"]

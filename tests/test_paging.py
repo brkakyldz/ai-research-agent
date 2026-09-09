@@ -9,16 +9,19 @@ an app whose whole argument is that the archive is kept.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from tests.factories import publish
 
-from ainews.db import Article, Run, Source, Summary, Verdict
+from ainews.db import Article, Bulletin, Run, Source, Summary, Verdict
 from ainews.web.queries import LIMIT_CEILING, Page, page_limit
 
 
 @pytest.fixture
-async def many_runs(session: AsyncSession) -> list[Run]:
+async def many_bulletins(session: AsyncSession) -> list[Bulletin]:
     source = Source(name="OpenAI", url="https://openai.com/rss.xml")
     session.add(source)
     await session.flush()
@@ -35,20 +38,27 @@ async def many_runs(session: AsyncSession) -> list[Run]:
         )
         session.add(article)
         await session.flush()
-        session.add(
-            Summary(
-                run_id=run.id,
-                article_id=article.id,
-                language="tr",
-                title_local=f"Bulten {n}",
-                summary="s",
-                why_it_matters="w",
-                importance=4,
-                rank=1,
+        summary = Summary(
+            article_id=article.id,
+            language="tr",
+            title_local=f"Bulten {n}",
+            summary="s",
+            why_it_matters="w",
+            importance=4,
+        )
+        session.add(summary)
+        await session.flush()
+        await session.commit()
+        # One bulletin per day, thirty-five days back, so the archive has
+        # thirty-five rows rather than thirty-five versions of today.
+        runs.append(
+            await publish(
+                session,
+                [summary.id],
+                day=(date.today() - timedelta(days=n)).isoformat(),
+                run=run,
             )
         )
-        runs.append(run)
-    await session.commit()
     return runs
 
 
@@ -74,7 +84,7 @@ def test_the_limit_from_the_url_is_clamped(raw: int | None, expected: int) -> No
 
 
 async def test_the_archive_says_how_many_bulletins_it_is_not_showing(
-    client: TestClient, engine: AsyncEngine, many_runs: list[Run]
+    client: TestClient, engine: AsyncEngine, many_bulletins: list[Bulletin]
 ) -> None:
     body = client.get("/archive").text
     assert "30/35 gösteriliyor" in body
@@ -82,31 +92,31 @@ async def test_the_archive_says_how_many_bulletins_it_is_not_showing(
 
 
 async def test_raising_the_limit_shows_the_rest(
-    client: TestClient, engine: AsyncEngine, many_runs: list[Run]
+    client: TestClient, engine: AsyncEngine, many_bulletins: list[Bulletin]
 ) -> None:
     body = client.get("/archive?limit=60").text
     assert "Daha fazla" not in body, "nothing is left behind, so nothing is offered"
 
 
 async def test_a_bulletin_outside_the_window_still_opens_by_id(
-    client: TestClient, engine: AsyncEngine, many_runs: list[Run]
+    client: TestClient, engine: AsyncEngine, many_bulletins: list[Bulletin]
 ) -> None:
     """A link into the archive must not depend on how far the list was opened.
-    The oldest run is past the default window of thirty."""
-    oldest = many_runs[0]
-    body = client.get(f"/archive?run={oldest.id}").text
-    assert body.count(oldest.id) >= 1
+    The oldest bulletin is past the default window of thirty."""
+    oldest = many_bulletins[-1]
+    body = client.get(f"/archive?b={oldest.id}").text
+    assert f"b={oldest.id}" in body
 
 
 async def test_the_run_log_says_how_much_of_itself_it_draws(
-    client: TestClient, engine: AsyncEngine, many_runs: list[Run]
+    client: TestClient, engine: AsyncEngine, many_bulletins: list[Bulletin]
 ) -> None:
     assert "Daha fazla" not in client.get("/runs").text, "35 runs fit in the window of 40"
     assert "Daha fazla" in client.get("/runs?limit=10").text
 
 
 async def test_search_counts_the_hits_it_did_not_draw(
-    client: TestClient, engine: AsyncEngine, many_runs: list[Run]
+    client: TestClient, engine: AsyncEngine, many_bulletins: list[Bulletin]
 ) -> None:
     """FTS5 answers the count without materialising the rows, which is the whole
     reason a search box can afford to say "60 of 214"."""
@@ -116,7 +126,7 @@ async def test_search_counts_the_hits_it_did_not_draw(
 
 
 async def test_the_labels_page_offers_the_rest(
-    client: TestClient, engine: AsyncEngine, session: AsyncSession, many_runs: list[Run]
+    client: TestClient, engine: AsyncEngine, session: AsyncSession, many_bulletins: list[Bulletin]
 ) -> None:
     from sqlalchemy import select
 

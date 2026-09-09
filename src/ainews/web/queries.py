@@ -15,15 +15,22 @@ from typing import Any
 from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ainews.config import Language, Settings, get_settings
-from ainews.db import Article, EvalResult, Run, RunStep, Source, Summary, Verdict, bulletin_runs
-from ainews.web.bulletin import (
-    is_supplement,
-    reading_order,
-    supplement_floor,
-    supplement_horizon,
+from ainews.clock import day_bounds, to_local
+from ainews.config import Language, get_settings
+from ainews.db import (
+    Article,
+    Bulletin,
+    BulletinItem,
+    EvalResult,
+    Run,
+    RunStep,
+    Source,
+    Summary,
+    Verdict,
+    bulletin_runs,
 )
-from ainews.web.format import relative_age, to_local
+from ainews.web.bulletin import tier_step
+from ainews.web.format import relative_age
 
 
 @dataclass(slots=True)
@@ -78,6 +85,15 @@ def page_limit(raw: int | None, default: int) -> int:
 
 @dataclass(slots=True)
 class Story:
+    """One story as the page draws it.
+
+    `tier` and `importance` are both here and neither is the other's fallback
+    (ADR 0030). A story inside a bulletin has a tier - the editor's placement -
+    and a story outside one has only the summariser's 1-5 score, given with one
+    article in view. `step` picks whichever applies, and the two never mix
+    within a list because a list is either the bulletin or the rest of the day.
+    """
+
     id: int
     source: str
     url: str
@@ -87,29 +103,39 @@ class Story:
     importance: int
     tags: list[str]
     age: str
+    tier: str | None = None
+    # The ranker's own sentence for the placement, where it gave one.
+    reason: str | None = None
     # The reader's verdict on this summary, if one was given: "ok" | "wrong".
     verdict: str | None = None
     verdict_note: str | None = None
 
+    @property
+    def step(self) -> int:
+        """The ink-and-size step the headline is drawn at (`theme.css`, `.p1`-`.p5`)."""
+        return tier_step(self.tier) or self.importance
 
-def _finished_digests() -> Any:
-    """A bulletin that exists: it ran, it did not fail, and it wrote something."""
-    return bulletin_runs().where(Run.status.in_(("ok", "partial"))).where(Run.n_summarized > 0)
 
-
-def archive_runs() -> Any:
+def archive_bulletins() -> Any:
     """What `/archive` lists, and what the rail badge counts.
 
     One selector for both, because they were two and disagreed: the badge
     counted `kind == "digest"` while every press wrote `manual`, so it read 1
     over a list of 3 (ADR 0026). A count is a promise about what is behind the
     link, and it can only keep that promise by being the same query.
+
+    Every version, not only the current one. A superseded bulletin is what the
+    reader was shown that morning, and an archive with the replaced pages
+    removed is not a record - the row says which version it is and the template
+    marks the ones that were overtaken.
     """
-    return bulletin_runs().where(Run.n_summarized > 0)
+    return select(Bulletin).order_by(
+        Bulletin.day.desc(), Bulletin.version.desc(), Bulletin.id.desc()
+    )
 
 
-async def latest_digest_run(session: AsyncSession, settings: Settings | None = None) -> Run | None:
-    """The bulletin the front page shows, whatever language it was written in.
+async def latest_bulletin(session: AsyncSession) -> Bulletin | None:
+    """The bulletin the front page shows: the newest version of the newest day.
 
     Not filtered by the page's language. That made the shell's TR/EN switch a
     content filter: a reader on a Turkish page who pressed `English` got "no
@@ -118,25 +144,48 @@ async def latest_digest_run(session: AsyncSession, settings: Settings | None = N
     bulletin's language when it differs from the page's, so a Turkish shell
     around English stories is labelled rather than silently served.
 
-    Nor is it simply the newest. `bulletin.is_supplement` says why a small run is
-    not the day, and `bulletin.supplement_horizon` how far back the fuller one it
-    supplements may be. Both of those are editorial policy and live there; this
-    is the two queries that ask them.
+    One query, where there used to be two and a policy module. A press writes a
+    new version of the day (ADR 0030), so there is no longer a two-story
+    supplement to detect, no floor for it to clear and no horizon to reach back
+    over for the fuller bulletin it supplements.
     """
-    settings = settings or get_settings()
-    latest = (await session.execute(_finished_digests().limit(1))).scalar_one_or_none()
-    if latest is None or not is_supplement(latest, settings):
-        return latest
-    fuller = (
+    return (await session.execute(archive_bulletins().limit(1))).scalar_one_or_none()
+
+
+async def bulletin_by_id(session: AsyncSession, bulletin_id: int) -> Bulletin | None:
+    return await session.get(Bulletin, bulletin_id)
+
+
+async def newer_version(session: AsyncSession, bulletin: Bulletin) -> Bulletin | None:
+    """The version that replaced this one, if any - what marks an archive row as
+    superseded and what the reader is offered instead of a page they have to
+    work out is stale."""
+    return (
         await session.execute(
-            _finished_digests()
-            .where(Run.n_summarized >= supplement_floor(settings))
-            .where(Run.started_at >= supplement_horizon(latest, settings))
-            .where(Run.started_at < latest.started_at)
+            archive_bulletins()
+            .where(Bulletin.day == bulletin.day)
+            .where(Bulletin.language == bulletin.language)
+            .where(Bulletin.version > bulletin.version)
             .limit(1)
         )
     ).scalar_one_or_none()
-    return fuller or latest
+
+
+async def bulletins_page(session: AsyncSession, limit: int = 30) -> Page[Bulletin]:
+    """Every bulletin there is, newest first - the archive does not filter by
+    language for the same reason the digest does not (ADR 0017); each row in the
+    picker carries its own language, so a mixed archive reads as a list of
+    bulletins rather than as a page that lost half its history."""
+    rows = list((await session.execute(archive_bulletins().limit(limit))).scalars())
+    return Page(rows=rows, total=await count_archive(session), limit=limit)
+
+
+async def count_archive(session: AsyncSession) -> int:
+    """How many bulletins the archive holds - the rail badge's number, counted
+    off the very query that draws the list."""
+    return (
+        await session.execute(select(func.count()).select_from(archive_bulletins().subquery()))
+    ).scalar_one()
 
 
 def _to_story(
@@ -145,6 +194,7 @@ def _to_story(
     source_name: str,
     age: str,
     verdict: Verdict | None = None,
+    item: BulletinItem | None = None,
 ) -> Story:
     try:
         tags = json.loads(summary.tags_json or "[]")
@@ -157,61 +207,151 @@ def _to_story(
         title_local=summary.title_local,
         summary=summary.summary,
         why_it_matters=summary.why_it_matters,
-        # The editor's score where the ranker gave one, the summariser's where
-        # it did not (ADR 0025). The headline size is drawn from this.
-        importance=summary.shown_importance,
+        # The summariser's own score, given with one article in view. What the
+        # headline is drawn at is `Story.step`, which prefers the tier where
+        # there is one and never mixes the two scales (ADR 0030).
+        importance=summary.importance,
         tags=tags,
         age=age,
+        tier=item.tier if item else None,
+        reason=item.reason if item else None,
         verdict=verdict.verdict if verdict else None,
         verdict_note=verdict.note if verdict else None,
     )
 
 
-async def stories_for_run(
-    session: AsyncSession,
-    run: Run,
-    *,
-    language: Language,
-    ranked_only: bool = True,
-    tag: str | None = None,
-) -> list[Story]:
-    """The run's stories, in the order a bulletin reads: `bulletin.reading_order`.
+def _matches(story: Story, tag: str | None) -> bool:
+    """The exact membership test the SQL narrowing cannot make.
 
-    `ranked_only` is the top-N filter - which stories are in the bulletin at all.
-    `language` is the page's, not the run's, and only the age string uses it:
-    "3 saat" is a button, not reporting - it is written by this app rather than
-    by the model, so it follows the shell even when the stories under it were
-    written in the other language.
+    `tags_json` is a JSON array in a text column, so `"openai"` as a substring
+    can only appear as a whole element - but the query's `contains` is a
+    substring match, and this is what makes the filter mean what it says.
     """
-    query = (
+    return not tag or tag in story.tags
+
+
+def _tagged(query: Any, tag: str | None) -> Any:
+    """A cheap narrowing, not the decision.
+
+    What it saves is loading ninety rows to keep ten; what it refuses to do is
+    make SQLite parse the JSON, which fails the whole query on one malformed row
+    rather than skipping it.
+    """
+    return query.where(Summary.tags_json.contains(f'"{tag}"', autoescape=True)) if tag else query
+
+
+def _story_columns() -> Any:
+    return (
         select(Summary, Article, Source.name, Verdict)
         .join(Article, Article.id == Summary.article_id)
         .join(Source, Source.id == Article.source_id)
         .outerjoin(Verdict, Verdict.summary_id == Summary.id)
-        .where(Summary.run_id == run.id)
     )
-    if ranked_only:
-        query = query.where(Summary.rank.isnot(None))
-    if tag:
-        # A cheap narrowing, not the decision. `tags_json` is a JSON array in a
-        # text column, so `"openai"` as a substring can only appear as a whole
-        # element - but it could also be part of a longer word inside a *value*
-        # this column does not hold, so the exact membership test below still
-        # runs. What this saves is loading ninety rows to keep ten; what it
-        # refuses to do is make SQLite parse the JSON, which fails the whole
-        # query on one malformed row rather than skipping it.
-        query = query.where(Summary.tags_json.contains(f'"{tag}"', autoescape=True))
-    query = query.order_by(*reading_order())
 
-    stories = []
-    for summary, article, source_name, verdict in (await session.execute(query)).all():
-        story = _to_story(
-            summary, article, source_name, relative_age(article.published_at, language), verdict
+
+async def stories_for_bulletin(
+    session: AsyncSession,
+    bulletin: Bulletin,
+    *,
+    language: Language,
+    tag: str | None = None,
+) -> list[Story]:
+    """The bulletin, in the order the editor put it in.
+
+    `position` and only `position`. The tier is what the typography draws, not
+    what the list sorts by - two majors and a notable can read major, notable,
+    major if that is the day's argument, and sorting by tier would rewrite the
+    editor's order into groups. This is the whole of what replaced
+    `bulletin.reading_order`, which existed to reconcile two scores that no
+    longer both exist.
+
+    `language` is the page's, not the bulletin's, and only the age string uses
+    it: "3 saat" is a button, not reporting - it is written by this app rather
+    than by the model, so it follows the shell even when the stories under it
+    were written in the other language.
+    """
+    query = _tagged(
+        _story_columns()
+        .add_columns(BulletinItem)
+        .join(BulletinItem, BulletinItem.summary_id == Summary.id)
+        .where(BulletinItem.bulletin_id == bulletin.id)
+        .order_by(BulletinItem.position),
+        tag,
+    )
+    stories = [
+        _to_story(
+            summary, article, name, relative_age(article.published_at, language), verdict, item
         )
-        if tag and tag not in story.tags:
-            continue
-        stories.append(story)
-    return stories
+        for summary, article, name, verdict, item in (await session.execute(query)).all()
+    ]
+    return [story for story in stories if _matches(story, tag)]
+
+
+def _rest_of_day(bulletin: Bulletin) -> Any:
+    """The day's summaries the bulletin left out.
+
+    Bucketed on `created_at` against the local day's UTC bounds, not on the
+    collection window the ranker drew from: the window moves and the archive
+    does not, so a bulletin read a month later would otherwise show a different
+    set of also-rans each time it was opened.
+
+    Irrelevant summaries are left out here as well as out of the pool (ADR
+    0031). This block is the rest of the day's *reading*, not an audit of the
+    summariser: an item the summariser called not-AI-news is noise wherever it
+    is drawn, and one of the feeds is a personal blog that also publishes on map
+    projections. The cost is that a wrong `relevant=false` is invisible on the
+    page and has to be found through search.
+    """
+    start, end = day_bounds(bulletin.day)
+    in_bulletin = (
+        select(BulletinItem.id)
+        .where(BulletinItem.summary_id == Summary.id)
+        .where(BulletinItem.bulletin_id == bulletin.id)
+        .exists()
+    )
+    return (
+        _story_columns()
+        .where(Summary.language == bulletin.language)
+        .where(Summary.created_at >= start)
+        .where(Summary.created_at < end)
+        .where(Summary.relevant.is_(True))
+        .where(~in_bulletin)
+    )
+
+
+async def other_stories(
+    session: AsyncSession,
+    bulletin: Bulletin,
+    *,
+    language: Language,
+    tag: str | None = None,
+) -> list[Story]:
+    """What the day held and the editor did not publish, heaviest first.
+
+    Appended after the bulletin rather than merged into it. They carry no tier,
+    so they draw at the summariser's own score, and keeping them in their own
+    block is what stops the two scales being compared by eye - the failure ADR
+    0030 names, where a ranked 3-that-became-5 was drawn larger than an honest
+    unranked 3 in a layout whose only ranking indicator is size.
+    """
+    query = _tagged(_rest_of_day(bulletin), tag).order_by(
+        Summary.importance.desc(), Summary.id.asc()
+    )
+    stories = [
+        _to_story(summary, article, name, relative_age(article.published_at, language), verdict)
+        for summary, article, name, verdict in (await session.execute(query)).all()
+    ]
+    return [story for story in stories if _matches(story, tag)]
+
+
+async def count_others(session: AsyncSession, bulletin: Bulletin) -> int:
+    """How many stories sit behind the expander - counted, so the label is a
+    promise about what is behind the link rather than an estimate of it."""
+    return (
+        await session.execute(
+            select(func.count()).select_from(_rest_of_day(bulletin).order_by(None).subquery())
+        )
+    ).scalar_one()
 
 
 async def story_for_summary(
@@ -235,70 +375,83 @@ async def story_for_summary(
     )
 
 
-async def count_unranked(session: AsyncSession, run: Run) -> int:
-    return (
-        await session.execute(
-            select(func.count())
-            .select_from(Summary)
-            .where(Summary.run_id == run.id)
-            .where(Summary.rank.is_(None))
-        )
-    ).scalar_one()
-
-
 @dataclass(slots=True)
 class TagCounts:
-    """The run's tags counted two ways, from one pass over its rows.
+    """The day's tags counted two ways, from one pass over its rows.
 
     Both numbers are on screen at once whenever `?all=1` is on: the filter row
     counts the list the reader can reach, and the brief's footnote counts the
-    *digest* - the same stories the rail badge counts - so opening the full list
-    must not leave "11 haber" beside a topic count taken over ninety-one. Two
-    calls would scan every `tags_json` in the run a second time to produce a
+    *bulletin* - the same stories the rail badge counts - so opening the full
+    list must not leave "11 haber" beside a topic count taken over ninety-one.
+    Two calls would scan every `tags_json` in the day a second time to produce a
     single integer.
     """
 
-    ranked: list[tuple[str, int]]
+    published: list[tuple[str, int]]
     every: list[tuple[str, int]]
 
-    def shown(self, ranked_only: bool) -> list[tuple[str, int]]:
-        return self.ranked if ranked_only else self.every
+    def shown(self, published_only: bool) -> list[tuple[str, int]]:
+        return self.published if published_only else self.every
 
 
-async def tag_counts(session: AsyncSession, run: Run) -> TagCounts:
-    """Tags across the run, most common first, in both scopes.
+async def tag_counts(session: AsyncSession, bulletin: Bulletin) -> TagCounts:
+    """Tags across the day, most common first, in both scopes.
 
     Counted in Python rather than in SQL because the tags live in a JSON column;
     at a hundred rows a day that is not worth a second table, and a malformed
     value is skipped here rather than failing a `json_each` mid-query.
 
-    The ranked scope has to track the list the page is showing, and until
-    2026-09-06 it did not exist: the counts were taken over every summary the
-    run produced while the filter they label narrows the *ranked* fifteen. So
-    the row said `agents 27` on a page headed "15 haber", and pressing it
-    returned four stories. A count is a promise about what is behind the link.
+    The published scope has to track the list the page is showing. Before it
+    existed the counts were taken over every summary the run produced while the
+    filter they label narrowed the *ranked* fifteen, so the row said
+    `agents 27` on a page headed "15 haber" and pressing it returned four
+    stories. A count is a promise about what is behind the link.
     """
+    start, end = day_bounds(bulletin.day)
+    published = set(
+        (
+            await session.execute(
+                select(BulletinItem.summary_id).where(BulletinItem.bulletin_id == bulletin.id)
+            )
+        ).scalars()
+    )
     rows = (
         await session.execute(
-            select(Summary.tags_json, Summary.rank).where(Summary.run_id == run.id)
+            select(Summary.id, Summary.tags_json)
+            .where(Summary.language == bulletin.language)
+            .where(Summary.created_at >= start)
+            .where(Summary.created_at < end)
         )
     ).all()
-    ranked: dict[str, int] = {}
+    # A bulletin may carry a story summarised on an earlier day - the pool is a
+    # window, not a calendar (`nodes/rank.day_pool`) - so its tags are counted
+    # from the item list rather than from the day's rows alone.
+    missing = published - {summary_id for summary_id, _ in rows}
+    if missing:
+        rows = list(rows) + list(
+            (
+                await session.execute(
+                    select(Summary.id, Summary.tags_json).where(Summary.id.in_(missing))
+                )
+            ).all()
+        )
+
+    in_bulletin: dict[str, int] = {}
     every: dict[str, int] = {}
-    for raw, rank in rows:
+    for summary_id, raw in rows:
         try:
             tags = json.loads(raw or "[]")
         except json.JSONDecodeError:
             continue
         for tag in tags:
             every[tag] = every.get(tag, 0) + 1
-            if rank is not None:
-                ranked[tag] = ranked.get(tag, 0) + 1
+            if summary_id in published:
+                in_bulletin[tag] = in_bulletin.get(tag, 0) + 1
 
     def ordered(counts: dict[str, int]) -> list[tuple[str, int]]:
         return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
-    return TagCounts(ranked=ordered(ranked), every=ordered(every))
+    return TagCounts(published=ordered(in_bulletin), every=ordered(every))
 
 
 @dataclass(slots=True)
@@ -361,23 +514,6 @@ async def recent_runs(session: AsyncSession, limit: int = 12) -> Page[Run]:
     )
     total = (await session.execute(select(func.count()).select_from(Run))).scalar_one()
     return Page(rows=rows, total=total, limit=limit)
-
-
-async def digest_runs(session: AsyncSession, limit: int = 30) -> Page[Run]:
-    """Every bulletin there is, newest first - the archive does not filter by
-    language for the same reason the digest does not (ADR 0017); each row in the
-    picker carries its own language, so a mixed archive reads as a list of
-    bulletins rather than as a page that lost half its history."""
-    rows = list((await session.execute(archive_runs().limit(limit))).scalars())
-    return Page(rows=rows, total=await count_archive(session), limit=limit)
-
-
-async def count_archive(session: AsyncSession) -> int:
-    """How many bulletins the archive holds - the rail badge's number, counted
-    off the very query that draws the list."""
-    return (
-        await session.execute(select(func.count()).select_from(archive_runs().subquery()))
-    ).scalar_one()
 
 
 def _fts_query(raw: str) -> str:
@@ -576,6 +712,25 @@ async def verdict_progress(session: AsyncSession) -> VerdictProgress:
     return VerdictProgress(labelled=labelled, wrong=wrong, total=total)
 
 
+def _home_bulletin() -> Any:
+    """The newest bulletin a summary appears in, as a correlated subquery.
+
+    What a link to a labelled story needs. A summary can be in two bulletins -
+    two versions of one day - and the newest is the page the reader would be
+    shown if they went looking, so it is the page the link lands on. `NULL` for
+    a summary the editor never published, which the templates draw as a row
+    with no link rather than as a link to nothing.
+    """
+    return (
+        select(BulletinItem.bulletin_id)
+        .join(Bulletin, Bulletin.id == BulletinItem.bulletin_id)
+        .where(BulletinItem.summary_id == Summary.id)
+        .order_by(Bulletin.day.desc(), Bulletin.version.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
 @dataclass(slots=True)
 class LabelledStory:
     """One row of `/runs/verdicts`: a verdict, and enough of the story to place it.
@@ -586,7 +741,7 @@ class LabelledStory:
     """
 
     summary_id: int
-    run_id: str
+    bulletin_id: int | None
     decided_at: datetime
     source: str
     title_local: str
@@ -612,7 +767,7 @@ async def labelled_stories(session: AsyncSession, limit: int = 200) -> Page[Labe
     """
     rows = (
         await session.execute(
-            select(Verdict, Summary, Source.name)
+            select(Verdict, Summary, Source.name, _home_bulletin().label("bulletin_id"))
             .join(Summary, Summary.id == Verdict.summary_id)
             .join(Article, Article.id == Summary.article_id)
             .join(Source, Source.id == Article.source_id)
@@ -625,14 +780,14 @@ async def labelled_stories(session: AsyncSession, limit: int = 200) -> Page[Labe
         rows=[
             LabelledStory(
                 summary_id=summary.id,
-                run_id=summary.run_id,
+                bulletin_id=bulletin_id,
                 decided_at=verdict.created_at,
                 source=source_name,
                 title_local=summary.title_local,
                 verdict=verdict.verdict,
                 note=verdict.note,
             )
-            for verdict, summary, source_name in rows
+            for verdict, summary, source_name, bulletin_id in rows
         ],
         total=total,
         limit=limit,
@@ -650,7 +805,7 @@ class Finding:
     """
 
     summary_id: int
-    run_id: str
+    bulletin_id: int | None
     judged_at: datetime
     model: str
     source: str
@@ -671,7 +826,7 @@ async def judge_findings(session: AsyncSession, limit: int = 200) -> list[Findin
     """
     rows = (
         await session.execute(
-            select(EvalResult, Summary, Source.name, Verdict)
+            select(EvalResult, Summary, Source.name, Verdict, _home_bulletin().label("bulletin_id"))
             .join(Summary, Summary.id == EvalResult.summary_id)
             .join(Article, Article.id == Summary.article_id)
             .join(Source, Source.id == Article.source_id)
@@ -682,7 +837,7 @@ async def judge_findings(session: AsyncSession, limit: int = 200) -> list[Findin
     ).all()
     seen: set[int] = set()
     findings: list[Finding] = []
-    for result, summary, source_name, verdict in rows:
+    for result, summary, source_name, verdict, bulletin_id in rows:
         if summary.id in seen:
             continue
         seen.add(summary.id)
@@ -691,7 +846,7 @@ async def judge_findings(session: AsyncSession, limit: int = 200) -> list[Findin
         findings.append(
             Finding(
                 summary_id=summary.id,
-                run_id=summary.run_id,
+                bulletin_id=bulletin_id,
                 judged_at=result.created_at,
                 model=result.model,
                 source=source_name,

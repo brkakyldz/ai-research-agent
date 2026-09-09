@@ -13,41 +13,36 @@ And `recursion_limit` counts supersteps: a `Send` fan-out is one superstep
 however wide it is, so the real depth here is six and the default of 25 would
 do - the runner raises it anyway as insurance against a future node that loops.
 
-Checkpoints go to their own SQLite file, not the application database. They are
-machine state with a different lifecycle: deleting them costs nothing, while
-deleting `app.db` costs the archive. They are also what a failed run resumes
-from (`runner.run_digest(resume=...)`), which is the one thing they are read for.
+There is no checkpointer. A checkpoint is a way of not losing work when a run
+dies, and the work this run does is now durable as it happens: each branch
+commits its summary before it returns (ADR 0030). A run that dies at `rank` has
+bought ninety summaries and they are all in the archive, so the recovery is to
+press again - the next press ranks them instead of buying them again, which is
+cheaper and simpler than replaying a graph from a checkpoint whose prompts,
+models and schema have all moved since it was written (ADR 0032).
 """
 
 from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
-from sqlalchemy import select
 
-from ainews.config import Settings, get_settings
-from ainews.db import Article, Source
+from ainews.config import get_settings
 from ainews.db.session import session_scope
 from ainews.pipeline.nodes.collect import collect_articles
 from ainews.pipeline.nodes.dedupe import dedupe_candidates
 from ainews.pipeline.nodes.enrich import enrich_articles
 from ainews.pipeline.nodes.persist import persist_run
-from ainews.pipeline.nodes.rank import rank_summaries
+from ainews.pipeline.nodes.rank import day_pool, previous_headlines, rank_day
 from ainews.pipeline.nodes.summarize import summarize_article
 from ainews.pipeline.pricing import CostCeiling, estimate_digest_cost
-from ainews.pipeline.state import PipelineState, SummaryPayload
-from ainews.pipeline.steps import StepRecord, record_fan_out, step
+from ainews.pipeline.state import PipelineState
+from ainews.pipeline.steps import record_fan_out, step
 
 log = logging.getLogger(__name__)
-
-
-def checkpoint_path(settings: Settings | None = None) -> Path:
-    settings = settings or get_settings()
-    return settings.sqlite_path.parent / "checkpoints.db"
 
 
 # Every adapter below is wrapped in `step()`, which times it and writes one
@@ -153,61 +148,64 @@ def fan_out_summaries(state: PipelineState) -> list[Send] | str:
 
 
 async def rank_node(state: PipelineState) -> PipelineState:
-    summaries = state.get("summaries") or []
-    if not summaries:
-        return {"ranked": [], "editor_note": ""}
+    """Rank the *day*, not the run.
 
-    async with step(state["run_id"], "rank") as s:
-        return await _rank(state, summaries, s)
-
-
-async def _source_meta(article_ids: list[int]) -> dict[int, tuple[str, float]]:
-    """Each article's source name and weight - the ranker's tie-break material.
-
-    One join, not two `session.get` calls per summary. At ninety summaries that
-    was a hundred and eighty round trips to name the source of each, and the
-    name and the weight are one row of `sources` reachable from the id the
-    payload already carries.
+    The pool is every relevant summary in the collection window that no earlier
+    day's bulletin has published, so a second press re-ranks what is already
+    there together with what it just bought (ADR 0030). That is why this node
+    reads the database rather than `state["summaries"]`: the summaries this run
+    wrote are a delta, and a delta is not a day. It also means the tie-break
+    material - each story's source and weight - comes back in the query that
+    selects the candidates, instead of a second join to name what the payloads
+    could not carry.
     """
-    async with session_scope() as session:
-        rows = (
-            await session.execute(
-                select(Article.id, Source.name, Source.weight)
-                .join(Source, Source.id == Article.source_id)
-                .where(Article.id.in_(article_ids))
+    async with step(state["run_id"], "rank") as s:
+        async with session_scope() as session:
+            candidates = await day_pool(session, state["day"], state["language"])
+            previous = await previous_headlines(session, state["day"], state["language"])
+
+        if not candidates:
+            s.counts(0, 0)
+            return {"ranked": [], "editor_note": ""}
+
+        ranking = await rank_day(
+            candidates,
+            state["language"],
+            previous=previous,
+            model=state.get("model_rank"),
+            seed=state["run_id"],
+        )
+        s.counts(len(candidates), len(ranking.order))
+        # `persist_run`'s fallback, not an empty string: see the note in
+        # `steps.record_fan_out`. The two have to price the same tokens the
+        # same way.
+        s.spend(
+            state.get("model_rank") or get_settings().openai_model,
+            ranking.tokens_in,
+            ranking.tokens_out,
+        )
+        if ranking.agreement is None:
+            s.note_key("rank_unranked")
+        else:
+            s.note_key(
+                "rank_agreement",
+                agreement=round(ranking.agreement * 100),
+                passes=len(ranking.passes),
             )
-        ).all()
-    found = {article_id: (name, weight) for article_id, name, weight in rows}
-    # An article whose row has gone is still ranked, under the same placeholder
-    # it had before: the ranker's input is the summary, and a missing source is
-    # a tie-break it does without rather than a run it fails.
-    return {article_id: found.get(article_id, ("unknown", 1.0)) for article_id in article_ids}
-
-
-async def _rank(
-    state: PipelineState, summaries: list[SummaryPayload], s: StepRecord
-) -> PipelineState:
-    meta = await _source_meta([item["article_id"] for item in summaries])
-
-    ranking = await rank_summaries(
-        summaries, meta, state["language"], model=state.get("model_rank")
-    )
-    s.counts(len(summaries), len(ranking.order))
-    # `persist_run`'s fallback, not an empty string: see the note in
-    # `steps.record_fan_out`. The two have to price the same tokens the same way.
-    s.spend(
-        state.get("model_rank") or get_settings().openai_model,
-        ranking.tokens_in,
-        ranking.tokens_out,
-    )
-    return {
-        "ranked": [
-            {"article_id": aid, "rank": i, "importance": ranking.importance[aid]}
-            for i, aid in enumerate(ranking.order, start=1)
-        ],
-        "editor_note": ranking.editor_note,
-        "rank_usage": {"tokens_in": ranking.tokens_in, "tokens_out": ranking.tokens_out},
-    }
+        return {
+            "ranked": [
+                {
+                    "summary_id": summary_id,
+                    "position": position,
+                    "tier": ranking.tiers[summary_id],
+                    "reason": ranking.reasons.get(summary_id, ""),
+                }
+                for position, summary_id in enumerate(ranking.order, start=1)
+            ],
+            "editor_note": ranking.editor_note,
+            "agreement": ranking.agreement,
+            "rank_usage": {"tokens_in": ranking.tokens_in, "tokens_out": ranking.tokens_out},
+        }
 
 
 async def persist_node(state: PipelineState) -> PipelineState:
@@ -226,13 +224,7 @@ def build_graph() -> StateGraph:
     """The graph itself, built once.
 
     Cached because it is built from constants - six nodes and their edges, no
-    settings and no session - and because it is not only built when a run
-    starts. `runner.pending_nodes` builds and compiles it to ask a checkpoint
-    what is left to do, which happens on the confirmation fragment and on every
-    model-slot click behind it.
-
-    Compiling still happens per call: `.compile()` binds a checkpointer, and the
-    checkpointer is the one part that differs between a run and a read.
+    settings and no session - so there is nothing per-run for it to close over.
     """
     graph = StateGraph(PipelineState)
     graph.add_node("collect", collect_node)

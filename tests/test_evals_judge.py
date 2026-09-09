@@ -15,8 +15,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ainews.clock import local_day
 from ainews.config import Settings
-from ainews.db import Article, EvalResult, Run, Source, Summary, Verdict
+from ainews.db import Article, Bulletin, BulletinItem, EvalResult, Run, Source, Summary, Verdict
 from ainews.evals import judge as judge_module
 from ainews.evals import stability
 from ainews.evals.cli import run_eval
@@ -27,8 +28,8 @@ from ainews.evals.judge import (
     calibrate,
     choose_sample,
     format_calibration,
+    judge_bulletin,
     judge_labelled,
-    judge_run,
 )
 from ainews.pipeline.nodes import rank as rank_module
 from ainews.pipeline.state import Pick, RankedDigest
@@ -68,13 +69,23 @@ BODY = "Nvidia will pay $12.9 billion for Hugging Face, which hosts three millio
 
 
 @pytest.fixture
-async def run(session: AsyncSession) -> Run:
-    """A finished run with six summarised stories, bodies included."""
+async def bulletin(session: AsyncSession) -> Bulletin:
+    """A published bulletin: three stories on the page, three the day left out.
+
+    Both halves, because `choose_sample` prefers the published ones and fills
+    the rest from below the fold - a judge that only ever saw the bulletin would
+    measure the ranker's taste as much as the summariser's grounding.
+    """
     src = Source(name="Ars", url="https://ars.dev/feed", weight=1.2)
     session.add(src)
     await session.flush()
     run = Run(kind="digest", language="tr", status="ok", n_summarized=6)
     session.add(run)
+    await session.flush()
+    bulletin = Bulletin(
+        day=local_day(), language="tr", version=1, est_cost_usd=0.004, run_id=run.id
+    )
+    session.add(bulletin)
     await session.flush()
     for i in range(6):
         art = Article(
@@ -86,21 +97,28 @@ async def run(session: AsyncSession) -> Run:
         )
         session.add(art)
         await session.flush()
-        session.add(
-            Summary(
-                article_id=art.id,
-                run_id=run.id,
-                language="tr",
-                title_local=f"Haber {i}",
-                summary=f"Ozet {i}. Iki. Uc.",
-                why_it_matters="Onemli.",
-                tags_json=json.dumps(["nvidia"]),
-                importance=3 + (i % 3),
-                rank=i + 1 if i < 3 else None,
-            )
+        summary = Summary(
+            article_id=art.id,
+            language="tr",
+            title_local=f"Haber {i}",
+            summary=f"Ozet {i}. Iki. Uc.",
+            why_it_matters="Onemli.",
+            tags_json=json.dumps(["nvidia"]),
+            importance=3 + (i % 3),
         )
+        session.add(summary)
+        await session.flush()
+        if i < 3:
+            session.add(
+                BulletinItem(
+                    bulletin_id=bulletin.id,
+                    summary_id=summary.id,
+                    position=i + 1,
+                    tier="lead" if i == 0 else "major",
+                )
+            )
     await session.commit()
-    return run
+    return bulletin
 
 
 @pytest.fixture
@@ -135,22 +153,24 @@ def test_the_sample_is_stable_under_a_seed() -> None:
 
 
 async def test_the_cost_guard_stops_before_the_first_call(
-    session: AsyncSession, run: Run, settings: Settings, monkeypatch: pytest.MonkeyPatch
+    session: AsyncSession, bulletin: Bulletin, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     llm = FakeLLM(GroundingVerdict(passed=True), raise_with=AssertionError("must not be called"))
     monkeypatch.setattr(judge_module, "judge_model", lambda *_: llm)
 
     with pytest.raises(CostGuard) as exc:
-        await judge_run(session, run.id, sample=6, max_cost=0.0, settings=settings)
+        await judge_bulletin(session, bulletin.id, sample=6, max_cost=0.0, settings=settings)
     assert "over --max-cost" in str(exc.value)
     assert llm.calls == []
     assert (await session.execute(select(EvalResult))).scalars().all() == []
 
 
 async def test_a_judged_run_writes_one_row_per_summary_with_its_cost(
-    session: AsyncSession, run: Run, settings: Settings, fake_judge: FakeLLM
+    session: AsyncSession, bulletin: Bulletin, settings: Settings, fake_judge: FakeLLM
 ) -> None:
-    report = await judge_run(session, run.id, sample=4, seed=1, max_cost=1.0, settings=settings)
+    report = await judge_bulletin(
+        session, bulletin.id, sample=4, seed=1, max_cost=1.0, settings=settings
+    )
     assert (report.n_passed, report.n_failed, report.n_unparsed) == (4, 0, 0)
     assert len(fake_judge.calls) == 4
     assert BODY[:30] in fake_judge.calls[0], "the judge reads the body the summariser read"
@@ -164,7 +184,7 @@ async def test_a_judged_run_writes_one_row_per_summary_with_its_cost(
 
 
 async def test_a_failed_claim_is_recorded_verbatim(
-    session: AsyncSession, run: Run, settings: Settings, monkeypatch: pytest.MonkeyPatch
+    session: AsyncSession, bulletin: Bulletin, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def answer(prompt: str) -> GroundingVerdict:
         if "Ozet 2." in prompt:
@@ -172,7 +192,7 @@ async def test_a_failed_claim_is_recorded_verbatim(
         return GroundingVerdict(passed=True)
 
     monkeypatch.setattr(judge_module, "judge_model", lambda *_: FakeLLM(answer))
-    report = await judge_run(session, run.id, sample=6, max_cost=1.0, settings=settings)
+    report = await judge_bulletin(session, bulletin.id, sample=6, max_cost=1.0, settings=settings)
     assert report.n_failed == 1
     failed = (
         await session.execute(select(EvalResult).where(EvalResult.passed.is_(False)))
@@ -181,10 +201,10 @@ async def test_a_failed_claim_is_recorded_verbatim(
 
 
 async def test_a_judge_that_fails_to_parse_is_recorded_not_raised(
-    session: AsyncSession, run: Run, settings: Settings, monkeypatch: pytest.MonkeyPatch
+    session: AsyncSession, bulletin: Bulletin, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(judge_module, "judge_model", lambda *_: FakeLLM(None))
-    report = await judge_run(session, run.id, sample=2, max_cost=1.0, settings=settings)
+    report = await judge_bulletin(session, bulletin.id, sample=2, max_cost=1.0, settings=settings)
     assert report.n_unparsed == 2
     rows = (await session.execute(select(EvalResult))).scalars().all()
     assert [r.passed for r in rows] == [None, None]
@@ -192,11 +212,11 @@ async def test_a_judge_that_fails_to_parse_is_recorded_not_raised(
 
 
 async def test_an_upstream_error_is_a_row_not_a_traceback(
-    session: AsyncSession, run: Run, settings: Settings, monkeypatch: pytest.MonkeyPatch
+    session: AsyncSession, bulletin: Bulletin, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     llm = FakeLLM(None, raise_with=RuntimeError("simulated 500"))
     monkeypatch.setattr(judge_module, "judge_model", lambda *_: llm)
-    report = await judge_run(session, run.id, sample=1, max_cost=1.0, settings=settings)
+    report = await judge_bulletin(session, bulletin.id, sample=1, max_cost=1.0, settings=settings)
     assert report.outcomes[0].error is not None and "simulated 500" in report.outcomes[0].error
     row = (await session.execute(select(EvalResult))).scalar_one()
     assert row.passed is None and "simulated 500" in (row.detail or "")
@@ -232,7 +252,7 @@ def test_unparsed_judgements_are_counted_apart() -> None:
 
 
 async def test_labelled_mode_judges_only_what_the_reader_labelled(
-    session: AsyncSession, run: Run, settings: Settings, monkeypatch: pytest.MonkeyPatch
+    session: AsyncSession, bulletin: Bulletin, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ids = list((await session.execute(select(Summary.id).order_by(Summary.id))).scalars())
     session.add(Verdict(summary_id=ids[0], verdict="wrong", note="uydurma"))
@@ -253,51 +273,55 @@ async def test_labelled_mode_judges_only_what_the_reader_labelled(
 # -- rank stability -----------------------------------------------------------
 
 
-def test_kendall_tau_is_one_for_identical_orders_and_minus_one_for_reversed() -> None:
-    assert stability.kendall_tau([1, 2, 3, 4], [1, 2, 3, 4]) == 1.0
-    assert stability.kendall_tau([1, 2, 3, 4], [4, 3, 2, 1]) == -1.0
-    assert stability.kendall_tau([1, 2, 3], [1, 3, 2]) == pytest.approx(1 / 3)
-    assert stability.kendall_tau([1, 2, 3], [4, 5, 6]) == 1.0, "nothing shared, nothing to disagree"
-    assert stability.jaccard([1, 2, 3], [2, 3, 4]) == 0.5
-
-
-async def test_the_probe_shuffles_calls_and_stores_one_row(
-    session: AsyncSession, run: Run, settings: Settings, monkeypatch: pytest.MonkeyPatch
+async def test_the_probe_measures_the_shuffles_against_the_published_order(
+    session: AsyncSession, bulletin: Bulletin, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A ranker that always answers "1, 2, 3" against a shuffled table returns
-    a different article order each time, and the probe has to notice."""
+    """A ranker that always answers "1, 2, 3" against a shuffled table returns a
+    different story order each time, and the probe has to notice - including how
+    far each one is from the page the reader was actually given."""
     seen: list[str] = []
 
     class Ranker(FakeLLM):
         def with_structured_output(self, _schema: Any, **__: object) -> FakeStructured:
             return FakeStructured(
                 RankedDigest(
-                    editor_note="n", picks=[Pick(number=n, importance=3) for n in (1, 2, 3)]
+                    editor_note="n",
+                    picks=[Pick(number=n, tier="major", reason="") for n in (1, 2, 3)],
                 ),
                 calls=seen,
             )
 
     monkeypatch.setattr(rank_module, "ranker", lambda *_: Ranker(None))
-    report = await stability.rank_stability(session, run.id, times=3, seed=0, settings=settings)
+    report = await stability.rank_stability(
+        session, bulletin.id, times=3, seed=0, settings=settings
+    )
+
     assert len(seen) == 3
-    assert len(report.orders) == 3 and all(len(o) == 3 for o in report.orders)
-    assert report.tau < 1.0 or report.jaccard < 1.0, "position-bound answers must read as unstable"
+    # Four orders, not three: the one that shipped is in the comparison, which
+    # is the whole difference between this and the number production computes.
+    assert len(report.orders) == 4
+    assert report.orders[0] == await stability.published_order(session, bulletin.id)
+    assert report.tau < 1.0 or report.jaccard < 1.0, "position-bound answers read as unstable"
+
     row = (await session.execute(select(EvalResult))).scalar_one()
     assert row.kind == "rank_stability" and row.summary_id is None
+    assert row.bulletin_id == bulletin.id
     assert json.loads(row.detail or "{}")["times"] == 3
 
 
-async def test_a_fallback_answer_is_not_mistaken_for_stability(
-    session: AsyncSession, run: Run, settings: Settings, monkeypatch: pytest.MonkeyPatch
+async def test_a_failed_call_is_counted_and_never_stands_in_for_an_answer(
+    session: AsyncSession, bulletin: Bulletin, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A failed rank call contributes no order at all. An importance ordering
+    invented here would be perfectly stable and would say nothing about the
+    model, which is the number this command exists to produce."""
     monkeypatch.setattr(
         rank_module, "ranker", lambda *_: FakeLLM(None, raise_with=RuntimeError("down"))
     )
-    report = await stability.rank_stability(session, run.id, times=2, settings=settings)
+    report = await stability.rank_stability(session, bulletin.id, times=2, settings=settings)
+
     assert report.n_fallback == 2
-    # The fallback sorts by importance then weight and breaks ties in arrival
-    # order, so shuffled input gives it a slightly different order too - which
-    # is exactly why a fallback must be counted rather than read as a number.
+    assert report.orders == [await stability.published_order(session, bulletin.id)]
     row = (await session.execute(select(EvalResult))).scalar_one()
     assert row.passed is None
     assert json.loads(row.detail or "{}")["n_fallback"] == 2
@@ -306,22 +330,22 @@ async def test_a_fallback_answer_is_not_mistaken_for_stability(
 # -- the sample follows the reader (2026-09-08) --------------------------------
 
 
-def test_the_sample_is_drawn_from_the_ranked_stories_first() -> None:
-    """The reader labels what the page shows, which is the ranked fifteen. A
-    sample drawn uniformly over ninety summaries held one or two of them, so a
+def test_the_sample_is_drawn_from_the_published_stories_first() -> None:
+    """The reader labels what the page shows, which is the bulletin. A sample
+    drawn uniformly over ninety summaries held one or two of them, so a
     judgement and a label almost never landed on the same story."""
     candidates = [
         judge_module.Candidate(
-            i, "r", i, "s", "t", "b", "sum", "why", rank=i + 1 if i < 3 else None
+            i, 1, i, "s", "t", "b", "sum", "why", position=i + 1 if i < 3 else None
         )
         for i in range(20)
     ]
     chosen = choose_sample(candidates, 5, seed=0)
-    assert [c.summary_id for c in chosen if c.rank is not None] == [0, 1, 2], "every ranked one"
+    assert [c.summary_id for c in chosen if c.position is not None] == [0, 1, 2], "every one"
     assert len(chosen) == 5, "the rest filled from below the fold"
 
     two = choose_sample(candidates, 2, seed=0)
-    assert all(c.rank is not None for c in two), "a small sample never leaves the ranked set"
+    assert all(c.position is not None for c in two), "a small sample stays on the page"
     assert two == choose_sample(list(reversed(candidates)), 2, seed=0), "still seeded"
 
 

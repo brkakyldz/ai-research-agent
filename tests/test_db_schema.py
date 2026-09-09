@@ -55,7 +55,6 @@ async def test_fts_index_follows_summary_writes(session: AsyncSession) -> None:
     session.add(
         Summary(
             article_id=art.id,
-            run_id=run.id,
             language="tr",
             title_local="Yeni bir dil modeli duyuruldu",
             summary="Sirket bugun yeni bir model yayinladi.",

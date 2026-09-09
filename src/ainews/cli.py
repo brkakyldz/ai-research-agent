@@ -43,27 +43,14 @@ async def _digest(
     language: str | None,
     model_summarize: str | None = None,
     model_rank: str | None = None,
-    resume: str | None = None,
 ) -> int:
-    from ainews.pipeline.runner import resolve_run_id, run_digest
+    from ainews.pipeline.runner import run_digest
 
     settings = get_settings()
     if not settings.llm_configured:
         print("OPENAI_API_KEY is not set; a digest needs it.", file=sys.stderr)
         return 2
     await _prepare()
-    if resume is not None:
-        # A failed run picked up at the node that failed: the summaries it paid
-        # for are in the checkpoint, and only what is left runs (`runner.py`).
-        try:
-            async with session_scope() as session:
-                resume = await resolve_run_id(session, resume)
-            run_id = await run_digest(resume=resume)
-        except (LookupError, ValueError) as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
-        print(f"digest run {run_id} resumed and finished")
-        return 0
     run_id = await run_digest(
         language=language,  # type: ignore[arg-type]
         model_summarize=model_summarize,
@@ -85,13 +72,10 @@ async def _prune(dry_run: bool) -> int:
         print(str(exc), file=sys.stderr)
         return 2
     verb = "would drop" if report.dry_run else "dropped"
-    print(
-        f"{verb} {report.threads} checkpoint thread(s) "
-        f"({report.checkpoint_rows} rows) and {report.articles} unsummarised article(s)"
-    )
+    print(f"{verb} {report.articles} unsummarised article(s)")
     if not report.dry_run:
         print(f"reclaimed {report.total_bytes / 1024:.0f} KiB")
-    print("summaries, runs, verdicts and judge findings are never pruned")
+    print("summaries, bulletins, runs, verdicts and judge findings are never pruned")
     return 0
 
 
@@ -219,21 +203,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="model for the single ranking call (default: OPENAI_MODEL)",
     )
-    digest.add_argument(
-        "--resume",
-        metavar="RUN_ID",
-        default=None,
-        help=(
-            "pick a failed run up at the node that failed, from its checkpoint; "
-            "a full id or an unambiguous prefix. The other flags are ignored: the "
-            "language and the models are in the checkpoint"
-        ),
-    )
 
     sub.add_parser("sources", help="list the seeded feeds and their last status")
     pruning = sub.add_parser(
         "prune",
-        help="drop checkpoint threads and unsummarised articles nothing can reach",
+        help="drop unsummarised articles nothing can reach",
     )
     pruning.add_argument(
         "--dry-run",
@@ -286,9 +260,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "collect":
                 return await _collect()
             if args.command == "digest":
-                return await _digest(
-                    args.language, args.model_summarize, args.model_rank, args.resume
-                )
+                return await _digest(args.language, args.model_summarize, args.model_rank)
             if args.command == "sources":
                 return await _sources()
             if args.command == "prune":

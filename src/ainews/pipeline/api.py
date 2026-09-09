@@ -9,7 +9,7 @@ is what a cycle looks like once it has been worked around rather than removed.
 
 The direction is one way and stays one way: `pipeline` never imports `web`. That
 is the whole reason this file is on this side of the boundary — the pipeline
-decides what it is willing to answer, and the answer is four questions and one
+decides what it is willing to answer, and the answer is three questions and one
 repair, none of which starts a run.
 """
 
@@ -17,17 +17,9 @@ from __future__ import annotations
 
 from ainews.pipeline.nodes.collect import probe_feed
 from ainews.pipeline.nodes.dedupe import count_candidates
-from ainews.pipeline.runner import (
-    Resumable,
-    RunBusy,
-    digest_in_flight,
-    reconcile_orphaned_runs,
-    resumable_run,
-)
+from ainews.pipeline.runner import RunBusy, digest_in_flight, reconcile_orphaned_runs
 
 __all__ = [
-    # The failed run a press could finish instead, and its shape.
-    "Resumable",
     # What a refused run raises.
     "RunBusy",
     # How many articles a press would summarise, before it is pressed.
@@ -40,5 +32,4 @@ __all__ = [
     # open. Startup repair rather than work - it finishes runs and cannot start
     # one.
     "reconcile_orphaned_runs",
-    "resumable_run",
 ]

@@ -17,12 +17,12 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 
-from ainews.config import Language, get_settings
+from ainews.clock import to_local
+from ainews.config import Language
 from ainews.web.i18n import strings
 
 
@@ -53,23 +53,6 @@ def build_templates(directory: Path, *, auto_reload: bool) -> Jinja2Templates:
     templates.env.filters["band"] = impact_band
     templates.env.filters["paragraphs"] = split_paragraphs
     return templates
-
-
-def local_zone() -> ZoneInfo:
-    settings = get_settings()
-    try:
-        return ZoneInfo(settings.timezone)
-    except Exception:
-        # A bad IANA name must not take the dashboard down; UTC is legible.
-        return ZoneInfo("UTC")
-
-
-def to_local(value: datetime | None) -> datetime | None:
-    """Every stored timestamp arrives aware and in UTC (`db.models.UTCDateTime`),
-    so this converts and does not have to guess."""
-    if value is None:
-        return None
-    return value.astimezone(local_zone())
 
 
 def format_clock(value: datetime | None) -> str:

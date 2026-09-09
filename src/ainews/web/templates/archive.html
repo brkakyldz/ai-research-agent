@@ -1,9 +1,18 @@
 {% extends "base.html" %}
 
 {% block content %}
-  {% if not runs %}
+  {% if not bulletins %}
     <div class="panel"><p class="empty">{{ t.empty_archive }}</p></div>
   {% else %}
+
+  {% if superseded_by %}
+  {# A version that was replaced. The page is still what the reader was shown
+     that morning, which is why it is kept; saying so and offering the current
+     one is the difference between an archive and a stale page. #}
+  <p class="feed__f"><span class="hint">{{ t.superseded }}</span>
+    <a class="lnk" href="/archive?lang={{ language }}&amp;b={{ superseded_by.id }}">{{ t.superseded_go }}</a>
+  </p>
+  {% endif %}
 
   {% if selected and selected.editor_note %}
   <section class="brief">
@@ -11,22 +20,26 @@
       <p class="brief__l">{{ t.brief_label }}</p>
       <div class="brief__t">{% for para in selected.editor_note|paragraphs %}<p>{{ para }}</p>{% endfor %}</div>
     </div>
-    <p class="brief__m mono">{{ selected.started_at|stamp }}</p>
+    <p class="brief__m mono">{{ selected.created_at|stamp }}</p>
   </section>
   {% endif %}
 
   <section class="feed-col">
     <div class="filter">
       <div class="tags">
-        {% for r in runs %}
-        <a href="/archive?lang={{ language }}&amp;run={{ r.id }}"
-           {% if selected and r.id == selected.id %}aria-current="true"{% endif %}>{{ r.started_at|clock }}{% if r.language != language %} · <span lang="{{ r.language }}">{{ t['lang_' ~ r.language] }}</span>{% endif %}</a>
+        {% for b in bulletins %}
+        <a href="/archive?lang={{ language }}&amp;b={{ b.id }}"
+           {% if selected and b.id == selected.id %}aria-current="true"{% endif %}>{{ b.created_at|clock }}{% if b.version > 1 %} · v{{ b.version }}{% endif %}{% if b.language != language %} · <span lang="{{ b.language }}">{{ t['lang_' ~ b.language] }}</span>{% endif %}</a>
         {% endfor %}
       </div>
-      {% with page = runs %}{% include "_more.html" %}{% endwith %}
+      {% with page = bulletins %}{% include "_more.html" %}{% endwith %}
     </div>
 
     {% if selected %}{% include "_stories.html" %}{% endif %}
+    {% if others %}
+    <p class="feed__f"><span class="hint">{{ t.others_label }}</span></p>
+    {% with stories = others %}{% include "_stories.html" %}{% endwith %}
+    {% endif %}
   </section>
 
   {% endif %}

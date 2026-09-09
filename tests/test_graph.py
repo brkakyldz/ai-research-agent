@@ -15,8 +15,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ainews.clock import local_day
 from ainews.config import Settings
-from ainews.db import Article, Run, Source, Summary
+from ainews.db import Article, Bulletin, BulletinItem, Run, Source, Summary
 from ainews.pipeline import graph as graph_module
 from ainews.pipeline.llm import usage_from_message
 from ainews.pipeline.nodes import rank as rank_module
@@ -73,9 +74,9 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> None:
             RankedDigest(
                 editor_note="Ucuz modeller gunu.",
                 picks=[
-                    Pick(number=2, importance=5),
-                    Pick(number=1, importance=4),
-                    Pick(number=3, importance=3),
+                    Pick(number=2, tier="lead", reason="gunun haberi"),
+                    Pick(number=1, tier="major", reason=""),
+                    Pick(number=3, tier="notable", reason=""),
                 ],
             )
         ),
@@ -233,6 +234,7 @@ async def test_a_full_run_fans_out_ranks_and_persists(
         {
             "run_id": run.id,
             "language": "tr",
+            "day": local_day(),
             "candidate_ids": [],
             "summaries": [],
             "ranked": [],
@@ -242,32 +244,34 @@ async def test_a_full_run_fans_out_ranks_and_persists(
     )
 
     assert len(result["summaries"]) == 3, "no carrier payload among the summaries"
-    assert [r["rank"] for r in result["ranked"]] == [1, 2, 3]
-    assert result["rank_usage"] == {"tokens_in": 100, "tokens_out": 40}
+    assert [item["position"] for item in result["ranked"]] == [1, 2, 3]
+    # Three shuffled rank calls, so three times the tokens of one.
+    assert result["rank_usage"] == {"tokens_in": 300, "tokens_out": 120}
 
     stored = list((await session.execute(select(Summary))).scalars())
     assert len(stored) == 3
     assert {s.language for s in stored} == {"tr"}
     assert {s.article_id for s in stored} == set(ids)
-
-    # The ranker answered with candidate numbers 2, 1, 3 against the table it was
-    # shown, so the ranks have to follow that table's order rather than the order
-    # articles happen to sit in the database.
-    shown = [s["article_id"] for s in result["summaries"]]
-    by_article = {s.article_id: s.rank for s in stored}
-    assert by_article[shown[1]] == 1
-    assert by_article[shown[0]] == 2
-    assert by_article[shown[2]] == 3
-    # And the editor's score travels with the pick (ADR 0025): the summariser
-    # said 4 for every story, the ranker said 5, 4, 3 for its three picks.
-    editor = {s.article_id: s.editor_importance for s in stored}
-    assert (editor[shown[1]], editor[shown[0]], editor[shown[2]]) == (5, 4, 3)
     assert all(s.importance == 4 for s in stored), "the summariser's own score is untouched"
+    assert all(s.est_cost_usd > 0 for s in stored), "a summary carries what it cost"
+
+    # The bulletin is the published object, and the run is what made it.
+    bulletin = (await session.execute(select(Bulletin))).scalar_one()
+    assert (bulletin.day, bulletin.language, bulletin.version) == (local_day(), "tr", 1)
+    assert bulletin.editor_note == "Ucuz modeller gunu."
+    assert bulletin.run_id == run.id
+    items = list(
+        (await session.execute(select(BulletinItem).order_by(BulletinItem.position))).scalars()
+    )
+    # Every reading answered "2, 1, 3" against its own shuffled table, so the
+    # three disagree about the day and Borda picks one order. What must hold is
+    # that a tier reached the row and exactly one story leads.
+    assert [item.tier for item in items].count("lead") <= 1
+    assert len(items) == 3
 
     await session.refresh(run)
     assert run.status == "ok"
     assert run.n_summarized == 3
-    assert run.editor_note == "Ucuz modeller gunu."
     assert run.tokens_in > 0
     assert run.est_cost_usd > 0
 
@@ -288,7 +292,7 @@ async def test_one_failing_article_does_not_fail_the_run(
         lambda *_: FakeLLM(
             RankedDigest(
                 editor_note="Gun ozeti.",
-                picks=[Pick(number=1, importance=4), Pick(number=2, importance=3)],
+                picks=[Pick(number=1, tier="lead"), Pick(number=2, tier="major")],
             )
         ),
     )
@@ -302,6 +306,7 @@ async def test_one_failing_article_does_not_fail_the_run(
         {
             "run_id": run.id,
             "language": "en",
+            "day": local_day(),
             "candidate_ids": [],
             "summaries": [],
             "ranked": [],
@@ -332,6 +337,7 @@ async def test_a_run_with_nothing_to_summarise_still_closes(
         {
             "run_id": run.id,
             "language": "tr",
+            "day": local_day(),
             "candidate_ids": [],
             "summaries": [],
             "ranked": [],
@@ -367,43 +373,81 @@ async def test_rank_tokens_are_priced_at_the_rank_model(
     split = settings.model_copy(
         update={"openai_model": "gpt-5.6-terra", "openai_model_summarize": "gpt-5.6-luna"}
     )
+    summary = Summary(
+        article_id=art.id,
+        language="en",
+        title_local="t",
+        summary="s",
+        why_it_matters="w",
+        importance=3,
+        model="gpt-5.6-luna",
+        tokens_in=1000,
+        tokens_out=100,
+        est_cost_usd=estimate_cost("gpt-5.6-luna", 1000, 100),
+    )
+    session.add(summary)
+    await session.commit()
+
     state = {
         "run_id": run.id,
         "language": "en",
+        "day": local_day(),
         "summaries": [
             {
+                "summary_id": summary.id,
                 "article_id": art.id,
-                "title_local": "t",
-                "summary": "s",
-                "why_it_matters": "w",
-                "tags": [],
-                "importance": 3,
                 "tokens_in": 1000,
                 "tokens_out": 100,
+                "est_cost_usd": summary.est_cost_usd,
             },
         ],
         "rank_usage": {"tokens_in": 5000, "tokens_out": 300},
-        "ranked": [{"article_id": art.id, "rank": 1, "importance": 3}],
+        "ranked": [{"summary_id": summary.id, "position": 1, "tier": "lead", "reason": ""}],
         "errors": [],
     }
     await persist_run(session, state, split)  # type: ignore[arg-type]
 
     await session.refresh(run)
-    expected = estimate_cost("gpt-5.6-luna", 1000, 100) + estimate_cost("gpt-5.6-terra", 5000, 300)
+    rank_cost = estimate_cost("gpt-5.6-terra", 5000, 300)
+    expected = estimate_cost("gpt-5.6-luna", 1000, 100) + rank_cost
     assert run.est_cost_usd == pytest.approx(expected)
     assert run.est_cost_usd > estimate_cost("gpt-5.6-luna", 6000, 400), (
         "priced everything as luna: the old, wrong number"
     )
     assert (run.tokens_in, run.tokens_out) == (6000, 400)
+    # The bulletin carries the ranking it bought and nothing else: a summary
+    # carries its own spend, so the same dollar is not on two rows.
+    bulletin = (await session.execute(select(Bulletin))).scalar_one()
+    assert bulletin.est_cost_usd == pytest.approx(rank_cost)
 
 
 # -- ranking fallbacks --------------------------------------------------------
 
 
-async def test_ranking_falls_back_to_importance_when_the_model_fails(
+def _candidates(pairs: list[tuple[int, int]]) -> list[Any]:
+    from ainews.pipeline.nodes.rank import Candidate
+
+    return [
+        Candidate(
+            summary_id=summary_id,
+            article_id=summary_id,
+            source="A",
+            weight=1.0,
+            title="t",
+            summary="s",
+            why_it_matters="w",
+            importance=importance,
+            kind="news",
+            age_hours=1.0,
+        )
+        for summary_id, importance in pairs
+    ]
+
+
+async def test_ranking_falls_back_to_importance_when_every_call_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The digest ships even when the ranker does not."""
+    """The bulletin ships even when the ranker does not."""
 
     class Broken:
         def with_structured_output(self, *_: object, **__: object) -> Any:
@@ -411,18 +455,13 @@ async def test_ranking_falls_back_to_importance_when_the_model_fails(
 
     monkeypatch.setattr(rank_module, "ranker", lambda *_: Broken())
 
-    summaries = [
-        {"article_id": 1, "importance": 2, "title_local": "a", "summary": "s"},
-        {"article_id": 2, "importance": 5, "title_local": "b", "summary": "s"},
-        {"article_id": 3, "importance": 3, "title_local": "c", "summary": "s"},
-    ]
-    meta = {1: ("A", 1.0), 2: ("B", 1.0), 3: ("C", 1.0)}
-    ranking = await rank_module.rank_summaries(summaries, meta, "tr")  # type: ignore[arg-type]
+    ranking = await rank_module.rank_day(_candidates([(1, 2), (2, 5), (3, 3)]), "tr")
 
     assert ranking.order == [2, 3, 1]
-    assert ranking.importance == {2: 5, 3: 3, 1: 2}, "the summariser's scores stand"
     assert "modelsiz" in ranking.editor_note
     assert (ranking.tokens_in, ranking.tokens_out) == (0, 0)
+    # No reading agreed with anything, and the page has to be able to say so.
+    assert ranking.agreement is None
 
 
 async def test_out_of_range_positions_from_the_model_are_dropped(
@@ -435,18 +474,16 @@ async def test_out_of_range_positions_from_the_model_are_dropped(
         lambda *_: FakeLLM(
             RankedDigest(
                 editor_note="n",
-                picks=[Pick(number=n, importance=3) for n in (2, 99, 2, 1)],
+                picks=[Pick(number=n, tier="major") for n in (2, 99, 2, 1)],
             )
         ),
     )
-    summaries = [
-        {"article_id": 10, "importance": 3, "title_local": "a", "summary": "s"},
-        {"article_id": 20, "importance": 3, "title_local": "b", "summary": "s"},
-    ]
-    meta = {10: ("A", 1.0), 20: ("B", 1.0)}
-    ranking = await rank_module.rank_summaries(summaries, meta, "en")  # type: ignore[arg-type]
+    result = await rank_module.rank_once(
+        _candidates([(10, 3), (20, 3)]), "en", top_n=2, previous=[]
+    )
 
-    assert ranking.order == [20, 10], "99 is out of range and the repeated 2 is a duplicate"
+    assert result is not None
+    assert result.order == [20, 10], "99 is out of range and the repeated 2 is a duplicate"
 
 
 # -- stubs --------------------------------------------------------------------

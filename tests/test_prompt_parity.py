@@ -84,13 +84,16 @@ def test_the_summarisers_limits_are_the_same_number_in_both() -> None:
 
 
 def test_the_ranker_asks_for_the_same_shape_in_both() -> None:
-    """ADR 0025 gave the ranker `picks` of `{number, importance}`. A prompt still
-    asking for a bare order would return a `RankedDigest` with no corrected
-    scores, and the page draws its headline sizes from those."""
+    """The ranker returns `picks` of `{number, tier, reason}` (ADR 0030), and
+    the page draws its headline sizes from the tier. A prompt still asking for a
+    bare order would return a `RankedDigest` whose tiers the model never chose,
+    and every story would draw at the schema's default."""
     for language in LANGUAGES:
         body = _read("rank", language)
-        for field in ("number", "importance", "editor_note", "top_n"):
+        for field in ("number", "tier", "reason", "editor_note", "top_n", "previous"):
             assert field in body, f"rank/{language} does not mention {field}"
+        for tier in ("lead", "major", "notable", "brief"):
+            assert tier in body, f"rank/{language} does not name the tier {tier}"
 
 
 @pytest.mark.parametrize("name", PARALLEL)

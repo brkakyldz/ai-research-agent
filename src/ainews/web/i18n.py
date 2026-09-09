@@ -54,11 +54,6 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
             "Şu an özetlenmeyi bekleyen haber yok; tarama yenisini bulmazsa bu baskı boş kalır."
         ),
         "confirm_cost": "Son çalışma {c} tuttu.",
-        # The offer to finish a failed run from its checkpoint. `{step}` is the
-        # node it stopped at, in the run detail page's own words.
-        "resume_what": "{when} çalışması {step} adımında durdu; özetleri saklandı.",
-        "resume_yes": "Kaldığı yerden devam et",
-        "resume_gone": "Bu çalışma artık devam ettirilemez",
         # The one choice the press carries. It is asked here, next to the money,
         # because this is where the language is actually decided: the switch in
         # the bar translates the interface and nothing else (ADR 0017).
@@ -198,6 +193,13 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "search": "Ara",
         "all_tags": "Hepsi",
         "show_others": "Diğer {n} haberi göster",
+        # The heading over the day's unpublished summaries. It exists because
+        # those draw at the summariser's own 1-5 and the bulletin above draws at
+        # the editor's tier; without a line between them the reader compares two
+        # scales by eye (ADR 0030).
+        "others_label": "Editörün seçmedikleri",
+        "superseded": "Bu bültenin daha yeni bir sürümü var.",
+        "superseded_go": "Güncel sürüme git",
         "all_summarised": "Hepsi özetlendi · arşivde ve aramada",
         # The press is on `/runs` since ADR 0015; this sentence still pointed at a
         # refresh button "above" that the bar no longer carries.
@@ -206,7 +208,7 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
             "yeni haberleri özetler ve günün notunu yazar."
         ),
         "empty_search": "Bu arama için sonuç yok.",
-        "empty_archive": "Arşivde henüz çalışma yok.",
+        "empty_archive": "Arşivde henüz bülten yok.",
         "runs_heading": "Çalışmalar",
         "sources_heading": "Kaynaklar",
         "archive_heading": "Arşiv",
@@ -290,9 +292,6 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
             "produces an empty bulletin."
         ),
         "confirm_cost": "The last run cost {c}.",
-        "resume_what": "The run of {when} stopped at {step}; its summaries are kept.",
-        "resume_yes": "Pick up where it stopped",
-        "resume_gone": "That run can no longer be resumed",
         "out_language": "Bulletin language",
         "model_summarize": "Summary model",
         "model_rank": "Ranking model",
@@ -397,13 +396,16 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "search": "Search",
         "all_tags": "All",
         "show_others": "Show the other {n}",
+        "others_label": "Not in the bulletin",
+        "superseded": "A newer version of this bulletin exists.",
+        "superseded_go": "Go to the current version",
         "all_summarised": "All summarised · in the archive and in search",
         "empty_digest": (
             "No digest yet. Run now, on the Runs page, polls the feeds, summarises what is "
             "new and writes the day's note."
         ),
         "empty_search": "Nothing matches that search.",
-        "empty_archive": "No runs in the archive yet.",
+        "empty_archive": "No bulletins in the archive yet.",
         "runs_heading": "Runs",
         "sources_heading": "Sources",
         "archive_heading": "Archive",

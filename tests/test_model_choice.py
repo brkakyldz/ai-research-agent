@@ -21,8 +21,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from ainews.clock import local_day
 from ainews.config import Settings
-from ainews.db import Article, Run, Source
+from ainews.db import Article, Run, Source, Summary
 from ainews.pipeline.pricing import (
     MODEL_NAMES,
     estimate_cost,
@@ -194,11 +195,11 @@ async def test_the_chosen_model_reaches_the_summarise_call(
     assert result["errors"], "a failed branch is an error, not a crash"
 
 
-async def test_a_send_written_before_the_choice_existed_still_runs(
+async def test_a_send_with_no_model_falls_back_to_the_configured_summariser(
     monkeypatch: pytest.MonkeyPatch, session: AsyncSession, settings: Settings
 ) -> None:
-    """A checkpoint from before ADR 0020 has no `model` key. Resuming it must
-    fall back to the configured summariser, which is what it was using."""
+    """`SummarizeTask.model` is optional, and a caller that did not choose one
+    meant the environment's default."""
     from ainews.pipeline.nodes import summarize as summarize_module
 
     src = Source(name="Lab", url="https://lab.dev/feed")
@@ -221,7 +222,7 @@ async def test_a_send_written_before_the_choice_existed_still_runs(
     task = {"run_id": "r", "language": "en", "article_id": art.id}
     await summarize_module.summarize_article(task, settings)  # type: ignore[arg-type]
 
-    assert asked == [None], "no model on the task means the factory's own default"
+    assert asked == [settings.openai_model_summarize]
 
 
 async def test_the_run_row_is_priced_at_the_models_that_ran(
@@ -246,27 +247,39 @@ async def test_the_run_row_is_priced_at_the_models_that_ran(
     session.add_all([art, run])
     await session.commit()
 
-    def payload(article_id: int, tin: int, tout: int) -> dict[str, Any]:
-        return {
-            "article_id": article_id,
-            "title_local": "t",
-            "summary": "s",
-            "why_it_matters": "w",
-            "tags": [],
-            "importance": 3,
-            "tokens_in": tin,
-            "tokens_out": tout,
-        }
+    summary = Summary(
+        article_id=art.id,
+        language="en",
+        title_local="t",
+        summary="s",
+        why_it_matters="w",
+        importance=3,
+        model=TERRA,
+        tokens_in=1000,
+        tokens_out=100,
+        est_cost_usd=estimate_cost(TERRA, 1000, 100),
+    )
+    session.add(summary)
+    await session.commit()
 
     state = {
         "run_id": run.id,
         "language": "en",
+        "day": local_day(),
         # Both settings say luna; the run says otherwise and the run is right.
         "model_summarize": TERRA,
         "model_rank": LUNA,
-        "summaries": [payload(art.id, 1000, 100)],
+        "summaries": [
+            {
+                "summary_id": summary.id,
+                "article_id": art.id,
+                "tokens_in": 1000,
+                "tokens_out": 100,
+                "est_cost_usd": summary.est_cost_usd,
+            }
+        ],
         "rank_usage": {"tokens_in": 5000, "tokens_out": 300},
-        "ranked": [{"article_id": art.id, "rank": 1, "importance": 3}],
+        "ranked": [{"summary_id": summary.id, "position": 1, "tier": "lead", "reason": ""}],
         "errors": [],
     }
     await persist_run(session, state, settings)  # type: ignore[arg-type]
@@ -290,14 +303,6 @@ async def test_run_digest_resolves_both_models_before_it_opens_the_run(
             seen.update(initial)
             return initial
 
-    class _FakeSaver:
-        async def __aenter__(self) -> _FakeSaver:
-            return self
-
-        async def __aexit__(self, *_: object) -> None:
-            return None
-
-    monkeypatch.setattr(runner_module.AsyncSqliteSaver, "from_conn_string", lambda *_: _FakeSaver())
     monkeypatch.setattr(
         runner_module, "build_graph", lambda: SimpleNamespace(compile=lambda **_: _FakeApp())
     )

@@ -14,9 +14,10 @@ from __future__ import annotations
 import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.factories import publish
 
 from ainews.config import Settings
-from ainews.db import Article, Run, Source, Summary
+from ainews.db import Article, Source, Summary
 from ainews.evals import judge as judge_module
 from ainews.evals.judge import UNATTRIBUTED, Candidate, Outcome, _detail
 from ainews.pipeline.nodes import enrich as enrich_module
@@ -165,7 +166,7 @@ def test_both_prompts_explain_the_marker(language: str) -> None:
 def _outcome(passed: bool, body_source: str | None, claim: str | None = None) -> Outcome:
     candidate = Candidate(
         summary_id=1,
-        run_id="r",
+        bulletin_id=1,
         article_id=1,
         source="Simon Willison",
         title="t",
@@ -203,23 +204,19 @@ async def test_the_judge_reads_the_article_and_not_the_web_context(
     article = await _article(session, "The article itself.")
     article.extra_text = TAVILY_NOISE
     article.body_source = "feed"
-    run = Run(kind="digest", language="tr")
-    session.add(run)
-    await session.flush()
-    session.add(
-        Summary(
-            article_id=article.id,
-            run_id=run.id,
-            language="tr",
-            title_local="x",
-            summary="y",
-            why_it_matters="z",
-            importance=3,
-        )
+    summary = Summary(
+        article_id=article.id,
+        language="tr",
+        title_local="x",
+        summary="y",
+        why_it_matters="z",
+        importance=3,
     )
+    session.add(summary)
     await session.commit()
+    bulletin = await publish(session, [summary.id])
 
-    candidates = await judge_module.load_candidates(session, run.id)
+    candidates = await judge_module.load_candidates(session, bulletin.id)
 
     assert len(candidates) == 1
     assert candidates[0].body == "The article itself."

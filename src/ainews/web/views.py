@@ -21,7 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, Settings, get_settings
-from ainews.db import Run, Source, Summary
+from ainews.db import Bulletin, BulletinItem, Run, Source
 from ainews.pipeline.api import digest_in_flight
 from ainews.web import queries
 from ainews.web.format import format_gap, format_stamp_long
@@ -81,44 +81,44 @@ class Rail:
 
 def build_header(
     language: Language,
-    run: Run | None,
+    bulletin: Bulletin | None,
     n_sources: int,
     n_stories: int | None,
 ) -> Header:
     """Pure: `shell_context` has already paid for every number in here.
 
     It used to take three of them as optional and fetch each one itself when it
-    was not given, which read as a convenience and worked out as a second copy of
-    `latest_finished_run` on every page render. Its only caller has the run, the
-    count and the source total in hand.
+    was not given, which read as a convenience and worked out as a second copy
+    of the same lookup on every page render. Its only caller has the bulletin,
+    the count and the source total in hand.
     """
     return Header(
-        # No run, no stamp: the bar used to show the current time, which is a
-        # number nobody measured dressed as one somebody did.
-        stamp=format_stamp_long(run.started_at, language) if run else None,
+        # No bulletin, no stamp: the bar used to show the current time, which is
+        # a number nobody measured dressed as one somebody did.
+        stamp=format_stamp_long(bulletin.created_at, language) if bulletin else None,
         n_stories=n_stories,
         n_sources=n_sources,
-        bulletin_language=(run.language if run is not None and run.language != language else None),
+        bulletin_language=(
+            bulletin.language if bulletin is not None and bulletin.language != language else None
+        ),
     )
 
 
-async def count_ranked(session: AsyncSession, run: Run) -> int:
-    """How many stories the digest actually holds.
+async def count_items(session: AsyncSession, bulletin: Bulletin) -> int:
+    """How many stories the bulletin actually holds.
 
-    A `COUNT`, not `min(run.n_summarized, digest_top_n)`. That arithmetic is a
-    guess, and on any day the ranker returns fewer than the cap it is the wrong
-    one: a run that summarised 136 and ranked 11 drew eleven stories under a
-    rail badge reading 15 and a footnote reading "15 haber".
-
-    `digest_top_n` is a ceiling the ranker is asked to respect, not a promise it
-    made. The number of stories on the page is a count, so it is counted.
+    A `COUNT`, not `min(n_summarized, digest_top_n)`. That arithmetic is a guess
+    and on any day the ranker returns fewer than the cap it is the wrong one: a
+    run that summarised 136 and ranked 11 drew eleven stories under a rail badge
+    reading 15 and a footnote reading "15 haber". `digest_top_n` is a ceiling
+    the ranker is asked to respect and now explicitly told it need not reach
+    (`prompts/*/rank.md`), so the number on the page is counted.
     """
     return (
         await session.execute(
             select(func.count())
-            .select_from(Summary)
-            .where(Summary.run_id == run.id)
-            .where(Summary.rank.isnot(None))
+            .select_from(BulletinItem)
+            .where(BulletinItem.bulletin_id == bulletin.id)
         )
     ).scalar_one()
 
@@ -243,33 +243,32 @@ async def shell_context(
     session: AsyncSession,
     language: Language,
     page: str,
-    run: Run | None = None,
+    bulletin: Bulletin | None = None,
 ) -> dict[str, object]:
     """`base_context` plus the things the shell reads from the database.
 
     One helper because the rail and the status strip need the same source count,
     and paying for it twice on every page would be the only cost of splitting.
 
-    The advice is built first, which is not an ordering preference. `advice.last`
-    *is* the latest finished bulletin run, and `latest_finished_run()` asks for
-    the same row with the same query - so every page in the app used to run that
-    lookup twice, on a table it also scans for `last_success_at` and the archive
-    count. Building the advice first means the second lookup is a dictionary
-    read, and it cannot disagree with the first.
+    The advice is built first, which is not an ordering preference: the rail's
+    foot on every page and the block at the head of `/runs` read the same
+    object, so building it here is what stops the two disagreeing.
+
+    A page that is not about one bulletin - `/sources`, `/search` - passes none
+    and the shell falls back to the current one, because the bar's stamp and the
+    rail's story count describe what the reader would see on the front page
+    rather than what they are looking at.
     """
     n_sources = await count_enabled_sources(session)
-    # One advice object, three readers now: the rail's foot on every page, the
-    # block at the head of `/runs`, and the run the header is drawn from. It is
-    # built here so none of the three can disagree.
     context = base_context(request, language, page)
-    context["advice"] = advice = await build_advice(session, language)
-    if run is None:
-        run = advice.last
+    context["advice"] = await build_advice(session, language)
+    if bulletin is None:
+        bulletin = await queries.latest_bulletin(session)
     # One count, two readers. The rail badge and the brief's footnote are the
     # same number and used to be arrived at twice by the same wrong formula.
-    n_stories = await count_ranked(session, run) if run is not None else None
-    context["header"] = build_header(language, run, n_sources, n_stories)
-    context["rail"] = await build_rail(session, language, advice, n_sources, n_stories)
+    n_stories = await count_items(session, bulletin) if bulletin is not None else None
+    context["header"] = build_header(language, bulletin, n_sources, n_stories)
+    context["rail"] = await build_rail(session, language, context["advice"], n_sources, n_stories)
     return context
 
 

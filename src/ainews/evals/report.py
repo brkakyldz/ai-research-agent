@@ -21,12 +21,13 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ainews.clock import day_bounds
 from ainews.config import PROJECT_ROOT, Settings, get_settings
-from ainews.db import EvalResult, Run, Summary, Verdict, bulletin_runs
+from ainews.db import Bulletin, BulletinItem, EvalResult, Summary, Verdict
 from ainews.db.models import utcnow
 from ainews.evals import checks
 from ainews.evals.judge import Calibration, calibrate
-from ainews.evals.record import record_run
+from ainews.evals.record import record_bulletin
 
 DEFAULT_PATH = PROJECT_ROOT / "docs" / "evals.md"
 HEADER = """# Evaluation record
@@ -48,10 +49,12 @@ def parse_since(text: str) -> int:
 
 
 @dataclass(slots=True)
-class RunReport:
-    run_id: str
+class BulletinReport:
+    bulletin_id: int
+    day: str
+    version: int
     language: str
-    started_at: str
+    agreement: float | None
     n_stories: int
     n_ranked: int
     product_cost: float
@@ -60,7 +63,7 @@ class RunReport:
     tags: dict[str, Any]
     importance: dict[int, float]
     overlap: dict[str, Any]
-    shift: dict[str, Any]
+    tiers: dict[str, Any]
     unrepresented: list[int]
     editor_note: dict[str, Any]
     verdicts: dict[str, int]
@@ -72,19 +75,35 @@ class RunReport:
 class Report:
     since_days: int
     generated_at: str
-    runs: list[RunReport] = field(default_factory=list)
+    bulletins: list[BulletinReport] = field(default_factory=list)
     calibration: Calibration | None = None
     n_labels: int = 0
     product_cost: float = 0.0
     eval_cost: float = 0.0
 
 
-async def _verdict_counts(session: AsyncSession, run_id: str, n_stories: int) -> dict[str, int]:
+async def _verdict_counts(
+    session: AsyncSession, bulletin: Bulletin, n_stories: int
+) -> dict[str, int]:
+    """The reader's calls on the stories this bulletin's day produced.
+
+    The day and not the bulletin: a verdict can be given on a story the editor
+    left out - the page offers the two words on every rendered item - and those
+    labels are exactly as useful to calibration as the published ones.
+    """
+    start, end = day_bounds(bulletin.day)
+    in_bulletin = (
+        select(BulletinItem.id)
+        .where(BulletinItem.summary_id == Summary.id)
+        .where(BulletinItem.bulletin_id == bulletin.id)
+        .exists()
+    )
     rows = (
         await session.execute(
             select(Verdict.verdict, func.count())
             .join(Summary, Summary.id == Verdict.summary_id)
-            .where(Summary.run_id == run_id)
+            .where(Summary.language == bulletin.language)
+            .where(in_bulletin | ((Summary.created_at >= start) & (Summary.created_at < end)))
             .group_by(Verdict.verdict)
         )
     ).all()
@@ -95,12 +114,12 @@ async def _verdict_counts(session: AsyncSession, run_id: str, n_stories: int) ->
     return counts
 
 
-async def _judge_summary(session: AsyncSession, run_id: str) -> dict[str, Any] | None:
+async def _judge_summary(session: AsyncSession, bulletin_id: int) -> dict[str, Any] | None:
     rows = list(
         (
             await session.execute(
                 select(EvalResult)
-                .where(EvalResult.run_id == run_id)
+                .where(EvalResult.bulletin_id == bulletin_id)
                 .where(EvalResult.kind == "grounding")
             )
         ).scalars()
@@ -123,13 +142,13 @@ async def _judge_summary(session: AsyncSession, run_id: str) -> dict[str, Any] |
     }
 
 
-async def _stability_summary(session: AsyncSession, run_id: str) -> dict[str, Any] | None:
+async def _stability_summary(session: AsyncSession, bulletin_id: int) -> dict[str, Any] | None:
     import json
 
     row = (
         await session.execute(
             select(EvalResult)
-            .where(EvalResult.run_id == run_id)
+            .where(EvalResult.bulletin_id == bulletin_id)
             .where(EvalResult.kind == "rank_stability")
             .order_by(EvalResult.created_at.desc(), EvalResult.id.desc())
             .limit(1)
@@ -171,51 +190,61 @@ async def build_report(
     session: AsyncSession,
     since_days: int = 30,
     settings: Settings | None = None,
-    run_id: str | None = None,
+    bulletin_id: int | None = None,
 ) -> Report:
-    """Every measured number for the runs in the window, or for one run.
+    """Every measured number for the bulletins in the window, or for one of them.
 
-    `run_id` narrows the per-run sections to one run; the window still bounds
-    the spend totals and the calibration reads every label there is. It exists
-    because the record was growing by the *report* count rather than the run
-    count: three sections in `docs/evals.md` carried the 2026-09-04 run three
-    times, its deterministic rows identical in all three.
+    `bulletin_id` narrows the per-bulletin sections to one; the window still
+    bounds the spend totals and the calibration reads every label there is. It
+    exists because the record was growing by the *report* count rather than the
+    bulletin count: three sections in `docs/evals.md` carried the 2026-09-04 day
+    three times, its deterministic rows identical in all three.
     """
     settings = settings or get_settings()
     horizon = utcnow() - timedelta(days=since_days)
     report = Report(since_days=since_days, generated_at=utcnow().strftime("%Y-%m-%d %H:%M UTC"))
 
-    query = bulletin_runs().where(Run.n_summarized > 0).where(Run.started_at >= horizon)
-    if run_id is not None:
-        query = query.where(Run.id == run_id)
-    runs = list((await session.execute(query)).scalars())
-    for run in runs:
-        fixture = await record_run(session, run.id, settings)
+    query = (
+        select(Bulletin)
+        .where(Bulletin.created_at >= horizon)
+        .order_by(Bulletin.day.desc(), Bulletin.version.desc())
+    )
+    if bulletin_id is not None:
+        query = query.where(Bulletin.id == bulletin_id)
+    bulletins = list((await session.execute(query)).scalars())
+    for bulletin in bulletins:
+        fixture = await record_bulletin(session, bulletin.id, settings)
         stories = fixture["stories"]
-        report.runs.append(
-            RunReport(
-                run_id=run.id,
-                language=run.language,
-                started_at=run.started_at.strftime("%Y-%m-%d"),
+        report.bulletins.append(
+            BulletinReport(
+                bulletin_id=bulletin.id,
+                day=bulletin.day,
+                version=bulletin.version,
+                language=bulletin.language,
+                agreement=bulletin.agreement,
                 n_stories=len(stories),
                 n_ranked=len(checks.ranked_order(stories)),
-                product_cost=run.est_cost_usd,
+                # What the day cost: the ranking on the bulletin, plus every
+                # summary it drew on. A summary carries its own spend now, so
+                # this is a sum rather than a run total that included stories
+                # published on another day.
+                product_cost=bulletin.est_cost_usd + await _summary_cost(session, bulletin),
                 budget=checks.word_budget(stories),
                 ungrounded=checks.ungrounded_numerals(stories),
                 tags=checks.tag_vocabulary(stories),
                 importance=checks.importance_distribution(stories),
                 overlap=checks.ranker_vs_fallback(stories),
-                shift=checks.editor_shift(stories),
+                tiers=checks.tier_shape(stories),
                 unrepresented=checks.unrepresented_fives(stories),
-                editor_note=checks.editor_note_shape(run.editor_note),
-                verdicts=await _verdict_counts(session, run.id, len(stories)),
-                judge=await _judge_summary(session, run.id),
-                stability=await _stability_summary(session, run.id),
+                editor_note=checks.editor_note_shape(bulletin.editor_note),
+                verdicts=await _verdict_counts(session, bulletin, len(stories)),
+                judge=await _judge_summary(session, bulletin.id),
+                stability=await _stability_summary(session, bulletin.id),
             )
         )
 
     report.calibration, report.n_labels = await _calibration(session)
-    report.product_cost = sum(r.product_cost for r in report.runs)
+    report.product_cost = sum(b.product_cost for b in report.bulletins)
     report.eval_cost = float(
         (
             await session.execute(
@@ -228,6 +257,21 @@ async def build_report(
     return report
 
 
+async def _summary_cost(session: AsyncSession, bulletin: Bulletin) -> float:
+    """What the day's summaries cost, published or not."""
+    start, end = day_bounds(bulletin.day)
+    return float(
+        (
+            await session.execute(
+                select(func.coalesce(func.sum(Summary.est_cost_usd), 0.0))
+                .where(Summary.language == bulletin.language)
+                .where(Summary.created_at >= start)
+                .where(Summary.created_at < end)
+            )
+        ).scalar_one()
+    )
+
+
 # -- rendering ----------------------------------------------------------------
 
 
@@ -235,11 +279,13 @@ def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.1%}"
 
 
-def render_run(run: RunReport) -> list[str]:
+def render_bulletin(run: BulletinReport) -> list[str]:
     budget = run.budget
+    version = "" if run.version == 1 else f" v{run.version}"
+    agreement = "n/a" if run.agreement is None else f"{run.agreement:.2f}"
     lines = [
-        f"### Run `{run.run_id[:8]}` · {run.language} · {run.started_at} · "
-        f"{run.n_stories} stories, {run.n_ranked} ranked",
+        f"### Bulletin {run.day}{version} · {run.language} · "
+        f"{run.n_ranked} published of {run.n_stories} summarised · agreement {agreement}",
         "",
         "| Measure | Value | Function |",
         "|---|---|---|",
@@ -260,9 +306,10 @@ def render_run(run: RunReport) -> list[str]:
         f"| `checks.importance_distribution` |",
         f"| Ranker vs fallback overlap | {run.overlap['overlap']} of {run.overlap['top_n']} "
         f"| `checks.ranker_vs_fallback` |",
-        f"| Editor's corrections | {run.shift['n_changed']} of {run.shift['n_ranked']} ranked "
-        f"({run.shift['up']} up, {run.shift['down']} down), mean shift "
-        f"{run.shift['mean_abs_shift']:.2f} | `checks.editor_shift` |",
+        f"| Tiers | {' / '.join(f'{t} {n}' for t, n in run.tiers['counts'].items())} "
+        f"| `checks.tier_shape` |",
+        f"| Editor against the free order | {run.tiers['contradictions']} inverted pair(s), "
+        f"{_pct(run.tiers['contradiction_share'])} | `checks.tier_shape` |",
         f"| Unrepresented fives | {run.unrepresented or 'none'} | `checks.unrepresented_fives` |",
         f"| Editor's note | {run.editor_note['paragraphs']} paragraph(s), "
         f"{run.editor_note['words']} words | `checks.editor_note_shape` |",
@@ -275,12 +322,12 @@ def render_run(run: RunReport) -> list[str]:
         lines.append(
             f"| Judge pass rate on the sample | {_pct(rate)} ({j['passed']} passed, "
             f"{j['failed']} failed, {j['unparsed']} unparsed of {j['n']}, {j['model']}) "
-            f"| `judge.judge_run` |"
+            f"| `judge.judge_bulletin` |"
         )
         for claim in j["claims"]:
             lines.append(f"| ↳ unsupported claim | {claim} | `judge.judge_one` |")
     else:
-        lines.append("| Judge pass rate on the sample | not judged | `judge.judge_run` |")
+        lines.append("| Judge pass rate on the sample | not judged | `judge.judge_bulletin` |")
     if run.stability:
         s = run.stability
         fallback = f", {s['n_fallback']} fell back" if s["n_fallback"] else ""
@@ -290,7 +337,10 @@ def render_run(run: RunReport) -> list[str]:
         )
     else:
         lines.append("| Rank stability | not probed | `stability.rank_stability` |")
-    lines.append(f"| Product spend | ${run.product_cost:.4f} | `Run.est_cost_usd` |")
+    lines.append(
+        f"| Product spend | ${run.product_cost:.4f} "
+        f"| `Bulletin.est_cost_usd` + `Summary.est_cost_usd` |"
+    )
     lines.append("")
     return lines
 
@@ -298,27 +348,29 @@ def render_run(run: RunReport) -> list[str]:
 def render_markdown(report: Report, existing: str = "") -> str:
     """The section, as it will be appended.
 
-    `existing` is the record so far. A run whose block would be byte-identical
-    to one already in it is written as one line pointing back rather than
-    repeated: the record is immutable, but an immutable record that restates
-    itself every time it is asked grows by the report count instead of the run
-    count, and after a month nobody can find the section where a number moved.
+    `existing` is the record so far. A bulletin whose block would be
+    byte-identical to one already in it is written as one line pointing back
+    rather than repeated: the record is immutable, but an immutable record that
+    restates itself every time it is asked grows by the report count instead of
+    the bulletin count, and after a month nobody can find the section where a
+    number moved.
     """
     lines = [
         f"## {report.generated_at} — last {report.since_days} days",
         "",
-        f"Product spend **${report.product_cost:.4f}** across {len(report.runs)} run(s); "
-        f"eval spend **${report.eval_cost:.4f}** (`Run.est_cost_usd`, `EvalResult.est_cost_usd`).",
+        f"Product spend **${report.product_cost:.4f}** across "
+        f"{len(report.bulletins)} bulletin(s); eval spend **${report.eval_cost:.4f}** "
+        "(`Bulletin.est_cost_usd`, `Summary.est_cost_usd`, `EvalResult.est_cost_usd`).",
         "",
     ]
-    for run in report.runs:
-        block = render_run(run)
+    for bulletin in report.bulletins:
+        block = render_bulletin(bulletin)
         if existing and "\n".join(block[2:]) in existing:
             lines.extend([block[0], "", "Unchanged since an earlier section.", ""])
         else:
             lines.extend(block)
-    if not report.runs:
-        lines.extend(["No digest run in the window.", ""])
+    if not report.bulletins:
+        lines.extend(["No bulletin in the window.", ""])
 
     lines.append("### Judge calibration")
     lines.append("")

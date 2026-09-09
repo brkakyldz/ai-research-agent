@@ -83,7 +83,6 @@ async def test_every_timestamped_table_reads_back_aware(
     await session.flush()
     session.add(
         Summary(
-            run_id=run.id,
             article_id=article.id,
             language="tr",
             title_local="t",

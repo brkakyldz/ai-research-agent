@@ -66,7 +66,7 @@
             <td>{{ f.judged_at|clock }}</td>
             <td lang="en">{{ f.source }}</td>
             <td class="strong story">
-              <a href="/archive?lang={{ language }}&amp;run={{ f.run_id }}&amp;all=1#story-{{ f.summary_id }}">{{ f.title_local }}</a>
+              {% if f.bulletin_id %}<a href="/archive?lang={{ language }}&amp;b={{ f.bulletin_id }}&amp;all=1#story-{{ f.summary_id }}">{{ f.title_local }}</a>{% else %}{{ f.title_local }}{% endif %}
             </td>
             <td class="note claim">{{ f.claim }}</td>
             {# The words swap themselves and only themselves: the target is the
@@ -108,7 +108,7 @@
                below the fold, and the archive would otherwise render a page
                with no such anchor in it. #}
             <td class="strong story">
-              <a href="/archive?lang={{ language }}&amp;run={{ label.run_id }}&amp;all=1#story-{{ label.summary_id }}">{{ label.title_local }}</a>
+              {% if label.bulletin_id %}<a href="/archive?lang={{ language }}&amp;b={{ label.bulletin_id }}&amp;all=1#story-{{ label.summary_id }}">{{ label.title_local }}</a>{% else %}{{ label.title_local }}{% endif %}
             </td>
             <td class="verdict{% if label.verdict == 'wrong' %} bad{% endif %}">
               {{ t['verdict_' ~ label.verdict] }}

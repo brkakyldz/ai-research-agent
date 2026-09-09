@@ -1,32 +1,83 @@
-"""The persist step: write the summaries and close out the run row.
+"""The persist step: publish the bulletin and close out the run row.
 
-Everything before this point is in graph state, which is machine state with its
-own lifecycle. This is where a run becomes something the dashboard can read a
-week later.
+It no longer writes the summaries. Those were committed one at a time as they
+came back (ADR 0030), so this node's job is the *other* object: one day's
+reading, in one language, as a ranking over the summaries that were in view.
 
-Cost is computed here rather than reported by the API, from the token counts each
-LLM node carried back on its payload. It is an estimate and the run row says so -
-prompt caching in particular makes the real bill lower than this number.
+Publishing is a new `version` of the day rather than a second bulletin. That is
+the whole of what F1 changes for the reader: two presses before lunch leave one
+page, and the earlier version stays in the archive as what was on the front page
+at the time rather than being overwritten.
+
+Cost is computed here rather than reported by the API, from the token counts
+each LLM node carried back. It is an estimate and the run row says so - prompt
+caching in particular makes the real bill lower than this number.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
-from ainews.db import Run, Summary
+from ainews.db import Bulletin, BulletinItem, Run
 from ainews.db.models import utcnow
 from ainews.pipeline.pricing import estimate_cost
-from ainews.pipeline.state import PipelineState, RankedItem, SummaryPayload
+from ainews.pipeline.state import PipelineState
 
 log = logging.getLogger(__name__)
 
 # Errors are shown in /runs verbatim, so the column has to stay readable.
 MAX_STORED_ERRORS = 20
+
+
+async def publish_bulletin(
+    session: AsyncSession, state: PipelineState, rank_cost: float
+) -> Bulletin | None:
+    """Write this run's ranking as the next version of its day.
+
+    `None` when the run ranked nothing: a press that found no candidates has
+    not edited the day, and writing an empty version 2 over a real version 1
+    would take the reader's bulletin away and call it an update.
+    """
+    items = state.get("ranked") or []
+    if not items:
+        return None
+
+    day, language = state["day"], state["language"]
+    version = (
+        await session.execute(
+            select(func.coalesce(func.max(Bulletin.version), 0) + 1)
+            .where(Bulletin.day == day)
+            .where(Bulletin.language == language)
+        )
+    ).scalar_one()
+
+    bulletin = Bulletin(
+        day=day,
+        language=language,
+        version=version,
+        editor_note=state.get("editor_note") or None,
+        model_rank=state.get("model_rank"),
+        agreement=state.get("agreement"),
+        est_cost_usd=rank_cost,
+        run_id=state["run_id"],
+    )
+    session.add(bulletin)
+    await session.flush()
+    for item in items:
+        session.add(
+            BulletinItem(
+                bulletin_id=bulletin.id,
+                summary_id=item["summary_id"],
+                position=item["position"],
+                tier=item["tier"],
+                reason=item["reason"] or None,
+            )
+        )
+    return bulletin
 
 
 async def persist_run(
@@ -38,95 +89,53 @@ async def persist_run(
         raise RuntimeError(f"run {state['run_id']} disappeared mid-flight")
 
     payloads = state.get("summaries") or []
-    ranked: dict[int, RankedItem] = {
-        item["article_id"]: item for item in (state.get("ranked") or [])
-    }
+    # A retried `Send` appends its payload a second time, because `summaries` is
+    # a concatenating reducer. The rows themselves are safe - the summarise node
+    # writes them under a unique key - but counting the tokens twice would put a
+    # bill on the run that nobody was charged.
+    by_summary = {payload["summary_id"]: payload for payload in payloads}
 
-    # A retried `Send` - a resumed run, a superstep replayed - appends its payload
-    # a second time, because `summaries` is a concatenating reducer. The unique
-    # index on (article_id, run_id, language) would then abort this whole commit
-    # and lose every summary in the run, so collapse to one row per article.
-    by_article: dict[int, SummaryPayload] = {}
-    for payload in payloads:
-        by_article[payload["article_id"]] = payload
-
-    # A run resumed after this node had already committed - which can happen
-    # when the failure was in the bookkeeping after the commit - must not try
-    # to insert the same rows again for the same reason.
-    already = set(
-        (
-            await session.execute(
-                select(Summary.article_id)
-                .where(Summary.run_id == run.id)
-                .where(Summary.language == state["language"])
-            )
-        ).scalars()
-    )
-
-    for payload in by_article.values():
-        if payload["article_id"] in already:
-            continue
-        pick = ranked.get(payload["article_id"])
-        session.add(
-            Summary(
-                article_id=payload["article_id"],
-                run_id=run.id,
-                language=state["language"],
-                title_local=payload["title_local"],
-                summary=payload["summary"],
-                why_it_matters=payload["why_it_matters"],
-                tags_json=json.dumps(payload["tags"], ensure_ascii=False),
-                # Two scores, kept apart on purpose (ADR 0025): the summariser's
-                # own, and the ranker's read of the same story against the whole
-                # day. The page draws the second where there is one; the
-                # evaluation layer compares the two.
-                importance=payload["importance"],
-                editor_importance=pick["importance"] if pick else None,
-                rank=pick["rank"] if pick else None,
-            )
-        )
-
-    # The rank call's tokens come on their own channel and are priced at *its*
+    # The rank calls' tokens come on their own channel and are priced at *their*
     # model. Costing every token at `openai_model_summarize` is only right while
     # the two knobs point at the same model - the day the summariser moves up to
     # terra (ADR 0001) the run row would lie about the bill.
     usage = state.get("rank_usage") or {"tokens_in": 0, "tokens_out": 0}
     rank_in, rank_out = usage["tokens_in"], usage["tokens_out"]
-    summarize_in = sum(s["tokens_in"] for s in payloads)
-    summarize_out = sum(s["tokens_out"] for s in payloads)
-    tokens_in = summarize_in + rank_in
-    tokens_out = summarize_out + rank_out
+    # Priced at the model this run actually used, which since ADR 0020 is a
+    # choice made at the press and may be nothing like the environment's
+    # default. Reading `settings` here would let the two agree with each other
+    # and both disagree with the run.
+    rank_cost = estimate_cost(state.get("model_rank") or settings.openai_model, rank_in, rank_out)
+    summarize_in = sum(payload["tokens_in"] for payload in by_summary.values())
+    summarize_out = sum(payload["tokens_out"] for payload in by_summary.values())
+    summarize_cost = sum(payload["est_cost_usd"] for payload in by_summary.values())
     errors = state.get("errors") or []
+
+    bulletin = await publish_bulletin(session, state, rank_cost)
 
     run.finished_at = utcnow()
     run.n_collected = state.get("n_collected", 0)
     run.n_new = state.get("n_new", 0)
-    run.n_summarized = len(by_article)
-    run.tokens_in = tokens_in
-    run.tokens_out = tokens_out
-    # Priced at the models this run actually used, which since ADR 0020 is a
-    # choice made at the press and may be nothing like the environment's
-    # default. Reading `settings` here would have re-introduced the bug fixed
-    # above in a worse form: the two knobs would agree with each other and both
-    # disagree with the run.
-    model_summarize = state.get("model_summarize") or settings.openai_model_summarize
-    model_rank = state.get("model_rank") or settings.openai_model
-    run.est_cost_usd = estimate_cost(model_summarize, summarize_in, summarize_out) + estimate_cost(
-        model_rank, rank_in, rank_out
-    )
-    run.editor_note = state.get("editor_note") or None
+    run.n_summarized = len(by_summary)
+    run.tokens_in = summarize_in + rank_in
+    run.tokens_out = summarize_out + rank_out
+    # The run's own spend, which is what it paid for: the summaries it bought
+    # plus the ranking it bought. A bulletin's cost is the ranking alone, and a
+    # summary carries its own - the same dollar is not on two rows.
+    run.est_cost_usd = summarize_cost + rank_cost
     run.error = "\n".join(errors[:MAX_STORED_ERRORS]) or None
     # "partial" is a real outcome, not a failure: a feed 404ed or three articles
-    # would not summarise, and the other ninety-seven are still a digest.
+    # would not summarise, and the other ninety-seven are still a bulletin.
     run.status = "partial" if errors else "ok"
 
     await session.commit()
     log.info(
-        "run %s finished: %d summaries, %d/%d tokens, ~$%.4f, status=%s",
+        "run %s finished: %d summaries, bulletin %s, %d/%d tokens, ~$%.4f, status=%s",
         run.id,
         run.n_summarized,
-        tokens_in,
-        tokens_out,
+        f"{bulletin.day} v{bulletin.version}" if bulletin else "none",
+        run.tokens_in,
+        run.tokens_out,
         run.est_cost_usd,
         run.status,
     )

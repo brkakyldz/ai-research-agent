@@ -9,8 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.factories import publish
 
-from ainews.db import Article, Run, Source, Summary, Verdict
+from ainews.db import Article, BulletinItem, Run, Source, Summary, Verdict
 
 
 @pytest.fixture
@@ -36,19 +37,18 @@ async def summaries(session: AsyncSession) -> list[int]:
         await session.flush()
         summary = Summary(
             article_id=art.id,
-            run_id=run.id,
             language="tr",
             title_local=f"Haber {i}",
             summary="Bir. Iki. Uc.",
             why_it_matters="Onemli.",
             tags_json=json.dumps(["openai"]),
             importance=4,
-            rank=i + 1,
         )
         session.add(summary)
         await session.flush()
         ids.append(summary.id)
     await session.commit()
+    await publish(session, ids, run=run)
     return ids
 
 
@@ -334,21 +334,22 @@ async def test_the_link_lands_on_the_story_even_when_it_was_below_the_fold(
     await session.flush()
     summary = Summary(
         article_id=art.id,
-        run_id=run.id,
         language="tr",
         title_local="Katlanin altinda",
         summary="Bir. Iki. Uc.",
         why_it_matters="Onemli.",
         tags_json=json.dumps(["openai"]),
         importance=2,
-        rank=None,  # never made the top N
     )
     session.add(summary)
     await session.commit()
+    # Published without it: the editor left this story out, so it is on the day
+    # and not on the page.
+    bulletin = await publish(session, [], run=run)
 
     client.post("/verdict", data={"summary_id": summary.id, "verdict": "wrong", "note": "n"})
-    assert f'id="story-{summary.id}"' not in client.get(f"/archive?run={run.id}").text
-    assert f'id="story-{summary.id}"' in client.get(f"/archive?run={run.id}&all=1").text
+    assert f'id="story-{summary.id}"' not in client.get(f"/archive?b={bulletin.id}").text
+    assert f'id="story-{summary.id}"' in client.get(f"/archive?b={bulletin.id}&all=1").text
 
 
 def test_the_labels_page_says_so_when_nothing_has_been_judged(
@@ -391,9 +392,18 @@ async def _judged(session: AsyncSession, summary_id: int, passed: bool, claim: s
 
     summary = await session.get(Summary, summary_id)
     assert summary is not None
+    bulletin_id = (
+        (
+            await session.execute(
+                select(BulletinItem.bulletin_id).where(BulletinItem.summary_id == summary_id)
+            )
+        )
+        .scalars()
+        .first()
+    )
     session.add(
         EvalResult(
-            run_id=summary.run_id,
+            bulletin_id=bulletin_id,
             summary_id=summary_id,
             kind="grounding",
             passed=passed,

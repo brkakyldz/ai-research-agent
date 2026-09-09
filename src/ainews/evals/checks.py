@@ -24,6 +24,7 @@ from typing import Any
 
 from ainews.pipeline.nodes.dedupe import normalize_title, titles_match
 from ainews.pipeline.prompts import TAG_VOCABULARY
+from ainews.pipeline.state import TIER_ORDER
 
 Story = dict[str, Any]
 
@@ -220,8 +221,10 @@ def fallback_order(stories: list[Story], top_n: int) -> list[int]:
 
 
 def ranked_order(stories: list[Story]) -> list[int]:
-    ranked = [s for s in stories if s.get("rank") is not None]
-    return [int(s["article_id"]) for s in sorted(ranked, key=lambda s: int(s["rank"]))]
+    """The published order, by article id. `position` is the editor's placement
+    (ADR 0030); a story with none was not in the bulletin."""
+    ranked = [s for s in stories if s.get("position") is not None]
+    return [int(s["article_id"]) for s in sorted(ranked, key=lambda s: int(s["position"]))]
 
 
 def ranker_vs_fallback(stories: list[Story], top_n: int | None = None) -> dict[str, Any]:
@@ -238,29 +241,44 @@ def ranker_vs_fallback(stories: list[Story], top_n: int | None = None) -> dict[s
     return {"top_n": n, "overlap": overlap, "ranked": ranked[:n], "fallback": fallback}
 
 
-def editor_shift(stories: list[Story]) -> dict[str, Any]:
-    """How far the ranker moved the summariser's scores on the stories it kept.
+def tier_shape(stories: list[Story]) -> dict[str, Any]:
+    """How the editor distributed the tiers, and how far it read against the
+    summariser.
 
-    Reported, never asserted. The rank call is asked to correct the isolated
-    scores where the day makes them wrong, and ADR 0025 is what lets those
-    corrections reach the page. This says whether it uses the power: a
-    `n_changed` of zero on every run means the prompt line is decoration, and
-    a mean shift near two means the summariser's scale and the ranker's are not
-    the same scale. Stories with no `editor_importance` - unranked, or from a
-    run before the column existed - are not counted.
+    Reported, never asserted. The ranker answers with a placement and not with
+    a corrected score (ADR 0030), so what there is to measure is where it put
+    things. Two questions are worth asking of that.
+
+    `counts` says whether the vocabulary is being used. A bulletin that is
+    fifteen `notable` is a ranker filling a page, and the same finding
+    `ranker_vs_fallback` reports from the other side.
+
+    `contradictions` counts pairs the editor put in the opposite order to the
+    summariser's own score - a 3 tiered above a 5. Some of that is the whole
+    point of having an editor; all of it would mean the two are not reading the
+    same thing.
     """
-    shifts = [
-        int(s["editor_importance"]) - int(s.get("importance", 0))
-        for s in stories
-        if s.get("rank") is not None and s.get("editor_importance") is not None
-    ]
-    changed = [d for d in shifts if d]
+    ranked = sorted(
+        (s for s in stories if s.get("position") is not None),
+        key=lambda s: int(s["position"]),
+    )
+    counts = dict.fromkeys(TIER_ORDER, 0)
+    for story in ranked:
+        tier = story.get("tier")
+        if tier in counts:
+            counts[tier] += 1
+    contradictions = sum(
+        1
+        for i, earlier in enumerate(ranked)
+        for later in ranked[i + 1 :]
+        if int(earlier.get("importance", 0)) < int(later.get("importance", 0))
+    )
+    pairs = len(ranked) * (len(ranked) - 1) // 2
     return {
-        "n_ranked": len(shifts),
-        "n_changed": len(changed),
-        "up": sum(1 for d in changed if d > 0),
-        "down": sum(1 for d in changed if d < 0),
-        "mean_abs_shift": (sum(abs(d) for d in changed) / len(shifts)) if shifts else 0.0,
+        "n_ranked": len(ranked),
+        "counts": counts,
+        "contradictions": contradictions,
+        "contradiction_share": (contradictions / pairs) if pairs else 0.0,
     }
 
 
@@ -272,11 +290,11 @@ def unrepresented_fives(stories: list[Story], threshold: int = 85) -> list[int]:
     passed over in favour of another outlet's write-up of the same event is
     represented; a five nobody in its cluster carries into the digest is not.
     """
-    ranked = [s for s in stories if s.get("rank") is not None]
+    ranked = [s for s in stories if s.get("position") is not None]
     ranked_titles = [normalize_title(s.get("title") or "") for s in ranked]
     missing: list[int] = []
     for story in stories:
-        if int(story.get("importance", 0)) != 5 or story.get("rank") is not None:
+        if int(story.get("importance", 0)) != 5 or story.get("position") is not None:
             continue
         title = normalize_title(story.get("title") or "")
         if any(titles_match(title, other, threshold) for other in ranked_titles):

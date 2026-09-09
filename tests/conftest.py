@@ -20,9 +20,19 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from ainews import db as db_pkg
 from ainews.config import Settings, get_settings
-from ainews.db import Article, Run, Source, Summary, create_engine, init_db
+from ainews.db import (
+    Article,
+    Bulletin,
+    BulletinItem,
+    Run,
+    Source,
+    Summary,
+    create_engine,
+    init_db,
+)
 from ainews.db.session import dispose_engine
 from ainews.web.app import create_app
+from ainews.web.format import to_local
 
 
 @pytest.fixture(autouse=True)
@@ -90,17 +100,22 @@ async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 
 TITLES = [
-    ("OpenAI ucuz bir model duyurdu", 5),
-    ("Avrupa yapay zeka yasasi icin rehber yayimladi", 4),
-    ("Bir robotik girisimi yatirim aldi", 3),
-    ("Kucuk bir kutuphane surum cikardi", 2),
-    ("Topluluk derlemesi paylasildi", 1),
+    ("OpenAI ucuz bir model duyurdu", 5, "lead"),
+    ("Avrupa yapay zeka yasasi icin rehber yayimladi", 4, "major"),
+    ("Bir robotik girisimi yatirim aldi", 3, "notable"),
+    ("Kucuk bir kutuphane surum cikardi", 2, None),
+    ("Topluluk derlemesi paylasildi", 1, None),
 ]
 
 
-@pytest.fixture
-async def digest(session: AsyncSession) -> Run:
-    """One finished Turkish digest: three ranked stories and two below the fold.
+@pytest_asyncio.fixture
+async def digest(session: AsyncSession) -> Bulletin:
+    """One published Turkish bulletin: three stories, and two the editor left out.
+
+    A `Bulletin` and not a `Run`, because a bulletin is what a page shows (ADR
+    0030). The run is written too - the archive page does not read it, but
+    `/runs` does, and a bulletin with no press behind it is a state the
+    application cannot produce.
 
     Here rather than in a page test file because three of them want it: the
     pages, the shell and the press, which were one 1,307-line file before the
@@ -110,6 +125,7 @@ async def digest(session: AsyncSession) -> Run:
     session.add(src)
     await session.flush()
 
+    now = datetime.now(UTC)
     run = Run(
         kind="digest",
         language="tr",
@@ -119,37 +135,63 @@ async def digest(session: AsyncSession) -> Run:
         est_cost_usd=0.0421,
         tokens_in=1000,
         tokens_out=400,
-        editor_note="Gunun ortak konusu fiyat degil olcum.",
-        finished_at=datetime.now(UTC),
+        finished_at=now,
     )
     session.add(run)
     await session.flush()
 
-    for index, (title, importance) in enumerate(TITLES):
+    bulletin = Bulletin(
+        day=to_local(now).date().isoformat(),  # type: ignore[union-attr]
+        language="tr",
+        version=1,
+        editor_note="Gunun ortak konusu fiyat degil olcum.",
+        model_rank="gpt-5.6-luna",
+        agreement=0.82,
+        est_cost_usd=0.004,
+        run_id=run.id,
+    )
+    session.add(bulletin)
+    await session.flush()
+
+    position = 0
+    for index, (title, importance, tier) in enumerate(TITLES):
         art = Article(
             source_id=src.id,
             title=title,
             url=f"https://openai.com/news/{index}",
             url_canonical=f"https://openai.com/news/{index}",
-            published_at=datetime.now(UTC) - timedelta(hours=index + 1),
+            published_at=now - timedelta(hours=index + 1),
         )
         session.add(art)
         await session.flush()
-        session.add(
-            Summary(
-                article_id=art.id,
-                run_id=run.id,
-                language="tr",
-                title_local=title,
-                summary=f"Ozet metni {index}. Ikinci cumle. Ucuncu cumle.",
-                why_it_matters="Bu yuzden onemli.",
-                tags_json=json.dumps(["openai", "models"] if index < 2 else ["policy"]),
-                importance=importance,
-                rank=index + 1 if index < 3 else None,
-            )
+        summary = Summary(
+            article_id=art.id,
+            language="tr",
+            title_local=title,
+            summary=f"Ozet metni {index}. Ikinci cumle. Ucuncu cumle.",
+            why_it_matters="Bu yuzden onemli.",
+            tags_json=json.dumps(["openai", "models"] if index < 2 else ["policy"]),
+            importance=importance,
+            model="gpt-5.6-luna",
+            tokens_in=1400,
+            tokens_out=500,
+            est_cost_usd=0.0008,
         )
+        session.add(summary)
+        await session.flush()
+        if tier is not None:
+            position += 1
+            session.add(
+                BulletinItem(
+                    bulletin_id=bulletin.id,
+                    summary_id=summary.id,
+                    position=position,
+                    tier=tier,
+                    reason="Gunun en agir haberi." if position == 1 else None,
+                )
+            )
     await session.commit()
-    return run
+    return bulletin
 
 
 @pytest.fixture

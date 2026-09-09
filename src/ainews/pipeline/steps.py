@@ -213,10 +213,10 @@ async def _fan_out_row(state: PipelineState) -> None:
     # the row that says a hundred branches produced nothing.
     ended = rank.started_at if rank is not None else utcnow()
 
-    # One row per article even if a retried superstep appended a payload twice,
+    # One row per summary even if a retried superstep appended a payload twice,
     # for the same reason `persist_run` collapses them: the count on screen has
     # to be the count of summaries that reached the database.
-    n_out = len({p["article_id"] for p in payloads})
+    n_out = len({p["summary_id"] for p in payloads})
     record = StepRecord(started_at=enrich.finished_at)
     record.counts(n_in, n_out)
     # The same fallback `persist_run` uses, and it has to be the same one: that

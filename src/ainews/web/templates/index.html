@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-  {% if not run %}
+  {% if not bulletin %}
     <div class="panel"><p class="empty">{{ t.empty_digest }}</p></div>
   {% else %}
 
@@ -73,6 +73,15 @@
     {% endif %}
 
     {% include "_stories.html" %}
+
+    {% if others %}
+    {# The day's other summaries, under the bulletin and not merged into it.
+       These carry no tier, so they draw at the summariser's own score; a
+       heading between the two lists is what says the scales are different
+       rather than leaving the reader to notice. #}
+    <p class="feed__f"><span class="hint">{{ t.others_label }}</span></p>
+    {% with stories = others %}{% include "_stories.html" %}{% endwith %}
+    {% endif %}
 
     {% if n_others %}
     <p class="feed__f">

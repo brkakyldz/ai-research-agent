@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from ainews.config import Settings
-from ainews.db import Run, Summary
+from ainews.db import Bulletin, Run, Summary
 from ainews.web.app import create_app
 from ainews.web.format import MONTHS, format_stamp, split_paragraphs
 from ainews.web.i18n import STRINGS, THEME_COOKIE, strings
@@ -31,7 +31,7 @@ PAGES = ["/", "/search", "/archive", "/sources", "/runs"]
 
 
 @pytest.mark.parametrize("path", PAGES)
-def test_every_page_wears_the_rail(client: TestClient, digest: Run, path: str) -> None:
+def test_every_page_wears_the_rail(client: TestClient, digest: Bulletin, path: str) -> None:
     """The rail is the only way between five pages, so its absence on any one of
     them is a dead end, not a cosmetic problem."""
     body = client.get(path).text
@@ -42,7 +42,9 @@ def test_every_page_wears_the_rail(client: TestClient, digest: Run, path: str) -
 
 
 @pytest.mark.parametrize("path", PAGES)
-def test_the_rail_marks_the_page_you_are_on(client: TestClient, digest: Run, path: str) -> None:
+def test_the_rail_marks_the_page_you_are_on(
+    client: TestClient, digest: Bulletin, path: str
+) -> None:
     body = client.get(path).text
     marked = [line for line in body.splitlines() if 'aria-current="page"' in line]
     # The runs link is in the markup twice - once in the foot, once in the list
@@ -55,7 +57,7 @@ def test_the_rail_marks_the_page_you_are_on(client: TestClient, digest: Run, pat
     assert f'href="{path}?lang=tr"' in marked[0]
 
 
-def test_the_rail_counts_what_is_behind_each_link(client: TestClient, digest: Run) -> None:
+def test_the_rail_counts_what_is_behind_each_link(client: TestClient, digest: Bulletin) -> None:
     """The badge counts the stories the link leads to, and it is a COUNT.
 
     Not `min(run.n_summarized, digest_top_n)`, which is a ceiling the ranker is
@@ -70,7 +72,7 @@ def test_the_rail_counts_what_is_behind_each_link(client: TestClient, digest: Ru
     assert "3 haber · " in body, "the brief's footnote is the same number"
 
 
-def test_the_rail_carries_the_advice_not_a_clock(client: TestClient, digest: Run) -> None:
+def test_the_rail_carries_the_advice_not_a_clock(client: TestClient, digest: Bulletin) -> None:
     """Nothing fires on a schedule any more (ADR 0015), so the rail's foot says
     when a run would be worth starting. The seeded digest is minutes old and the
     suggested gap is a day, so the foot counts down rather than saying "now"."""
@@ -79,7 +81,7 @@ def test_the_rail_carries_the_advice_not_a_clock(client: TestClient, digest: Run
     assert "sonra</span>" in body, "a countdown, not the scheduler's next fire time"
 
 
-def test_the_run_page_leads_with_the_advice(client: TestClient, digest: Run) -> None:
+def test_the_run_page_leads_with_the_advice(client: TestClient, digest: Bulletin) -> None:
     """The block that replaced the cron: a state, a reason, and three facts."""
     body = client.get("/runs").text
     assert 'data-state="waiting"' in body
@@ -88,7 +90,7 @@ def test_the_run_page_leads_with_the_advice(client: TestClient, digest: Run) -> 
     assert 'hx-get="/runs/countdown' in body, "and a countdown that refreshes itself"
 
 
-def test_the_countdown_is_one_implementation(client: TestClient, digest: Run) -> None:
+def test_the_countdown_is_one_implementation(client: TestClient, digest: Bulletin) -> None:
     """`format_gap` walked the branches in Python and a `setInterval` walked them
     again in JavaScript, on the one line of the page that exists to be trusted.
     The fragment re-fetches itself now and there is no second copy to drift."""
@@ -103,16 +105,21 @@ def test_the_countdown_is_one_implementation(client: TestClient, digest: Run) ->
 
 
 async def test_a_stale_digest_turns_the_block_into_an_invitation(
-    client: TestClient, session: AsyncSession, digest: Run
+    client: TestClient, session: AsyncSession, digest: Bulletin
 ) -> None:
     """The state a reader meets on any morning after the first.
 
     The seeded digest is minutes old, so it is aged past the suggested gap here
     rather than in a second fixture - what changes on the page is the sentence
     and the countdown's sign, and nothing else moves.
+
+    The advice is anchored on the last successful *press*, not on the bulletin
+    it published, so the run behind the fixture is what moves.
     """
-    digest.started_at = datetime.now(UTC) - timedelta(hours=30)
-    session.add(digest)
+    run = await session.get(Run, digest.run_id)
+    assert run is not None
+    run.started_at = datetime.now(UTC) - timedelta(hours=30)
+    run.finished_at = run.started_at + timedelta(minutes=1)
     await session.commit()
 
     body = client.get("/runs").text
@@ -128,7 +135,7 @@ async def test_a_stale_digest_turns_the_block_into_an_invitation(
 
 
 @pytest.mark.parametrize("path", ["/", "/sources", "/archive", "/search"])
-def test_only_the_run_page_can_start_a_run(path: str, client: TestClient, digest: Run) -> None:
+def test_only_the_run_page_can_start_a_run(path: str, client: TestClient, digest: Bulletin) -> None:
     """The press is on `/runs` and nowhere else.
 
     What every other page carries is the way in - the runs link, drawn in the
@@ -142,7 +149,7 @@ def test_only_the_run_page_can_start_a_run(path: str, client: TestClient, digest
     assert body.count('class="nav--narrow"') == 1, "and once more for the phone"
 
 
-def test_the_press_asks_before_it_spends(client: TestClient, digest: Run) -> None:
+def test_the_press_asks_before_it_spends(client: TestClient, digest: Bulletin) -> None:
     """One click gets you a question, not a run.
 
     The resting button is a `GET` of the question; only the answer is a `POST`.
@@ -168,7 +175,7 @@ def test_the_press_asks_before_it_spends(client: TestClient, digest: Run) -> Non
 
 
 def test_the_question_carries_the_output_language_and_starts_on_the_pages(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     """Which language the bulletin is written in is asked at the press.
 
@@ -222,7 +229,9 @@ def test_the_first_run_is_told_what_it_will_do(
     assert "tuttu" not in asked, "no invented estimate before the first run"
 
 
-def test_search_finds_a_story_whatever_the_shell_is_set_to(client: TestClient, digest: Run) -> None:
+def test_search_finds_a_story_whatever_the_shell_is_set_to(
+    client: TestClient, digest: Bulletin
+) -> None:
     """The index is not filtered by the page's language either (ADR 0017).
 
     A reader looking for a company name wants the article; refusing it because
@@ -234,7 +243,7 @@ def test_search_finds_a_story_whatever_the_shell_is_set_to(client: TestClient, d
 
 
 def test_the_archive_lists_every_bulletin_and_names_the_odd_ones_out(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     body = client.get("/archive?lang=en").text
     assert "Gunun ortak konusu" in body, "a Turkish bulletin is still in the archive"
@@ -244,7 +253,7 @@ def test_the_archive_lists_every_bulletin_and_names_the_odd_ones_out(
 # -- the theme ----------------------------------------------------------------
 
 
-def test_the_default_theme_writes_no_attribute(client: TestClient, digest: Run) -> None:
+def test_the_default_theme_writes_no_attribute(client: TestClient, digest: Bulletin) -> None:
     """No `data-theme` is the follow-the-system state: `color-scheme: light dark`
     does the work, and an attribute would override the reader's own setting."""
     body = client.get("/").text
@@ -254,7 +263,7 @@ def test_the_default_theme_writes_no_attribute(client: TestClient, digest: Run) 
 
 @pytest.mark.parametrize("value", ["light", "dark"])
 def test_a_chosen_theme_is_rendered_and_remembered(
-    client: TestClient, digest: Run, value: str
+    client: TestClient, digest: Bulletin, value: str
 ) -> None:
     response = client.get(f"/?theme={value}")
     assert f'data-theme="{value}"' in response.text
@@ -263,11 +272,11 @@ def test_a_chosen_theme_is_rendered_and_remembered(
     assert f'data-theme="{value}"' in client.get("/runs").text
 
 
-def test_a_nonsense_theme_falls_back_to_the_system(client: TestClient, digest: Run) -> None:
+def test_a_nonsense_theme_falls_back_to_the_system(client: TestClient, digest: Bulletin) -> None:
     assert "data-theme" not in client.get("/?theme=neon").text
 
 
-def test_the_theme_links_keep_the_rest_of_the_query(client: TestClient, digest: Run) -> None:
+def test_the_theme_links_keep_the_rest_of_the_query(client: TestClient, digest: Bulletin) -> None:
     body = client.get("/?all=1&tag=policy").text
     assert "all=1" in body and "tag=policy" in body and "theme=dark" in body
 
@@ -275,7 +284,7 @@ def test_the_theme_links_keep_the_rest_of_the_query(client: TestClient, digest: 
 # -- the story block ----------------------------------------------------------
 
 
-def test_a_story_names_its_impact_band(client: TestClient, digest: Run) -> None:
+def test_a_story_names_its_impact_band(client: TestClient, digest: Bulletin) -> None:
     """The bars are a shape; the word beside them is what makes it a scale."""
     body = client.get("/").text
     assert "Yüksek ilgi" in body, "the 5 and the 4 are the high band"
@@ -283,7 +292,7 @@ def test_a_story_names_its_impact_band(client: TestClient, digest: Run) -> None:
 
 
 def test_the_impact_meter_lights_one_bar_per_step_of_the_band(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     """Three bars, lit up to the band, and the band names the colour.
 
@@ -300,7 +309,7 @@ def test_the_impact_meter_lights_one_bar_per_step_of_the_band(
     assert lit_two in body[body.index(mid) :]
 
 
-def test_why_it_matters_is_labelled_and_separate(client: TestClient, digest: Run) -> None:
+def test_why_it_matters_is_labelled_and_separate(client: TestClient, digest: Bulletin) -> None:
     """It is the one thing here an RSS reader does not have, so it is not left
     as bold text inside the summary."""
     body = client.get("/").text
@@ -308,14 +317,14 @@ def test_why_it_matters_is_labelled_and_separate(client: TestClient, digest: Run
     assert '<div class="why">' in body
 
 
-def test_a_story_carries_its_topics_and_they_filter(client: TestClient, digest: Run) -> None:
+def test_a_story_carries_its_topics_and_they_filter(client: TestClient, digest: Bulletin) -> None:
     body = client.get("/").text
     assert 'class="chip" href="/?lang=tr&amp;all=1&amp;tag=openai"' in body
     # And following one narrows the list, which is the only reason it is a link.
     assert client.get("/?all=1&tag=openai").text.count('class="item ') == 2
 
 
-def test_a_source_keeps_its_own_capitals(client: TestClient, digest: Run) -> None:
+def test_a_source_keeps_its_own_capitals(client: TestClient, digest: Bulletin) -> None:
     """It was lowercased to `openai`, which is the one word on the meta row a
     reader recognises at a glance."""
     body = client.get("/").text
@@ -323,13 +332,13 @@ def test_a_source_keeps_its_own_capitals(client: TestClient, digest: Run) -> Non
     assert "</span>openai" not in body
 
 
-def test_every_story_offers_its_source(client: TestClient, digest: Run) -> None:
+def test_every_story_offers_its_source(client: TestClient, digest: Bulletin) -> None:
     body = client.get("/").text
     assert body.count('class="go"') == 3, "one per story above the fold"
     assert "Kaynağa git" in body
 
 
-def test_a_low_scoring_story_is_only_a_headline(client: TestClient, digest: Run) -> None:
+def test_a_low_scoring_story_is_only_a_headline(client: TestClient, digest: Bulletin) -> None:
     """Ranks 2 and 1 collapse in CSS, so the markup has to stay identical -
     the test is that they are still whole items, not truncated ones."""
     body = client.get("/?all=1").text
@@ -340,7 +349,9 @@ def test_a_low_scoring_story_is_only_a_headline(client: TestClient, digest: Run)
 # -- the header and the rail --------------------------------------------------
 
 
-def test_the_reading_page_says_nothing_about_the_machine(client: TestClient, digest: Run) -> None:
+def test_the_reading_page_says_nothing_about_the_machine(
+    client: TestClient, digest: Bulletin
+) -> None:
     """Cost is not deleted, it is placed - and the place is `/runs`.
 
     It came off the top bar on 2026-09-05 and off the digest's side column on
@@ -356,7 +367,7 @@ def test_the_reading_page_says_nothing_about_the_machine(client: TestClient, dig
 
 
 def test_the_digest_reads_the_note_then_the_topics_then_the_day(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     """The order is the page's argument, and it survived the right rail.
 
@@ -375,7 +386,9 @@ def test_the_digest_reads_the_note_then_the_topics_then_the_day(
     assert 'class="side"' not in body, "there is no column beside the reading"
 
 
-def test_every_count_is_a_count_of_the_list_you_can_reach(client: TestClient, digest: Run) -> None:
+def test_every_count_is_a_count_of_the_list_you_can_reach(
+    client: TestClient, digest: Bulletin
+) -> None:
     """The filter pill and the feed have to agree.
 
     Counting the tags over every summary the run produced while the filter
@@ -394,7 +407,7 @@ def test_every_count_is_a_count_of_the_list_you_can_reach(client: TestClient, di
 
 
 def test_showing_everything_widens_the_counts_with_the_list(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     """`all=1` is the same agreement over a longer list, not a different rule."""
     body = client.get("/?all=1").text
@@ -403,7 +416,7 @@ def test_showing_everything_widens_the_counts_with_the_list(
 
 
 def test_the_briefs_footnote_counts_topics_rather_than_reporting_a_cap(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     """The filter row draws at most twelve topics; the footnote counts all of
     them. It used to count the drawn ones, so on any real day it printed the
@@ -415,7 +428,7 @@ def test_the_briefs_footnote_counts_topics_rather_than_reporting_a_cap(
     assert "3 haber · 1 kaynak · 3 konu" in client.get("/?all=1").text
 
 
-def test_the_impact_spread_keeps_all_three_bands(client: TestClient, digest: Run) -> None:
+def test_the_impact_spread_keeps_all_three_bands(client: TestClient, digest: Bulletin) -> None:
     """Three ranked stories: one 5, one 4, one 3 - so two high, one mid, no low.
     The empty band keeps its row, dimmed, because a scale with holes in it is
     still read as a scale.
@@ -429,7 +442,9 @@ def test_the_impact_spread_keeps_all_three_bands(client: TestClient, digest: Run
     assert 'class="score--low is-off"' in spread
 
 
-def test_the_spread_counts_the_list_the_reader_can_reach(client: TestClient, digest: Run) -> None:
+def test_the_spread_counts_the_list_the_reader_can_reach(
+    client: TestClient, digest: Bulletin
+) -> None:
     """It is counted off the stories in view rather than off the run, so a
     filter narrows it along with the feed. Seeded: three ranked (5, 4, 3), and
     `openai` is on the two that scored highest."""
@@ -443,7 +458,9 @@ def test_the_spread_counts_the_list_the_reader_can_reach(client: TestClient, dig
     assert counts("/?tag=openai") == ["2", "0", "0"]
 
 
-def test_the_week_is_read_from_real_runs_on_the_run_log(client: TestClient, digest: Run) -> None:
+def test_the_week_is_read_from_real_runs_on_the_run_log(
+    client: TestClient, digest: Bulletin
+) -> None:
     """Nothing in it is projected or filled in - if the numbers were invented
     the chart would not be worth the space it takes.
 
@@ -460,7 +477,9 @@ def test_the_week_is_read_from_real_runs_on_the_run_log(client: TestClient, dige
     assert 'class="chart"' not in client.get("/").text, "and not on the reading"
 
 
-def test_no_story_is_dressed_differently_for_being_first(client: TestClient, digest: Run) -> None:
+def test_no_story_is_dressed_differently_for_being_first(
+    client: TestClient, digest: Bulletin
+) -> None:
     """Size on this page means importance and nothing else. The first story used
     to carry a `data-lead` marker and a plate; two ranking systems in one column
     left the reader unable to tell size-by-score from size-by-position, so the
@@ -481,20 +500,20 @@ async def test_the_week_survives_an_empty_database(
     assert 'style="height: 0%"' in body
 
 
-def test_the_rail_groups_its_five_links(client: TestClient, digest: Run) -> None:
+def test_the_rail_groups_its_five_links(client: TestClient, digest: Bulletin) -> None:
     body = client.get("/").text
     for label in ("Günlük", "Keşfet", "Kayıt"):
         assert f'<p class="nav__g">{label}</p>' in body
 
 
-def test_the_keyboard_can_skip_the_shell(client: TestClient, digest: Run) -> None:
+def test_the_keyboard_can_skip_the_shell(client: TestClient, digest: Bulletin) -> None:
     body = client.get("/").text
     assert '<a class="skip" href="#main">' in body
     assert 'id="main"' in body
 
 
 def test_the_language_switch_draws_both_languages_and_marks_the_current_one(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     """Both slots, current one marked.
 
@@ -509,7 +528,7 @@ def test_the_language_switch_draws_both_languages_and_marks_the_current_one(
 
 
 def test_the_language_switch_marks_english_when_english_is_on(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     body = client.get("/?lang=en").text
     assert '<a href="/?lang=en" lang="en" hreflang="en" aria-current="true">' in body
@@ -523,7 +542,7 @@ def test_the_stamp_names_the_month_in_the_pages_language() -> None:
     assert format_stamp(None, "tr") == "—"
 
 
-def test_the_bar_stamp_follows_the_language(client: TestClient, digest: Run) -> None:
+def test_the_bar_stamp_follows_the_language(client: TestClient, digest: Bulletin) -> None:
     tr = client.get("/?lang=tr").text
     en = client.get("/?lang=en").text
     month = datetime.now(UTC).month - 1
@@ -544,7 +563,7 @@ def test_the_brief_is_split_into_the_paragraphs_the_model_wrote() -> None:
 
 
 async def test_the_digest_draws_a_three_paragraph_brief(
-    client: TestClient, session: AsyncSession, digest: Run
+    client: TestClient, session: AsyncSession, digest: Bulletin
 ) -> None:
     digest.editor_note = "Birinci.\n\nIkinci.\n\nUcuncu."
     await session.commit()
@@ -555,13 +574,13 @@ async def test_the_digest_draws_a_three_paragraph_brief(
 # -- the topic filter ---------------------------------------------------------
 
 
-def test_a_short_topic_list_needs_no_disclosure(client: TestClient, digest: Run) -> None:
+def test_a_short_topic_list_needs_no_disclosure(client: TestClient, digest: Bulletin) -> None:
     """Three tags is a filter. The disclosure only earns its place past six."""
     assert '<details class="more"' not in client.get("/").text
 
 
 async def test_a_long_topic_list_folds_after_six(
-    client: TestClient, session: AsyncSession, digest: Run
+    client: TestClient, session: AsyncSession, digest: Bulletin
 ) -> None:
     """Thirteen tags laid out at once is a second list to read before the list."""
     summary = (await session.execute(select(Summary).limit(1))).scalars().one()
@@ -578,7 +597,9 @@ async def test_a_long_topic_list_folds_after_six(
 # -- the shell's top bar -------------------------------------------------------
 
 
-def test_the_bar_spans_the_shell_and_carries_the_brand(client: TestClient, digest: Run) -> None:
+def test_the_bar_spans_the_shell_and_carries_the_brand(
+    client: TestClient, digest: Bulletin
+) -> None:
     """One bar across the window, with the rail hanging under its left cell.
 
     As the first child of the content column, the bar makes the window's top
@@ -598,7 +619,7 @@ def test_the_bar_spans_the_shell_and_carries_the_brand(client: TestClient, diges
     assert 'class="brand"' not in rest.split("</aside>", 1)[0], "and not the rail's head"
 
 
-def test_the_shell_is_one_rail_and_the_reading(client: TestClient, digest: Run) -> None:
+def test_the_shell_is_one_rail_and_the_reading(client: TestClient, digest: Bulletin) -> None:
     """The right rail is not needed any more.
 
     It was a card inside the digest's content block from 2026-09-06, then a
@@ -613,7 +634,7 @@ def test_the_shell_is_one_rail_and_the_reading(client: TestClient, digest: Run) 
         assert 'class="side"' not in body, path
 
 
-def test_the_rail_can_be_put_away_and_says_so(client: TestClient, digest: Run) -> None:
+def test_the_rail_can_be_put_away_and_says_so(client: TestClient, digest: Bulletin) -> None:
     """The collapse is a button, wired to the rail it acts on.
 
     `aria-controls` and `aria-expanded` are the whole of what a screen reader
@@ -628,7 +649,9 @@ def test_the_rail_can_be_put_away_and_says_so(client: TestClient, digest: Run) -
     assert 'aria-label="Menüyü daralt veya genişlet"' in body
 
 
-def test_every_rail_link_keeps_a_name_a_pointer_can_find(client: TestClient, digest: Run) -> None:
+def test_every_rail_link_keeps_a_name_a_pointer_can_find(
+    client: TestClient, digest: Bulletin
+) -> None:
     """Collapsed, the rail is five icons. An icon has to be learned, so each one
     keeps its label in the accessibility tree and a `title` for the hover.
 
@@ -649,7 +672,7 @@ def test_every_rail_link_keeps_a_name_a_pointer_can_find(client: TestClient, dig
 
 
 def test_the_two_switches_are_one_group_at_the_head_of_the_right_rail(
-    client: TestClient, digest: Run
+    client: TestClient, digest: Bulletin
 ) -> None:
     """The theme and the language are the same kind of control - a thing you set
     once - so they share the bar's last cell, which is also the head of the
@@ -669,7 +692,7 @@ def test_the_two_switches_are_one_group_at_the_head_of_the_right_rail(
     assert "seg--theme" not in rail, "the rail's foot gave it up"
 
 
-def test_the_bar_spells_the_bulletins_date_out(client: TestClient, digest: Run) -> None:
+def test_the_bar_spells_the_bulletins_date_out(client: TestClient, digest: Bulletin) -> None:
     """`06 Eyl · 16:06` in the machine face was a log line stuck to the page
     name. It is the one date on the page a person would say out loud."""
     body = client.get("/").text

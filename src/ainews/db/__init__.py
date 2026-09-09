@@ -3,6 +3,8 @@
 from ainews.db.models import (
     Article,
     Base,
+    Bulletin,
+    BulletinItem,
     DailyCounter,
     EvalResult,
     Run,
@@ -25,6 +27,8 @@ from ainews.db.session import (
 __all__ = [
     "Article",
     "Base",
+    "Bulletin",
+    "BulletinItem",
     "DailyCounter",
     "EvalResult",
     "Run",

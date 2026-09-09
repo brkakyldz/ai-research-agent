@@ -17,13 +17,12 @@ Each opens a run row before the work and closes it afterwards, including on
 failure. A run that crashed and left `status='running'` forever would be the one
 thing the /runs page could not explain.
 
-A failed digest can be picked up where it stopped. The graph checkpoints every
-superstep into `checkpoints.db` under the run's id, and reading those back is
-what a resume is for: a run that dies at `persist` has a hundred paid summaries
-sitting in the checkpoint file, and without the read the next press summarises
-the same hundred articles again, because `_unsummarized` sees no `Summary` rows.
-`ainvoke(None, thread_id=run_id)` re-runs the node that failed and
-everything after it, and nothing before it.
+A failed digest is picked up by pressing again. Each summarise branch commits
+its own row (ADR 0030), so the work a dead run bought is in the archive and not
+in a checkpoint file: `_unsummarized` skips those articles and the next press
+ranks them. That is why there is no resume - the recovery is the ordinary path,
+and it does not depend on a checkpoint whose prompts, models and state schema
+have all moved on since it was written (ADR 0032).
 """
 
 from __future__ import annotations
@@ -33,17 +32,16 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ainews.clock import local_day
 from ainews.config import Language, Settings, get_settings
-from ainews.db import Run, bulletin_runs
+from ainews.db import Bulletin, Run
 from ainews.db.models import utcnow
 from ainews.db.session import session_scope
-from ainews.pipeline.graph import build_graph, checkpoint_path
+from ainews.pipeline.graph import build_graph
 from ainews.pipeline.nodes.collect import collect_articles
 from ainews.pipeline.pricing import resolve_model
 from ainews.pipeline.state import PipelineState
@@ -121,25 +119,31 @@ async def _slot(token: str, kind: str, reserved: bool) -> AsyncIterator[None]:
         release_slot(token)
 
 
-async def resolve_run_id(session: AsyncSession, ref: str) -> str:
-    """`latest`, a full id, or an unambiguous prefix of one.
+async def resolve_bulletin(session: AsyncSession, ref: str) -> int:
+    """`latest`, a numeric id, a `YYYY-MM-DD`, or a `YYYY-MM-DD:tr`.
 
-    Shared by `ainews digest --resume` and every `ainews eval` subcommand; a
-    person at a terminal types the first six characters of a uuid, not thirty-two.
+    What every `ainews eval` subcommand takes, because a measurement is about a
+    published bulletin rather than about the press that paid for it (ADR 0030).
+    A date is the form a person actually has in mind, and it resolves to that
+    day's current version - the page they would be looking at.
     """
-    if ref == "latest":
-        run = (
-            await session.execute(bulletin_runs().where(Run.n_summarized > 0).limit(1))
-        ).scalar_one_or_none()
-        if run is None:
-            raise LookupError("no digest run with summaries in the database")
-        return run.id
-    rows = list((await session.execute(select(Run.id).where(Run.id.like(f"{ref}%")))).scalars())
-    if not rows:
-        raise LookupError(f"no run starts with {ref!r}")
-    if len(rows) > 1:
-        raise LookupError(f"{ref!r} is ambiguous: {', '.join(rows)}")
-    return rows[0]
+    query = select(Bulletin.id).order_by(
+        Bulletin.day.desc(), Bulletin.version.desc(), Bulletin.id.desc()
+    )
+    if ref != "latest":
+        day, _, language = ref.partition(":")
+        if day.isdigit():
+            found = await session.get(Bulletin, int(day))
+            if found is None:
+                raise LookupError(f"no bulletin {day}")
+            return found.id
+        query = query.where(Bulletin.day == day)
+        if language:
+            query = query.where(Bulletin.language == language)
+    bulletin_id = (await session.execute(query.limit(1))).scalars().first()
+    if bulletin_id is None:
+        raise LookupError(f"no bulletin matches {ref!r}")
+    return bulletin_id
 
 
 async def _open_run(
@@ -177,9 +181,8 @@ async def reconcile_orphaned_runs() -> int:
     `_fail_run` closes a run that *raised*. A process that is killed does not
     raise: a closed laptop, `docker compose down`, Ctrl-C at a terminal. The row
     keeps `status='running'` and `finished_at` NULL forever, the run log shows a
-    poll that has been going for a day, and a digest killed that way is never
-    offered for resume, because resume asks for `status='error'` and the status
-    never becomes one.
+    poll that has been going for a day, and the run slot's own advice block reads
+    a state the machine is not in.
 
     Called from the web application's startup, which is the moment the claim
     below is true: the run slot is module state (`_slot_holders`), so a process
@@ -243,56 +246,14 @@ async def _collect(settings: Settings) -> str:
     return run_id
 
 
-@dataclass(slots=True)
-class Resumable:
-    """What a failed run's checkpoint says is left to do."""
-
-    run: Run
-    # The node the graph will start from - the one that raised.
-    next_node: str
-
-
-async def pending_nodes(run_id: str, settings: Settings | None = None) -> list[str]:
-    """The nodes a run's checkpoint has still to execute; empty when there is
-    nothing to resume - no checkpoint under that id, or a graph that ran to
-    `END`. Read-only: opens the checkpoint file and closes it."""
-    settings = settings or get_settings()
-    checkpoints = checkpoint_path(settings)
-    if not checkpoints.is_file():
-        return []
-    async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as saver:
-        app = build_graph().compile(checkpointer=saver)
-        snapshot = await app.aget_state({"configurable": {"thread_id": run_id}})
-    return list(snapshot.next or ())
-
-
-async def resumable_run(
-    session: AsyncSession, settings: Settings | None = None
-) -> Resumable | None:
-    """The most recent digest, if it failed and its checkpoint can carry on.
-
-    Only the most recent: an older failure has been overtaken by a run that
-    summarised the same candidates, so resuming it would write a second bulletin
-    for a day that already has one.
-    """
-    last = (
-        await session.execute(bulletin_runs().where(Run.status != "running").limit(1))
-    ).scalar_one_or_none()
-    if last is None or last.status != "error":
-        return None
-    pending = await pending_nodes(last.id, settings)
-    return Resumable(run=last, next_node=pending[0]) if pending else None
-
-
 async def run_digest(
     language: Language | None = None,
     settings: Settings | None = None,
     model_summarize: str | None = None,
     model_rank: str | None = None,
-    resume: str | None = None,
     reserved_token: str | None = None,
 ) -> str:
-    """The full pipeline. Returns the run id, which is also the checkpoint thread.
+    """The full pipeline. Returns the run id.
 
     Holds the one run slot for its whole length and raises `RunBusy` when
     another run has it, so a terminal digest and a pressed one cannot select the
@@ -304,17 +265,10 @@ async def run_digest(
     resolved once here so every node downstream reads a name rather than a
     setting. Resolution happens before the run row opens, so the line the log
     prints is the line the bill will match.
-
-    With `resume` the other arguments are ignored: the language and the models
-    are in the checkpoint, and a run finished by a different model from the one
-    that started it would be priced as neither. The run row is reopened rather
-    than a new one written, so the bulletin lands on the id the reader saw fail.
     """
     settings = settings or get_settings()
-    token = reserved_token or f"digest:{resume or uuid.uuid4().hex[:8]}"
+    token = reserved_token or f"digest:{uuid.uuid4().hex[:8]}"
     async with _slot(token, "digest", reserved_token is not None):
-        if resume is not None:
-            return await _resume_digest(resume, settings)
         return await _start_digest(language, settings, model_summarize, model_rank)
 
 
@@ -342,6 +296,10 @@ async def _start_digest(
     initial: PipelineState = {
         "run_id": run_id,
         "language": language,
+        # The reader's calendar day, fixed when the run opens and carried in
+        # the state, so a run that starts at 23:59 and finishes at 00:04
+        # publishes one day rather than two.
+        "day": local_day(),
         "model_summarize": model_summarize,
         "model_rank": model_rank,
         "candidate_ids": [],
@@ -353,52 +311,18 @@ async def _start_digest(
     return run_id
 
 
-async def _resume_digest(run_id: str, settings: Settings) -> str:
-    async with session_scope() as session:
-        run = await session.get(Run, run_id)
-        if run is None:
-            raise LookupError(f"no run {run_id}")
-        if run.kind != "digest":
-            raise ValueError(f"run {run_id} is a feed poll; only a digest can be resumed")
-        if run.status != "error":
-            raise ValueError(f"run {run_id} is {run.status}; only a failed run can be resumed")
-    pending = await pending_nodes(run_id, settings)
-    if not pending:
-        raise LookupError(f"run {run_id} has no checkpoint to resume from")
-
-    log.info("run %s resuming at %s", run_id, pending[0])
-    async with session_scope() as session:
-        run = await session.get(Run, run_id)
-        run.status = "running"
-        run.finished_at = None
-        run.error = None
-    # `None` as the input is LangGraph's "carry on from the checkpoint": the
-    # state is the one the last completed superstep wrote, and execution starts
-    # at the node that was next.
-    await _invoke(run_id, None, settings)
-    return run_id
-
-
-async def _invoke(run_id: str, initial: PipelineState | None, settings: Settings) -> None:
+async def _invoke(run_id: str, initial: PipelineState, settings: Settings) -> None:
     try:
-        checkpoints = checkpoint_path(settings)
-        checkpoints.parent.mkdir(parents=True, exist_ok=True)
-        async with AsyncSqliteSaver.from_conn_string(str(checkpoints)) as saver:
-            app = build_graph().compile(checkpointer=saver)
-            await app.ainvoke(
-                initial,
-                config={
-                    "configurable": {"thread_id": run_id},
-                    "recursion_limit": RECURSION_LIMIT,
-                    # Keeps a hundred branches from becoming a hundred
-                    # simultaneous requests and a wall of 429s.
-                    "max_concurrency": settings.summarize_batch_size,
-                },
-                # Written before the next superstep starts, not alongside it.
-                # The default lets a checkpoint lag one step behind the graph,
-                # which is exactly the step a resume needs to have been kept.
-                durability="sync",
-            )
+        app = build_graph().compile()
+        await app.ainvoke(
+            initial,
+            config={
+                "recursion_limit": RECURSION_LIMIT,
+                # Keeps a hundred branches from becoming a hundred simultaneous
+                # requests and a wall of 429s.
+                "max_concurrency": settings.summarize_batch_size,
+            },
+        )
     except Exception as exc:
         log.exception("digest run %s failed", run_id)
         await _fail_run(run_id, f"{type(exc).__name__}: {exc}")

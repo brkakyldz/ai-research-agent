@@ -24,6 +24,14 @@ Kurallar:
   En fazla 10 kelime; başlık tek satırda durmalı.
 - Teknik terimleri zorlama çevirme — "model", "agent", "open-source", "fine-tune"
   yerleşik kullanımlarıyla kalsın.
+- `relevant`, haber yapay zekâ ya da yazılım sektörüyle hiç ilgili değilse
+  false olur: kişisel bir deneme, bir hobi projesi, alakasız bir alandan bir
+  yazı. Buradaki bazı kaynaklar kişilerin kendi blogları ve ikisini de
+  yayımlıyor. Küçük olması ilgisiz yapmaz; onun için `importance` 1 var.
+- `kind` içeriğin türüdür: bir ürün ya da sürüm çıkıyorsa `release`, makale ya
+  da teknik sonuçsa `research`, yorum ya da savsa `opinion`, birçok şeyi
+  derleyen bülten ya da bağlantı listesiyse `roundup`, haberse `news`, geri
+  kalan her şey için `other`.
 - `tags` iki ila dört adet, küçük harfli ve **İngilizce** konu etiketi. Şunları
   tercih et: {tags}. Hiçbiri uymuyorsa bir tane ekle. Etiketler filtre
   anahtarı; dil değiştirince bozulmamaları için İngilizce.

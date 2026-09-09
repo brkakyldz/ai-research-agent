@@ -13,6 +13,11 @@ press.
 
 Tier 3 is never used here. The point is a body that can be attributed, and a web
 search for the title is the one source that cannot be.
+
+It rewrites text and cannot move a story. Where a story sits is a fact about a
+bulletin (ADR 0030) and this touches summaries, so a repair to one article has
+no way to re-order the day around it even if it wanted to - which is the shape
+the old two-column design had to be told, in a comment, not to do.
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings, get_settings
 from ainews.db import Article, Source, Summary
-from ainews.pipeline.nodes.summarize import summarize_article
+from ainews.pipeline.nodes.summarize import draft_summary
 from ainews.pipeline.pricing import resolve_model
 from ainews.sources.extract import clean_html, fetch_article, is_usable
 
@@ -121,22 +126,12 @@ async def resummarize(
 
     rewritten = 0
     for language in languages:
-        # Through the node the pipeline uses, not a second implementation: a
+        # Through the call the pipeline uses, not a second implementation: a
         # repaired summary has to be the summary a run would have written.
-        result = await summarize_article(
-            {
-                "run_id": "",
-                "language": language,
-                "article_id": article_id,
-                "model": model,
-            },
-            settings,
-        )
-        payloads = result.get("summaries") or []
-        if not payloads:
-            log.warning("resummarize failed for article %d (%s)", article_id, language)
+        draft = await draft_summary(article_id, language, settings, model)
+        if isinstance(draft, str):
+            log.warning("resummarize failed for article %d (%s): %s", article_id, language, draft)
             continue
-        payload = payloads[0]
         rows = (
             await session.execute(
                 select(Summary)
@@ -145,14 +140,20 @@ async def resummarize(
             )
         ).scalars()
         for row in rows:
-            # The story keeps its place in whatever bulletin it is in: `rank`
-            # and `editor_importance` were the ranker's reading of the day and
-            # are not this call's to overwrite.
-            row.title_local = payload["title_local"]
-            row.summary = payload["summary"]
-            row.why_it_matters = payload["why_it_matters"]
-            row.tags_json = json.dumps(payload["tags"], ensure_ascii=False)
-            row.importance = payload["importance"]
+            row.title_local = draft.parsed.title_local
+            row.summary = draft.parsed.summary
+            row.why_it_matters = draft.parsed.why_it_matters
+            row.tags_json = json.dumps(draft.parsed.tags, ensure_ascii=False)
+            row.importance = draft.parsed.importance
+            row.relevant = draft.parsed.relevant
+            row.kind = draft.parsed.kind
+            # The row's cost is what its text cost, which is now this call. The
+            # run that first paid for it still carries what it paid on its own
+            # row; the same dollar has not moved, a second one was spent.
+            row.model = draft.model
+            row.tokens_in = draft.tokens_in
+            row.tokens_out = draft.tokens_out
+            row.est_cost_usd = draft.est_cost_usd
             rewritten += 1
     await session.commit()
 

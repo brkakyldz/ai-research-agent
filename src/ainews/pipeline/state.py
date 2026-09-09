@@ -2,10 +2,10 @@
 
 Two rules shape this module.
 
-State carries **ids, not bodies**. LangGraph writes a checkpoint after every
-superstep, so anything in the state is serialised once per step per branch; a
-hundred article bodies in there would turn a cheap run into a slow one. The
-bodies stay in SQLite and the graph passes primary keys.
+State carries **ids, not bodies**. A `Send` fan-out passes its state to every
+branch and the reducer collects a value back from each, so anything in here is
+carried a hundred times over on a hundred-article day. The bodies stay in
+SQLite and the graph passes primary keys.
 
 The LLM's output is a **Pydantic model, not a prompt convention**. Both LLM nodes
 use `with_structured_output`, so a malformed answer fails as a validation error
@@ -20,6 +20,25 @@ from typing import Annotated, Literal, TypedDict
 from pydantic import BaseModel, Field, field_validator
 
 Language = Literal["tr", "en"]
+# What kind of item the summariser thinks it read. The ranker uses it to
+# select rather than to score: a roundup is never offered the lead, because a
+# newsletter covering nine things is not the day's story even when it touches
+# the day's story.
+SummaryKind = Literal["news", "release", "research", "opinion", "roundup", "other"]
+# The four bands the page draws. A tier and not a second 1-5 score: the
+# summariser is told to be honest and that most items are 2 or 3, the ranker is
+# told that a 4 leading the day is a 5, and a page that sorts by
+# `coalesce(editor_importance, importance)` mixes an absolute scale with a
+# relative one in a layout whose only ranking indicator is size (ADR 0030).
+Tier = Literal["lead", "major", "notable", "brief"]
+# Hardest first. Two readers need the order - the aggregate breaks a tie in the
+# tier vote downward, and the page draws a size step - so it is stated once.
+TIER_ORDER: tuple[Tier, ...] = ("lead", "major", "notable", "brief")
+# What each tier draws at on the summariser's own 1-5 ink scale (`theme.css`,
+# `.p1`-`.p5`). Four tiers over five steps is not an oversight: `p1` is the
+# bottom of that scale and belongs to stories *outside* the bulletin, where a 1
+# means noise. Nothing the editor chose is noise.
+TIER_STEP: dict[Tier, int] = {"lead": 5, "major": 4, "notable": 3, "brief": 2}
 
 
 class ArticleSummary(BaseModel):
@@ -43,6 +62,26 @@ class ArticleSummary(BaseModel):
     # 2026-09-08, and the JSON schema reaches the model beside the prompt, so
     # the rubric was stated twice to the same reader and could drift apart.
     importance: int = Field(ge=1, le=5, description="1 to 5, on the scale the instructions define.")
+    # The source list was the only thing deciding whether an item was AI news,
+    # and one weight-1.5 source is a personal blog that also publishes on map
+    # projections. Asked at summarise time and not at rank time because the
+    # summariser has the article in front of it and the ranker has a table.
+    relevant: bool = Field(
+        default=True,
+        description=(
+            "True if this is AI or software-industry news. False for anything the "
+            "feed carries that is not - a personal essay, a hobby project, an "
+            "unrelated field."
+        ),
+    )
+    kind: SummaryKind = Field(
+        default="news",
+        description=(
+            "What shape of item this is: news, release (a product or version "
+            "shipping), research (a paper or technical result), opinion, roundup "
+            "(a link digest or newsletter covering many things), other."
+        ),
+    )
 
     @field_validator("tags", mode="after")
     @classmethod
@@ -56,23 +95,33 @@ class ArticleSummary(BaseModel):
 
 
 class Pick(BaseModel):
-    """One story the ranker keeps, and what it thinks the story is worth.
+    """One story the ranker keeps, where it belongs, and why.
 
-    The importance travels with the pick because the ranker is the one node that
-    sees the whole day, and the prompt asks it to correct the summariser's
-    isolated scores where the day makes them wrong. Without this field the model
-    would be told to fix a number and able to return only an order, and the page
-    would sort by the number it had been told to fix (ADR 0025).
+    `tier` and not a corrected 1-5 importance (ADR 0030). The ranker is the one
+    node that sees the whole day, and what it is qualified to say is how this
+    story stands against the others in front of it - not what its absolute
+    significance is on a scale the summariser was given a rubric for. A tier is
+    the page's own vocabulary: it is what the headline size draws.
+
+    `reason` is stored because "prefer one strong story over three angles on it"
+    was a rule with no trace. The ranker's cluster decisions left nothing behind
+    for anyone to check, so the rule could only be evaluated by re-reading the
+    day by hand.
     """
 
     number: int = Field(description="The candidate number shown in the table.")
-    importance: int = Field(
-        ge=1,
-        le=5,
+    tier: Tier = Field(
         description=(
-            "The story's importance in the context of the whole day, on the same 1-5 "
-            "scale the summariser used. Keep the summariser's score when the day "
-            "confirms it; change it when the day contradicts it."
+            "lead for the one story that leads the day, major for the few that "
+            "would headline any other day, notable for solid items, brief for "
+            "worth-knowing. At most one lead."
+        )
+    )
+    reason: str = Field(
+        default="",
+        description=(
+            "Up to fifteen words on why this story is at this tier, or why it "
+            "represents its cluster. Not a summary of the story."
         ),
     )
 
@@ -92,36 +141,41 @@ class RankedDigest(BaseModel):
     )
     picks: list[Pick] = Field(
         description=(
-            "The stories that belong in the digest, most important first, each with "
-            "its candidate number and its importance in the day's context."
+            "The stories that belong in today's bulletin, most important first, "
+            "each with its candidate number and its tier. Fewer than the maximum "
+            "when the day is thin."
         )
     )
 
 
 class SummaryPayload(TypedDict):
-    """One finished summary on its way back through the `Send` reducer."""
+    """One committed summary on its way back through the `Send` reducer.
 
+    Ids and money, no text. The row is already in the database when this is
+    written - `summarize` commits it (ADR 0030) - so the branch carries what
+    the run's bookkeeping needs and the ranker reads the day back out of SQLite.
+    A hundred article summaries riding the state would be a hundred summaries in
+    every message LangGraph passes between supersteps.
+    """
+
+    summary_id: int
     article_id: int
-    title_local: str
-    summary: str
-    why_it_matters: str
-    tags: list[str]
-    importance: int
     tokens_in: int
     tokens_out: int
+    est_cost_usd: float
 
 
-class RankedItem(TypedDict):
-    article_id: int
-    rank: int
-    # The ranker's read of the story against the day. `persist` writes it to
-    # `summaries.editor_importance`; the summariser's own score stays in
-    # `importance`, because the evaluation layer compares the two.
-    importance: int
+class ItemPayload(TypedDict):
+    """One story's place in the bulletin the run is about to publish."""
+
+    summary_id: int
+    position: int
+    tier: Tier
+    reason: str
 
 
 class RankUsage(TypedDict):
-    """The rank call's tokens, on their own channel.
+    """The rank calls' tokens, on their own channel.
 
     Its own key rather than a fake `SummaryPayload` with `article_id = -1`
     riding the summaries channel. A sentinel that avoids "opening a second
@@ -151,17 +205,21 @@ class PipelineState(TypedDict, total=False):
     # line and carried here rather than read from settings inside the node
     # (ADR 0020). In the state and not in a module global because two of these
     # nodes run a hundred branches wide: a global would be one value for a
-    # process, and this has to be one value for a *run*. `persist` prices the
-    # run off these two names, so the run row cannot disagree with what ran -
-    # and a resumed run (`runner.run_digest(resume=...)`) reads them back off
-    # the checkpoint, so it is finished by the models that started it.
+    # process, and this has to be one value for a *run*. The run row is priced
+    # off these two names, so it cannot disagree with what ran.
     model_summarize: str
     model_rank: str
     candidate_ids: list[int]
     summaries: Annotated[list[SummaryPayload], operator.add]
-    ranked: list[RankedItem]
+    ranked: list[ItemPayload]
     rank_usage: RankUsage
     editor_note: str
+    # The local day the bulletin belongs to, fixed when the run starts so a
+    # press at 23:59 writes one day and not two. `YYYY-MM-DD`.
+    day: str
+    # How much the shuffled rank calls agreed with each other. Carried to
+    # `persist` because it is a property of the bulletin, not of a probe.
+    agreement: float
     errors: Annotated[list[str], operator.add]
     n_collected: int
     n_new: int
@@ -170,9 +228,8 @@ class PipelineState(TypedDict, total=False):
 class SummarizeTask(TypedDict, total=False):
     """Payload of a single `Send` into the summarize node.
 
-    `model` is optional so a checkpoint written before ADR 0020 can still be
-    resumed: the node falls back to the configured summariser when the key is
-    absent, which is what that run was using anyway.
+    `model` is optional and the node falls back to the configured summariser,
+    which is what a caller that did not choose one meant.
     """
 
     run_id: str

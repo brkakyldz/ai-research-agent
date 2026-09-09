@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from ainews.config import Settings
-from ainews.db import Run, bulletin_runs
+from ainews.db import Bulletin, Run, bulletin_runs
 from ainews.db.models import RunKind
 from ainews.web import queries
 
@@ -47,18 +47,19 @@ async def test_the_badge_counts_exactly_what_the_archive_lists(
     session: AsyncSession, engine: AsyncEngine
 ) -> None:
     """The visible half of the bug: two numbers about one list, arrived at by
-    two queries. They are one query now."""
+    two queries. They are one query now - and the list is bulletins, so a run
+    that produced nothing cannot be counted into it at all."""
     session.add_all(
         [
-            Run(kind="digest", language="tr", status="ok", n_summarized=15),
-            Run(kind="digest", language="en", status="ok", n_summarized=3),
-            Run(kind="digest", language="tr", status="error"),  # nothing produced
+            Bulletin(day="2026-09-08", language="tr", version=1, est_cost_usd=0.0),
+            Bulletin(day="2026-09-08", language="en", version=1, est_cost_usd=0.0),
+            Run(kind="digest", language="tr", status="error"),  # nothing published
             Run(kind="collect", language="tr", status="ok"),
         ]
     )
     await session.commit()
 
-    listed = await queries.digest_runs(session, limit=30)
+    listed = await queries.bulletins_page(session, limit=30)
     assert await queries.count_archive(session) == len(listed) == 2
 
 

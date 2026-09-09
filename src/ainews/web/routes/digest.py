@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ainews.db import Run, Summary, Verdict, db_session
+from ainews.db import Bulletin, Summary, Verdict, db_session
 from ainews.db.models import utcnow
 from ainews.web import queries
 from ainews.web.format import impact_split
@@ -31,21 +31,22 @@ router = APIRouter()
 @router.get("/", response_class=HTMLResponse)
 async def index(
     request: Request,
-    all: bool = Query(False, description="show everything summarised, not just the ranked top N"),
+    all: bool = Query(False, description="show everything summarised, not just the bulletin"),
     tag: str | None = None,
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
     language = language_of(request)
     # Not filtered by `language`: the shell's switch translates the interface,
     # it does not choose which bulletin exists (ADR 0017).
-    run = await queries.latest_digest_run(session)
+    bulletin = await queries.latest_bulletin(session)
 
-    context = await shell_context(request, session, language, page="digest", run=run)
+    context = await shell_context(request, session, language, page="digest", bulletin=bulletin)
     context.update(
         {
-            "run": run,
-            "editor_note": run.editor_note if run else None,
+            "bulletin": bulletin,
+            "editor_note": bulletin.editor_note if bulletin else None,
             "stories": [],
+            "others": [],
             "n_others": 0,
             "tags": [],
             "n_topics": 0,
@@ -55,36 +56,43 @@ async def index(
         }
     )
 
-    if run is not None:
-        stories = await queries.stories_for_run(
-            session, run, language=language, ranked_only=not all, tag=tag
+    if bulletin is not None:
+        stories = await queries.stories_for_bulletin(session, bulletin, language=language, tag=tag)
+        # Appended, not merged. The bulletin's stories carry a tier and these do
+        # not, so keeping them in their own block is what stops an absolute
+        # score and a relative one being compared by eye (ADR 0030).
+        others = (
+            await queries.other_stories(session, bulletin, language=language, tag=tag)
+            if all
+            else []
         )
         context["stories"] = stories
+        context["others"] = others
         # Only offer the expander when there is something behind it.
-        context["n_others"] = 0 if all else await queries.count_unranked(session, run)
+        context["n_others"] = 0 if all else await queries.count_others(session, bulletin)
         # Every count on this page is a count of the list the reader can reach.
         # `all=1` widens the list, so it widens the counts with it - a filter
         # pill promising 27 stories on a page that holds fifteen, and returning
         # four when pressed, was three numbers disagreeing about one day.
-        ranked_only = not all
-        # One pass over the run's rows, both scopes counted. The filter row
+        #
+        # One pass over the day's rows, both scopes counted. The filter row
         # follows the list on screen, so it draws twelve of whichever scope is
         # showing and the disclosure the rest.
-        topics = await queries.tag_counts(session, run)
-        context["tags"] = topics.shown(ranked_only)[:12]
+        topics = await queries.tag_counts(session, bulletin)
+        context["tags"] = topics.shown(not all)[:12]
         # The brief's footnote does not follow it. That line is the size of the
-        # *digest* - the same eleven stories the rail badge counts - so opening
+        # *bulletin* - the same eleven stories the rail badge counts - so opening
         # `?all=1` must not leave "11 haber" beside a topic count taken over
         # ninety-one. Nor `tags|length`, which is the row's twelve-item cap
         # reporting itself as a measurement.
-        context["n_topics"] = len(topics.ranked)
+        context["n_topics"] = len(topics.published)
         # How heavy the day in view is, drawn at the end of the topic row. It is
         # counted off the list already in `context` rather than off the run, so
         # the filtered page answers for its filter. It is the only thing the
         # right rail's themes list is missed for: that list drew a name, a share
         # and a count per topic, which is the filter row three lines above it
         # written a second time (ADR 0024).
-        context["split"] = impact_split(stories)
+        context["split"] = impact_split(stories + others)
 
     response = get_templates(request).TemplateResponse(request, "index.html", context)
     remember_preferences(request, response, language)
@@ -94,8 +102,8 @@ async def index(
 @router.get("/archive", response_class=HTMLResponse)
 async def archive(
     request: Request,
-    run: str | None = None,
-    all: bool = Query(False, description="show everything summarised, not just the ranked top N"),
+    b: int | None = Query(None, description="which bulletin to open"),
+    all: bool = Query(False, description="show everything summarised, not just the bulletin"),
     limit: int | None = Query(None, description="how many bulletins to list"),
     session: AsyncSession = Depends(db_session),
 ) -> HTMLResponse:
@@ -103,33 +111,39 @@ async def archive(
 
     `all=1` is the digest's own flag, taken here for one caller: `/runs/verdicts`
     links a labelled story by its anchor, and a verdict can be given on a story
-    below the fold - the digest offers the two words on every rendered item,
-    ranked or not. Without the flag that link lands on a page the story is not
-    on, which is a dead anchor rather than a visible error.
+    the editor left out - the digest offers the two words on every rendered
+    item, published or not. Without the flag that link lands on a page the story
+    is not on, which is a dead anchor rather than a visible error.
     """
     language = language_of(request)
-    runs = await queries.digest_runs(session, limit=queries.page_limit(limit, 30))
-    selected: Run | None = None
-    if runs:
+    listed = await queries.bulletins_page(session, limit=queries.page_limit(limit, 30))
+    selected: Bulletin | None = None
+    if listed:
         # A bulletin named in the URL but past the window is still fetched by id:
         # a link into the archive must not depend on how far the list was opened.
-        selected = next((r for r in runs if r.id == run), None)
+        selected = next((row for row in listed if row.id == b), None)
         if selected is None:
-            selected = (await queries.run_by_id(session, run) if run else None) or runs.rows[0]
+            selected = (await queries.bulletin_by_id(session, b) if b else None) or listed.rows[0]
 
-    context = await shell_context(request, session, language, page="archive", run=selected)
+    context = await shell_context(request, session, language, page="archive", bulletin=selected)
     context.update(
         {
-            "runs": runs,
+            "bulletins": listed,
             "more_url": f"/archive?lang={language}"
-            + (f"&run={selected.id}" if selected else "")
+            + (f"&b={selected.id}" if selected else "")
             + "&limit=",
             "selected": selected,
+            # The version that replaced this one, so a reader who followed a link
+            # to a superseded page is told rather than left to work it out.
+            "superseded_by": (await queries.newer_version(session, selected) if selected else None),
             "stories": (
-                await queries.stories_for_run(
-                    session, selected, language=language, ranked_only=not all
-                )
+                await queries.stories_for_bulletin(session, selected, language=language)
                 if selected
+                else []
+            ),
+            "others": (
+                await queries.other_stories(session, selected, language=language)
+                if selected and all
                 else []
             ),
         }

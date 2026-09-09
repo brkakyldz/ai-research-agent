@@ -36,9 +36,13 @@ async def test_a_run_left_running_is_closed_at_startup(session: AsyncSession) ->
     assert orphan.error == "process ended before the run did"
 
 
-async def test_a_killed_digest_becomes_resumable(session: AsyncSession) -> None:
-    """Resume asks for `status='error'`, and a killed run never reached one, so
-    the run the reader most wants to finish was the one never offered."""
+async def test_a_killed_digest_is_closed_like_any_other(session: AsyncSession) -> None:
+    """A digest is not a special case of the reconciliation.
+
+    Every run the process was holding is closed the same way, whatever kind it
+    was: a digest left at `status='running'` is a press the advice block and the
+    one-run-at-a-time slot both read as still in flight, on a machine where
+    nothing is running at all."""
     orphan = Run(kind="digest", language="tr", status="running")
     session.add(orphan)
     await session.commit()

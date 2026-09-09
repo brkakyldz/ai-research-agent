@@ -215,19 +215,19 @@ def test_unrepresented_fives_sees_through_a_cluster() -> None:
             "article_id": 1,
             "title": "Nvidia is buying Hugging Face for $13 billion",
             "importance": 5,
-            "rank": None,
+            "position": None,
         },
         {
             "article_id": 2,
             "title": "Nvidia is buying Hugging Face for $13 billion - The Verge",
             "importance": 4,
-            "rank": 1,
+            "position": 1,
         },
         {
             "article_id": 3,
             "title": "A lab ships a model nobody ranked",
             "importance": 5,
-            "rank": None,
+            "position": None,
         },
     ]
     assert checks.unrepresented_fives(stories) == [3]
@@ -248,25 +248,27 @@ def test_editor_note_shape_counts_paragraphs_and_words() -> None:
     assert checks.editor_note_shape(None) == {"paragraphs": 0, "words": []}
 
 
-# -- the editor's corrections (ADR 0025) ---------------------------------------
+# -- the editor's placements (ADR 0030) ---------------------------------------
 
 
-def test_editor_shift_counts_how_far_the_ranker_moved_the_scores() -> None:
+def test_tier_shape_counts_the_bands_and_the_editors_disagreements() -> None:
+    """A bulletin that is fifteen `notable` is a ranker filling a page. And a
+    lower-importance story placed above a higher one is the editor reading
+    against the free ordering, which is what an editor is for - all of it would
+    mean the two are not reading the same thing."""
     stories = [
-        {"article_id": 1, "importance": 4, "editor_importance": 5, "rank": 1},
-        {"article_id": 2, "importance": 4, "editor_importance": 4, "rank": 2},
-        {"article_id": 3, "importance": 4, "editor_importance": 2, "rank": 3},
-        {"article_id": 4, "importance": 5, "editor_importance": None, "rank": None},
-        {"article_id": 5, "importance": 3, "rank": 4},  # before the column existed
+        {"article_id": 1, "importance": 3, "position": 1, "tier": "lead"},
+        {"article_id": 2, "importance": 5, "position": 2, "tier": "major"},
+        {"article_id": 3, "importance": 4, "position": 3, "tier": "major"},
+        {"article_id": 4, "importance": 5, "position": None, "tier": None},
     ]
-    assert checks.editor_shift(stories) == {
-        "n_ranked": 3,
-        "n_changed": 2,
-        "up": 1,
-        "down": 1,
-        "mean_abs_shift": pytest.approx(1.0),
-    }
-    assert checks.editor_shift([])["n_ranked"] == 0
+    shape = checks.tier_shape(stories)
+    assert shape["n_ranked"] == 3
+    assert shape["counts"] == {"lead": 1, "major": 2, "notable": 0, "brief": 0}
+    # (1, 2) and (1, 3): a 3 published above a 5 and above a 4.
+    assert shape["contradictions"] == 2
+    assert shape["contradiction_share"] == pytest.approx(2 / 3)
+    assert checks.tier_shape([])["n_ranked"] == 0
 
 
 def test_the_tag_vocabulary_share_reads_the_prompts_own_list() -> None:

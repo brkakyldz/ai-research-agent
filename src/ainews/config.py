@@ -124,8 +124,7 @@ class Settings(BaseSettings):
     def sqlite_path(self) -> Path:
         """Filesystem path behind `database_url`.
 
-        Two callers: the WAL pragmas at connection setup, and `checkpoint_path`,
-        which puts the graph's checkpoint file beside it. Not backups - there is
+        One caller: the WAL pragmas at connection setup. Not backups - there is
         no backup command, and getting the database out of the container is
         `docker cp`, which `docker-compose.yml` documents beside the named
         volume.

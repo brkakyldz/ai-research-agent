@@ -227,3 +227,221 @@ async def test_the_migration_creates_the_search_index(engine: AsyncEngine, table
             )
         ).scalar_one_or_none()
     assert found == table
+
+
+# -- 0004: the two objects ----------------------------------------------------
+
+
+async def _archive_with_a_published_run(path: Path, *, extra_summary: bool = False) -> AsyncEngine:
+    """A pre-0004 archive holding one digest run that published three stories.
+
+    Built at `0003_provenance` and not at head, because the columns this
+    revision reads - `summaries.run_id`, `rank`, `editor_importance` - do not
+    exist at head. That is what makes it the only chance to write them down.
+    """
+    engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+    async with engine.begin() as connection:
+        await connection.run_sync(lambda c: command.upgrade(alembic_config(c), "0003_provenance"))
+        await connection.execute(
+            text(
+                "INSERT INTO sources (id, name, url, kind, weight, enabled,"
+                " consecutive_failures)"
+                " VALUES (1, 'Simon Willison', 'https://sw.net/feed', 'rss', 1.5, 1, 0)"
+            )
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO runs (id, kind, language, status, started_at, n_collected, n_new,"
+                " n_summarized, tokens_in, tokens_out, est_cost_usd, model_rank, editor_note)"
+                " VALUES ('run1', 'digest', 'tr', 'ok', '2026-09-06 13:00:00', 40, 12, 12,"
+                " 9000, 3000, 0.0248, 'gpt-5.6-luna', 'Gunun ozeti.')"
+            )
+        )
+        for n in range(1, 5):
+            await connection.execute(
+                text(
+                    "INSERT INTO articles (id, source_id, title, url, url_canonical, body_text,"
+                    " body_source, fetched_at)"
+                    " VALUES (:id, 1, :title, :url, :url, 'A body.', 'feed',"
+                    " '2026-09-06 12:00:00')"
+                ),
+                {"id": n, "title": f"Story {n}", "url": f"https://sw.net/{n}"},
+            )
+            # Three of the four were ranked; the fourth was summarised and left
+            # out, which is the row that must not become a bulletin item.
+            await connection.execute(
+                text(
+                    "INSERT INTO summaries (id, article_id, run_id, language, title_local,"
+                    " summary, why_it_matters, tags_json, importance, rank, editor_importance,"
+                    " created_at)"
+                    " VALUES (:id, :id, 'run1', 'tr', :title, 'Ozet metni.', 'Onemi.', '[]',"
+                    " 3, :rank, :editor, '2026-09-06 13:05:00')"
+                ),
+                {
+                    "id": n,
+                    "title": f"Baslik {n}",
+                    "rank": n if n < 4 else None,
+                    "editor": 5 if n == 1 else None,
+                },
+            )
+        if extra_summary:
+            # A second run, because the old key is `(article_id, run_id,
+            # language)` and one run could never hold two summaries of an
+            # article. Two runs could, and only a query in `dedupe` stopped it.
+            await connection.execute(
+                text(
+                    "INSERT INTO runs (id, kind, language, status, started_at, n_collected,"
+                    " n_new, n_summarized, tokens_in, tokens_out, est_cost_usd)"
+                    " VALUES ('run0', 'digest', 'tr', 'ok', '2026-09-06 09:00:00', 1, 1, 1,"
+                    " 100, 50, 0.001)"
+                )
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO summaries (id, article_id, run_id, language, title_local,"
+                    " summary, why_it_matters, tags_json, importance, created_at)"
+                    " VALUES (99, 1, 'run0', 'tr', 'Ikinci baslik', 'x', 'y', '[]', 3,"
+                    " '2026-09-06 09:05:00')"
+                )
+            )
+    return engine
+
+
+async def test_a_published_run_becomes_a_bulletin(tmp_path: Path) -> None:
+    """Migration `0004`. What each run put on the front page is recorded in
+    `rank` and `editor_importance` and nowhere else, and the same revision drops
+    both."""
+    engine = await _archive_with_a_published_run(tmp_path / "archive.db")
+    try:
+        await init_db(engine)
+
+        async with engine.begin() as connection:
+            bulletin = (
+                await connection.execute(
+                    text(
+                        "SELECT day, language, version, editor_note, model_rank, run_id,"
+                        " est_cost_usd FROM bulletins"
+                    )
+                )
+            ).one()
+            items = (
+                await connection.execute(
+                    text("SELECT summary_id, position, tier FROM bulletin_items ORDER BY position")
+                )
+            ).all()
+        # 13:00 UTC is the same calendar day in every zone the tests run in.
+        assert bulletin == ("2026-09-06", "tr", 1, "Gunun ozeti.", "gpt-5.6-luna", "run1", 0.0248)
+        # The unranked fourth summary is not in the bulletin. It is still a
+        # summary; it was simply not published.
+        assert items == [(1, 1, "lead"), (2, 2, "major"), (3, 3, "major")]
+    finally:
+        await engine.dispose()
+
+
+async def test_the_summaries_survive_the_rebuild_with_their_text(tmp_path: Path) -> None:
+    """The revision drops three columns from a populated table, which on SQLite
+    is a copy into a new one. The failure that would hide is silent row loss."""
+    engine = await _archive_with_a_published_run(tmp_path / "archive.db")
+    try:
+        await init_db(engine)
+
+        async with engine.begin() as connection:
+            rows = (
+                await connection.execute(
+                    text(
+                        "SELECT id, title_local, relevant, kind, est_cost_usd FROM summaries"
+                        " ORDER BY id"
+                    )
+                )
+            ).all()
+        assert len(rows) == 4
+        assert rows[0] == (1, "Baslik 1", 1, "news", 0.0)
+    finally:
+        await engine.dispose()
+
+
+async def test_the_search_index_still_finds_the_rebuilt_rows(tmp_path: Path) -> None:
+    """A contentless FTS5 table indexes by rowid and its triggers live on the
+    table the rebuild replaces. Left alone, the index survives the copy pointing
+    at a table that no longer exists and nothing new is ever indexed."""
+    engine = await _archive_with_a_published_run(tmp_path / "archive.db")
+    try:
+        await init_db(engine)
+
+        async with engine.begin() as connection:
+            found = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT rowid FROM summaries_fts WHERE summaries_fts MATCH 'Baslik'"
+                            " ORDER BY rowid"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO summaries (article_id, language, title_local, summary,"
+                    " why_it_matters, tags_json, importance, relevant, kind, model, tokens_in,"
+                    " tokens_out, est_cost_usd, created_at)"
+                    " VALUES (4, 'en', 'Zzzunique headline', 's', 'w', '[]', 3, 1, 'news',"
+                    " 'gpt-5.6-luna', 10, 5, 0.001, '2026-09-09 10:00:00')"
+                )
+            )
+            indexed = (
+                await connection.execute(
+                    text("SELECT count(*) FROM summaries_fts WHERE summaries_fts MATCH 'Zzzunique'")
+                )
+            ).scalar_one()
+        assert found == [1, 2, 3, 4]
+        # The triggers are back, so the row written after the rebuild is indexed.
+        assert indexed == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_the_added_columns_keep_no_default_behind(tmp_path: Path) -> None:
+    """The defaults exist to fill the rows already there. The application writes
+    every one of these on insert, and a default left in place is a second source
+    for a value - the shape of bug where a model name silently becomes ''."""
+    engine = await _archive_with_a_published_run(tmp_path / "archive.db")
+    try:
+        await init_db(engine)
+
+        async with engine.begin() as connection:
+            defaults = {
+                row[1]: row[4]
+                for row in (await connection.execute(text("PRAGMA table_info(summaries)"))).all()
+            }
+        assert defaults["model"] is None
+        assert defaults["relevant"] is None
+        assert defaults["est_cost_usd"] is None
+    finally:
+        await engine.dispose()
+
+
+async def test_two_summaries_of_one_article_stop_the_upgrade_by_name(tmp_path: Path) -> None:
+    """The new key forbids them. Reaching the batch copy first would report a
+    constraint name and no row, on a half-migrated database.
+
+    `RuntimeError` and not the revision's own class: a module whose name starts
+    with a digit is not importable by name, and a test that reached into it with
+    `importlib` would be asserting on the plumbing rather than on the message an
+    operator reads.
+    """
+    engine = await _archive_with_a_published_run(tmp_path / "archive.db", extra_summary=True)
+    try:
+        with pytest.raises(RuntimeError) as raised:
+            await init_db(engine)
+        assert "article 1 in tr" in str(raised.value)
+        # Nothing was rebuilt: the check runs before the first write.
+        async with engine.begin() as connection:
+            assert (
+                await connection.execute(
+                    text("SELECT count(*) FROM sqlite_master WHERE name = 'bulletins'")
+                )
+            ).scalar_one() == 0
+    finally:
+        await engine.dispose()

@@ -1,14 +1,13 @@
 """`ainews prune`, and the line it will not cross.
 
-The archive is the point of the tool, so nothing here removes a summary, a run
-row, a verdict or a judge finding. What it removes is what no reader and no
-command can reach: checkpoint threads for runs that cannot be resumed, and
-articles past the collect horizon that were never summarised.
+The archive is the point of the tool, so nothing here removes a summary, a
+bulletin, a run row, a verdict or a judge finding. What it removes is the one
+thing no reader and no command can reach: articles past the collect horizon that
+were never summarised.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import timedelta
 
 import pytest
@@ -19,72 +18,7 @@ from ainews.config import Settings
 from ainews.db import Article, Run, Source, Summary
 from ainews.db.models import utcnow
 from ainews.pipeline import runner
-from ainews.pipeline.graph import checkpoint_path
 from ainews.pipeline.prune import prune
-
-
-def _fake_checkpoints(settings: Settings, threads: list[str]) -> None:
-    """A checkpoint file shaped like the saver's, without running a graph."""
-    path = checkpoint_path(settings)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS checkpoints (thread_id TEXT, blob TEXT)")
-        conn.execute("CREATE TABLE IF NOT EXISTS writes (thread_id TEXT, blob TEXT)")
-        for thread in threads:
-            conn.executemany("INSERT INTO checkpoints VALUES (?, ?)", [(thread, "x")] * 8)
-            conn.executemany("INSERT INTO writes VALUES (?, ?)", [(thread, "x")] * 200)
-        conn.commit()
-
-
-def _threads(settings: Settings) -> set[str]:
-    with sqlite3.connect(checkpoint_path(settings)) as conn:
-        return {r[0] for r in conn.execute("SELECT DISTINCT thread_id FROM checkpoints")}
-
-
-@pytest.fixture
-async def runs(session: AsyncSession, settings: Settings) -> dict[str, str]:
-    finished = Run(kind="digest", language="tr", status="ok", n_summarized=15)
-    failed = Run(kind="digest", language="tr", status="error", error="boom")
-    session.add_all([finished, failed])
-    await session.commit()
-    ids = {"finished": finished.id, "failed": failed.id, "gone": "a" * 32}
-    _fake_checkpoints(settings, list(ids.values()))
-    return ids
-
-
-async def test_a_failed_runs_checkpoint_is_kept(
-    settings: Settings, engine: AsyncEngine, runs: dict[str, str]
-) -> None:
-    """It is the whole reason the file exists: `ainews digest --resume` refuses
-    any run that is not in `error`, so that is exactly what must survive."""
-    await prune(settings)
-    assert _threads(settings) == {runs["failed"]}
-
-
-async def test_a_finished_runs_checkpoint_goes(
-    settings: Settings, engine: AsyncEngine, runs: dict[str, str]
-) -> None:
-    report = await prune(settings)
-    assert runs["finished"] not in _threads(settings)
-    assert report.threads == 2
-    assert report.checkpoint_rows == 2 * 208
-
-
-async def test_a_thread_with_no_run_row_goes(
-    settings: Settings, engine: AsyncEngine, runs: dict[str, str]
-) -> None:
-    """It cannot even be addressed: a resume takes a run id and there is no run."""
-    await prune(settings)
-    assert runs["gone"] not in _threads(settings)
-
-
-async def test_a_dry_run_counts_and_deletes_nothing(
-    settings: Settings, engine: AsyncEngine, runs: dict[str, str]
-) -> None:
-    report = await prune(settings, dry_run=True)
-    assert report.threads == 2
-    assert report.checkpoint_rows == 2 * 208
-    assert _threads(settings) == set(runs.values())
 
 
 async def test_an_article_past_the_horizon_with_no_summary_goes(
@@ -137,14 +71,12 @@ async def test_a_summarised_article_is_never_pruned(
     await session.flush()
     session.add(
         Summary(
-            run_id=run.id,
             article_id=article.id,
             language="tr",
             title_local="Eski",
             summary="s",
             why_it_matters="w",
             importance=4,
-            rank=1,
         )
     )
     await session.commit()
@@ -184,7 +116,6 @@ async def test_a_duplicate_of_a_pruned_article_survives_with_its_mark_cleared(
     await session.flush()
     session.add(
         Summary(
-            run_id=run.id,
             article_id=rewrite.id,
             language="tr",
             title_local="B",
@@ -205,8 +136,9 @@ async def test_a_duplicate_of_a_pruned_article_survives_with_its_mark_cleared(
 async def test_pruning_refuses_while_a_run_is_in_flight(
     settings: Settings, engine: AsyncEngine
 ) -> None:
-    """The run in flight is writing to the very thread this would delete, and
-    its run row has no final status to be matched against yet."""
+    """A digest in flight is collecting the very articles this counts, and an
+    article summarised a second after the count is one this would then delete
+    out from under a live summary."""
     assert await runner.reserve_slot("digest:held", "digest")
     try:
         with pytest.raises(runner.RunBusy):
@@ -216,12 +148,26 @@ async def test_pruning_refuses_while_a_run_is_in_flight(
 
 
 async def test_the_command_reports_and_deletes_nothing_on_a_dry_run(
-    settings: Settings, engine: AsyncEngine, runs: dict[str, str], capsys: pytest.CaptureFixture
+    settings: Settings, engine: AsyncEngine, session: AsyncSession, capsys: pytest.CaptureFixture
 ) -> None:
     from ainews.cli import _prune
 
+    source = Source(name="OpenAI", url="https://openai.com/rss.xml")
+    session.add(source)
+    await session.flush()
+    session.add(
+        Article(
+            source_id=source.id,
+            url="https://openai.com/old",
+            url_canonical="https://openai.com/old",
+            title="Old",
+            fetched_at=utcnow() - timedelta(days=settings.collect_max_age_days + 1),
+        )
+    )
+    await session.commit()
+
     assert await _prune(dry_run=True) == 0
     said = capsys.readouterr().out
-    assert "would drop 2 checkpoint thread(s)" in said
+    assert "would drop 1 unsummarised article(s)" in said
     assert "never pruned" in said
-    assert _threads(settings) == set(runs.values())
+    assert (await session.execute(select(Article))).scalars().all() != []

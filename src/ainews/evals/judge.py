@@ -39,8 +39,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ainews.clock import day_bounds
 from ainews.config import Settings, get_settings
-from ainews.db import Article, EvalResult, Source, Summary, Verdict
+from ainews.db import Article, Bulletin, BulletinItem, EvalResult, Source, Summary, Verdict
 from ainews.pipeline.llm import judge as judge_model
 from ainews.pipeline.llm import usage_from_message
 from ainews.pipeline.nodes.summarize import MAX_BODY_CHARS
@@ -84,7 +85,7 @@ class CostGuard(RuntimeError):
 @dataclass(slots=True)
 class Candidate:
     summary_id: int
-    run_id: str
+    bulletin_id: int | None
     article_id: int
     source: str
     title: str
@@ -92,9 +93,9 @@ class Candidate:
     summary: str
     why_it_matters: str
     human_verdict: str | None = None
-    # The story's place in the digest, or None below the fold. What
-    # `choose_sample` prefers.
-    rank: int | None = None
+    # The story's place in the bulletin, or None for one the editor left out.
+    # What `choose_sample` prefers.
+    position: int | None = None
     # Where `body` came from: `feed`, `fetch`, or `unknown` for a row written
     # before the article and the web context were separated (ADR 0029). A pass
     # over an `unknown` body is not evidence of grounding - it may be a pass
@@ -115,7 +116,7 @@ class Outcome:
 
 @dataclass(slots=True)
 class JudgeReport:
-    run_id: str
+    bulletin_id: int
     model: str
     outcomes: list[Outcome] = field(default_factory=list)
     est_cost_usd: float = 0.0
@@ -137,11 +138,15 @@ class JudgeReport:
 
 
 def _candidate(
-    summary: Summary, article: Article, source: Source, verdict: str | None
+    summary: Summary,
+    article: Article,
+    source: Source,
+    verdict: str | None,
+    item: BulletinItem | None = None,
 ) -> Candidate:
     return Candidate(
         summary_id=summary.id,
-        run_id=summary.run_id,
+        bulletin_id=item.bulletin_id if item else None,
         article_id=article.id,
         source=source.name,
         title=article.title,
@@ -151,25 +156,43 @@ def _candidate(
         summary=summary.summary,
         why_it_matters=summary.why_it_matters,
         human_verdict=verdict,
-        rank=summary.rank,
+        position=item.position if item else None,
         body_source=article.body_source,
     )
 
 
-async def load_candidates(session: AsyncSession, run_id: str) -> list[Candidate]:
-    """Every summary of the run that has a body to be judged against."""
+async def load_candidates(session: AsyncSession, bulletin_id: int) -> list[Candidate]:
+    """Every story in the bulletin, and every summary its day left out.
+
+    Both, because `choose_sample` prefers the published ones and fills the rest
+    of the sample from below the fold - a judge that only ever saw the bulletin
+    would measure the ranker's taste as much as the summariser's grounding. A
+    summary with no body cannot be judged against one and is not offered.
+    """
+    bulletin = await session.get(Bulletin, bulletin_id)
+    if bulletin is None:
+        raise LookupError(f"no bulletin {bulletin_id}")
+    start, end = day_bounds(bulletin.day)
     rows = (
         await session.execute(
-            select(Summary, Article, Source)
+            select(Summary, Article, Source, BulletinItem)
             .join(Article, Article.id == Summary.article_id)
             .join(Source, Source.id == Article.source_id)
-            .where(Summary.run_id == run_id)
+            .outerjoin(
+                BulletinItem,
+                (BulletinItem.summary_id == Summary.id) & (BulletinItem.bulletin_id == bulletin_id),
+            )
+            .where(Summary.language == bulletin.language)
+            .where(
+                BulletinItem.id.isnot(None)
+                | ((Summary.created_at >= start) & (Summary.created_at < end))
+            )
             .where(Article.body_text.isnot(None))
             .where(Article.body_text != "")
             .order_by(Summary.id)
         )
     ).all()
-    return [_candidate(s, a, src, None) for s, a, src in rows]
+    return [_candidate(s, a, src, None, item) for s, a, src, item in rows]
 
 
 async def load_labelled(session: AsyncSession) -> list[Candidate]:
@@ -188,9 +211,9 @@ async def load_labelled(session: AsyncSession) -> list[Candidate]:
 
 
 def choose_sample(candidates: list[Candidate], sample: int, seed: int) -> list[Candidate]:
-    """`sample` candidates, the same ones for the same seed and the same run.
+    """`sample` candidates, the same ones for the same seed and the same bulletin.
 
-    Ranked stories first: every ranked one when they fit, a seeded draw among
+    Published stories first: every ranked one when they fit, a seeded draw among
     them when they do not, and the remaining places filled by a seeded draw
     from below the fold. Judging what the reader sees is what makes a judgement
     and a label land on the same summary, which is the only pair calibration
@@ -199,8 +222,8 @@ def choose_sample(candidates: list[Candidate], sample: int, seed: int) -> list[C
     ordered = sorted(candidates, key=lambda c: c.summary_id)
     if sample >= len(ordered):
         return ordered
-    ranked = [c for c in ordered if c.rank is not None]
-    unranked = [c for c in ordered if c.rank is None]
+    ranked = [c for c in ordered if c.position is not None]
+    unranked = [c for c in ordered if c.position is None]
     rng = random.Random(seed)
     if len(ranked) >= sample:
         chosen = rng.sample(ranked, sample)
@@ -279,9 +302,9 @@ async def judge_candidates(
 
     The model is resolved here rather than read from settings, so the name the
     cost guard prices, the name the calls go to and the name written on every
-    `EvalResult` row are one value (ADR 0020). Judging the same run twice on two
-    tiers is a legitimate thing to want; a record that could not tell the two
-    apart afterwards would not be one.
+    `EvalResult` row are one value (ADR 0020). Judging the same bulletin twice
+    on two tiers is a legitimate thing to want; a record that could not tell the
+    two apart afterwards would not be one.
     """
     settings = settings or get_settings()
     model = resolve_model(model, settings.openai_model_judge)
@@ -295,7 +318,7 @@ async def judge_candidates(
         outcomes.append(outcome)
         session.add(
             EvalResult(
-                run_id=candidate.run_id,
+                bulletin_id=candidate.bulletin_id,
                 summary_id=candidate.summary_id,
                 kind="grounding",
                 passed=outcome.passed,
@@ -310,9 +333,9 @@ async def judge_candidates(
     return outcomes
 
 
-async def judge_run(
+async def judge_bulletin(
     session: AsyncSession,
-    run_id: str,
+    bulletin_id: int,
     *,
     sample: int = DEFAULT_SAMPLE,
     seed: int = 0,
@@ -322,12 +345,12 @@ async def judge_run(
 ) -> JudgeReport:
     settings = settings or get_settings()
     model = resolve_model(model, settings.openai_model_judge)
-    chosen = choose_sample(await load_candidates(session, run_id), sample, seed)
+    chosen = choose_sample(await load_candidates(session, bulletin_id), sample, seed)
     outcomes = await judge_candidates(
         session, chosen, max_cost=max_cost, settings=settings, model=model
     )
     cost = sum(estimate_cost(model, o.tokens_in, o.tokens_out) for o in outcomes)
-    return JudgeReport(run_id, model, outcomes, cost)
+    return JudgeReport(bulletin_id, model, outcomes, cost)
 
 
 # -- calibration --------------------------------------------------------------

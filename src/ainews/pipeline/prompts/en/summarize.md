@@ -19,6 +19,14 @@ Rules:
   announces something that changes what is buildable; 4 = a significant
   release, funding round or research result; 3 = worth knowing; 2 =
   incremental; 1 = noise, opinion or a rehash. Most items are 2 or 3.
+- `relevant` is false when this is not AI or software-industry news at all -
+  a personal essay, a hobby project, a piece about an unrelated field. Some
+  feeds here are people's own blogs and carry both. A relevant item that is
+  merely small is still relevant; that is what `importance` 1 is for.
+- `kind` is what shape of item this is: `release` for a product or version
+  shipping, `research` for a paper or technical result, `opinion` for argument
+  or commentary, `roundup` for a newsletter or link digest covering many
+  things, `news` for reporting, `other` for anything else.
 - `tags` are two to four lowercase English topic tags. Prefer these:
   {tags}. Add a tag of your own only when none of them fits.
 - Anything under `--- WEB CONTEXT: NOT THE ARTICLE ---` is not this

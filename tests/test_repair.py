@@ -13,9 +13,10 @@ import itertools
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.factories import publish
 
 from ainews.config import Settings
-from ainews.db import Article, Run, Source, Summary
+from ainews.db import Article, BulletinItem, Source, Summary
 from ainews.pipeline import repair as repair_module
 from ainews.pipeline.nodes import summarize as summarize_module
 from ainews.pipeline.repair import resummarize, unattributed_articles
@@ -66,24 +67,28 @@ async def _summarised(
         body_text="The stored body, whatever it is made of.",
         body_source=body_source,
     )
-    run = Run(kind="digest", language="tr")
-    session.add_all([article, run])
+    session.add(article)
     await session.flush()
+    ids: list[int] = []
     for language in languages:
-        session.add(
-            Summary(
-                article_id=article.id,
-                run_id=run.id,
-                language=language,
-                title_local="Eski baslik",
-                summary="Eski ozet.",
-                why_it_matters="Eski gerekce.",
-                importance=5,
-                rank=2,
-                editor_importance=4,
-            )
+        summary = Summary(
+            article_id=article.id,
+            language=language,
+            title_local="Eski baslik",
+            summary="Eski ozet.",
+            why_it_matters="Eski gerekce.",
+            importance=5,
+            model="gpt-5.6-luna",
+            tokens_in=1400,
+            tokens_out=500,
+            est_cost_usd=0.0008,
         )
+        session.add(summary)
+        await session.flush()
+        if language == "tr":
+            ids.append(summary.id)
     await session.commit()
+    await publish(session, ids, tiers=["major"])
     return article
 
 
@@ -154,9 +159,9 @@ async def test_a_repair_refetches_the_body_and_rewrites_the_summary(
 async def test_the_repair_keeps_the_story_where_the_editor_put_it(
     session: AsyncSession, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`rank` and `editor_importance` are the ranker's reading of a whole day.
-    A repair rewrites one article's text and has no standing to re-order the
-    bulletin around it."""
+    """Where a story sits is a fact about a bulletin (ADR 0030), and this
+    rewrites a summary - so a repair has no way to re-order the day around one
+    article even if it wanted to."""
     article = await _summarised(session, body_source="unknown")
 
     async def _fetch(*_: object, **__: object) -> str:
@@ -167,10 +172,10 @@ async def test_the_repair_keeps_the_story_where_the_editor_put_it(
 
     await resummarize(session, article.id, settings)
 
+    item = (await session.execute(BulletinItem.__table__.select())).first()
+    assert (item.position, item.tier) == (1, "major")
+    # The summariser's own score is this call's to change.
     row = (await session.execute(Summary.__table__.select())).first()
-    assert row.rank == 2
-    assert row.editor_importance == 4
-    # The summariser's own score is this call's to change; the editor's is not.
     assert row.importance == 3
 
 

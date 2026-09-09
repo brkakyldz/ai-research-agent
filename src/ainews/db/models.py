@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -189,10 +190,10 @@ class Article(Base):
 class Run(Base):
     """One execution of the pipeline.
 
-    The id is a uuid hex string and doubles as the LangGraph checkpointer
-    `thread_id`, so a run that failed can be resumed by name - `ainews digest
-    --resume <id>`, or the same offer inside the confirmation on `/runs`
-    (`pipeline/runner.py`, `run_digest(resume=...)`).
+    A run is what was *done*, not what was published: `bulletins` is the
+    published object (ADR 0030). What stays here is the machine's own account of
+    the press - what it collected, what it summarised, what it cost, whether it
+    finished - which is what `/runs` reads and what `run_steps` hangs off.
     """
 
     __tablename__ = "runs"
@@ -224,7 +225,9 @@ class Run(Base):
     editor_note: Mapped[str | None] = mapped_column(Text, default=None)
     error: Mapped[str | None] = mapped_column(Text, default=None)
 
-    summaries: Mapped[list[Summary]] = relationship(back_populates="run")
+    # No `summaries` here any more. A summary outlives the run that wrote it
+    # (ADR 0030), and a run's own output is the bulletin it published.
+    bulletins: Mapped[list[Bulletin]] = relationship()
 
     __table_args__ = (
         CheckConstraint("kind in ('collect', 'digest')", name="ck_runs_kind"),
@@ -297,28 +300,32 @@ class RunStep(Base):
 
 
 class Summary(Base):
-    """The LLM's read of one article, in one language, for one run.
+    """The LLM's read of one article, in one language. Written once.
 
-    `rank` is set only for the items that made the digest's top N; everything
-    else keeps its `importance` and is reachable below the fold and in search.
+    It used to be keyed on the run that made it, and the front page showed a
+    run. That is the modelling fault ADR 0030 undoes: candidate selection is a
+    delta over unsummarised articles, so the second press of a day produced a
+    two-story *bulletin* - its own brief, its own order, its own archive entry -
+    and three separate patches existed to hide that from the reader. A summary
+    is a property of an article; which stories make a day's bulletin, in what
+    order, is a different object.
 
-    Two scores (ADR 0025). `importance` is the summariser's, given with one
-    article in view and nothing else. `editor_importance` is the ranker's read
-    of the same story against the whole day, set only on ranked items; the page
-    draws it where it exists and the summariser's score where it does not. The
-    first is kept because the evaluation layer measures the summariser and the
-    ranker separately - the free importance-then-weight order the rank call is
-    compared against has to be built from the score the rank call did not
-    write. Nullable and unconstrained at the database because it was added to
-    a live archive by `ALTER TABLE` (`db/schema.py`); the schema on the model
-    holds it to 1-5 before it gets here.
+    So `run_id`, `rank` and `editor_importance` are gone from here.
+    `bulletin_items` holds the last two, because they are facts about a
+    bulletin rather than about a summary, and a day can be re-ranked without
+    rewriting the text.
+
+    `importance` stays and is the summariser's own score, given with one
+    article in view and nothing else. `relevant` and `kind` are what let the
+    ranker select rather than fill: the source list was the only thing deciding
+    whether an item was AI news, and one weight-1.5 source is a personal blog
+    that also carries map projections.
     """
 
     __tablename__ = "summaries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"))
-    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"))
     language: Mapped[str] = mapped_column(String(2))
 
     title_local: Mapped[str] = mapped_column(Text)
@@ -326,23 +333,113 @@ class Summary(Base):
     why_it_matters: Mapped[str] = mapped_column(Text)
     tags_json: Mapped[str] = mapped_column(Text, default="[]")
     importance: Mapped[int] = mapped_column(Integer, default=3)
-    editor_importance: Mapped[int | None] = mapped_column(Integer, default=None)
-    rank: Mapped[int | None] = mapped_column(Integer, default=None)
+    # Is this AI news at all, and what shape of item is it. The ranker is given
+    # only the relevant ones, and a roundup is never offered the lead.
+    relevant: Mapped[bool] = mapped_column(Boolean, default=True)
+    kind: Mapped[str] = mapped_column(String(12), default="news")
+
+    # What this one summary cost. It used to be totalled onto the run and
+    # nowhere else, which was fine while a summary belonged to a run; now that
+    # it outlives one, the cost has to travel with it or a re-ranked day would
+    # look free.
+    model: Mapped[str] = mapped_column(String(60), default="")
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     article: Mapped[Article] = relationship(back_populates="summaries")
-    run: Mapped[Run] = relationship(back_populates="summaries")
-
-    @property
-    def shown_importance(self) -> int:
-        """The score the page draws: the editor's where there is one."""
-        return self.editor_importance if self.editor_importance is not None else self.importance
 
     __table_args__ = (
-        UniqueConstraint("article_id", "run_id", "language", name="uq_summary_article_run_lang"),
+        UniqueConstraint("article_id", "language", name="uq_summary_article_lang"),
         CheckConstraint("importance between 1 and 5", name="ck_summaries_importance"),
-        Index("ix_summaries_run_rank", "run_id", "rank"),
+        CheckConstraint(
+            "kind in ('news', 'release', 'research', 'opinion', 'roundup', 'other')",
+            name="ck_summaries_kind",
+        ),
+        Index("ix_summaries_article", "article_id"),
+    )
+
+
+class Bulletin(Base):
+    """One day's reading, in one language: a ranking over the summaries in view.
+
+    Replaceable, which is the whole point. A press summarises whatever is new
+    and re-ranks the day, writing a new `version` rather than a second bulletin
+    - so pressing twice before lunch leaves one page, not a bulletin and a
+    two-story supplement the front page then has to choose between.
+
+    `agreement` is how much the three shuffled rank calls agreed with the order
+    that shipped. It is a production number rather than an occasional probe, and
+    it is also what marks a run whose rank call failed: the fallback order ships
+    with no editor behind it, and the page draws editor-sized headlines either
+    way.
+    """
+
+    __tablename__ = "bulletins"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # The local calendar day, `YYYY-MM-DD`. A string and not a date, because
+    # every clock the interface draws is local (ADR 0016) and a date column
+    # would invite a UTC comparison against it.
+    day: Mapped[str] = mapped_column(String(10))
+    language: Mapped[str] = mapped_column(String(2))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+    editor_note: Mapped[str | None] = mapped_column(Text, default=None)
+    model_rank: Mapped[str | None] = mapped_column(String(60), default=None)
+    agreement: Mapped[float | None] = mapped_column(Float, default=None)
+    est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), default=None)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    items: Mapped[list[BulletinItem]] = relationship(
+        back_populates="bulletin", cascade="all, delete-orphan", order_by="BulletinItem.position"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("day", "language", "version", name="uq_bulletin_day_lang_version"),
+        Index("ix_bulletins_day", "day", "language", "version"),
+    )
+
+
+class BulletinItem(Base):
+    """One story's place in one bulletin.
+
+    `tier` and not a second importance score (ADR 0030). The summariser is told
+    to be honest and that most items are 2 or 3; the ranker is told that a 4
+    leading the day is a 5. The page used to sort and size by
+    `coalesce(editor_importance, importance)`, which mixed an absolute scale
+    with a relative one - a ranked 3-that-became-5 drawn larger than an honest
+    unranked 3, in a layout whose only ranking indicator is size. A bulletin
+    item draws its tier; anything outside the bulletin draws its significance;
+    nothing coalesces.
+
+    `reason` is the ranker's own sentence for the pick. It is stored because
+    "prefer one strong story over three angles" was a rule with no trace: the
+    ranker's cluster decisions left nothing behind to check.
+    """
+
+    __tablename__ = "bulletin_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bulletin_id: Mapped[int] = mapped_column(ForeignKey("bulletins.id"))
+    summary_id: Mapped[int] = mapped_column(ForeignKey("summaries.id"))
+    position: Mapped[int] = mapped_column(Integer)
+    tier: Mapped[str] = mapped_column(String(10), default="notable")
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+
+    bulletin: Mapped[Bulletin] = relationship(back_populates="items")
+    summary: Mapped[Summary] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("bulletin_id", "summary_id", name="uq_item_bulletin_summary"),
+        CheckConstraint(
+            "tier in ('lead', 'major', 'notable', 'brief')", name="ck_bulletin_items_tier"
+        ),
+        Index("ix_bulletin_items_bulletin", "bulletin_id", "position"),
     )
 
 
@@ -376,15 +473,22 @@ class EvalResult(Base):
 
     Eval spend is on the record the same way product spend is, so
     `ainews eval report` can total the two side by side. `summary_id` is null
-    for a `rank_stability` row, which is about a run rather than a summary.
-    `passed` is null when the judge answered but could not be parsed - recorded,
-    not raised, so a bad afternoon at the API is a row and not a traceback.
+    for a `rank_stability` row, which is about a whole bulletin rather than one
+    summary. `passed` is null when the judge answered but could not be parsed -
+    recorded, not raised, so a bad afternoon at the API is a row and not a
+    traceback.
+
+    Keyed on the bulletin and not on the run that made it (ADR 0030). What is
+    measured is what was published: a grounding pass is a claim about a story on
+    a page, and a stability number is a claim about the order that page is in.
+    Nullable because a bulletin can be deleted from a demo database while its
+    measurements are what the demo is showing.
     """
 
     __tablename__ = "eval_results"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"))
+    bulletin_id: Mapped[int | None] = mapped_column(ForeignKey("bulletins.id"), default=None)
     summary_id: Mapped[int | None] = mapped_column(ForeignKey("summaries.id"), default=None)
     kind: Mapped[str] = mapped_column(String(20))
     passed: Mapped[bool | None] = mapped_column(default=None)
@@ -399,7 +503,7 @@ class EvalResult(Base):
 
     __table_args__ = (
         CheckConstraint("kind in ('grounding', 'rank_stability')", name="ck_eval_results_kind"),
-        Index("ix_eval_results_run_kind", "run_id", "kind"),
+        Index("ix_eval_results_bulletin_kind", "bulletin_id", "kind"),
     )
 
 
@@ -415,16 +519,14 @@ class DailyCounter(Base):
 def bulletin_runs() -> Select[tuple[Run]]:
     """Every run that is a bulletin rather than a feed poll, newest first.
 
-    The one place the distinction is written down. There were six: the archive,
-    the front page, the status strip, `resolve_run_id("latest")`, the resume
-    offer and `/runs/status` each filtered `runs` their own way, and two of the
-    six were wrong - the rail badge counted a `kind` nothing wrote, and
-    `/runs/status` read `manual` only, so a resumed or terminal run never
-    reported its error there.
+    The one place the distinction is written down. Five callers filtered `runs`
+    their own way and two of them were wrong - the rail badge counted a `kind`
+    nothing wrote, and `/runs/status` read `manual` only, so a run started at a
+    terminal never reported its error there.
 
     It lives beside the model rather than in `web/queries.py` because the
-    pipeline asks the same question - which run is the latest, which one can be
-    resumed - and the pipeline must not import the web layer to ask it.
+    pipeline asks the same question - which run is the latest - and the pipeline
+    must not import the web layer to ask it.
 
     Callers add their own conditions: `.where(Run.status != "running")` for a
     run that has finished, `.where(Run.n_summarized > 0)` for one that produced

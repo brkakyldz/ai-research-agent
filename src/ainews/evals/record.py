@@ -1,10 +1,10 @@
-"""Turn a run into a fixture: `ainews eval record --run <id>`.
+"""Turn a bulletin into a fixture: `ainews eval record --bulletin <ref>`.
 
 The fixture *is* the behaviour, the same way `prompts/*.md` are: re-recording is
 a reviewed diff, and the checks in `tests/test_evals_checks.py` assert bounds
 over it offline. The JSON is written deterministically - sorted keys, no
-timestamp of its own - so recording the same run twice is byte-for-byte the same
-file, and a diff means the database changed.
+timestamp of its own - so recording the same bulletin twice is byte-for-byte the
+same file, and a diff means the database changed.
 
 The article body is **not** stored. It is someone's copyrighted text and the
 repository is public; the checks only need the body's numerals and capitalised
@@ -22,18 +22,17 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ainews.clock import day_bounds
 from ainews.config import PROJECT_ROOT, Settings, get_settings
-from ainews.db import Article, Run, RunStep, Source, Summary
+from ainews.db import Article, Bulletin, BulletinItem, Run, RunStep, Source, Summary
 from ainews.evals.checks import numeral_values
 from ainews.pipeline.nodes.summarize import MAX_BODY_CHARS
 
-# Moved to the runner on 2026-09-08, when `ainews digest --resume` needed the
-# same prefix lookup; re-exported so the eval commands keep their import.
+__all__ = ["FIXTURE_DIR", "record_bulletin", "write_fixture"]
 
-__all__ = ["FIXTURE_DIR", "record_run", "write_fixture"]
-
-# Bumped when a story gains a field. 2 added `editor_importance` (ADR 0025).
-SCHEMA = 2
+# Bumped when a story gains a field. 3 replaced `rank` and `editor_importance`
+# with `position` and `tier`, and added `relevant` and `kind` (ADR 0030).
+SCHEMA = 3
 FIXTURE_DIR = PROJECT_ROOT / "tests" / "fixtures" / "runs"
 
 # A capitalised token: a word starting with an uppercase letter in either
@@ -67,26 +66,49 @@ def capitalised_tokens(body: str | None) -> list[str]:
     return tokens[:MAX_CAPITALISED]
 
 
-async def record_run(
-    session: AsyncSession, run_id: str, settings: Settings | None = None
+async def record_bulletin(
+    session: AsyncSession, bulletin_id: int, settings: Settings | None = None
 ) -> dict[str, Any]:
-    settings = settings or get_settings()
-    run = await session.get(Run, run_id)
-    if run is None:
-        raise LookupError(f"no run {run_id}")
+    """One published bulletin, and everything its day held, as a fixture.
 
+    The bulletin and not the run (ADR 0030): what the checks measure is what was
+    published, and a run is now a delta that may have bought two of the fifteen
+    stories on the page. The unpublished rest of the day is recorded beside it,
+    because half of what `checks` measures - the tag vocabulary, the importance
+    distribution, the free ordering - is about the summariser rather than about
+    the editor, and sampling only the winners would flatter it.
+    """
+    settings = settings or get_settings()
+    bulletin = await session.get(Bulletin, bulletin_id)
+    if bulletin is None:
+        raise LookupError(f"no bulletin {bulletin_id}")
+    run = await session.get(Run, bulletin.run_id) if bulletin.run_id else None
+
+    start, end = day_bounds(bulletin.day)
     rows = (
         await session.execute(
-            select(Summary, Article, Source)
+            select(Summary, Article, Source, BulletinItem)
             .join(Article, Article.id == Summary.article_id)
             .join(Source, Source.id == Article.source_id)
-            .where(Summary.run_id == run.id)
-            .order_by(Summary.rank.asc().nullslast(), Summary.importance.desc(), Summary.id.asc())
+            .outerjoin(
+                BulletinItem,
+                (BulletinItem.summary_id == Summary.id) & (BulletinItem.bulletin_id == bulletin_id),
+            )
+            .where(Summary.language == bulletin.language)
+            .where(
+                BulletinItem.id.isnot(None)
+                | ((Summary.created_at >= start) & (Summary.created_at < end))
+            )
+            .order_by(
+                BulletinItem.position.asc().nullslast(),
+                Summary.importance.desc(),
+                Summary.id.asc(),
+            )
         )
     ).all()
 
     stories: list[dict[str, Any]] = []
-    for summary, article, source in rows:
+    for summary, article, source, item in rows:
         try:
             tags = json.loads(summary.tags_json or "[]")
         except json.JSONDecodeError:
@@ -105,12 +127,17 @@ async def record_run(
                 "summary": summary.summary,
                 "why_it_matters": summary.why_it_matters,
                 "tags": tags,
-                # The summariser's score, and the ranker's where it gave one.
-                # `checks` reads the first for the free ordering and the
-                # distribution, the second for how far the editor moved things.
+                # The summariser's own score, given with one article in view.
+                # `checks` reads it for the free ordering and the distribution.
                 "importance": summary.importance,
-                "editor_importance": summary.editor_importance,
-                "rank": summary.rank,
+                "relevant": summary.relevant,
+                "kind": summary.kind,
+                # The editor's placement, or null for a story left out. Two
+                # fields where there were two scores, and neither is the other's
+                # fallback (ADR 0030).
+                "position": item.position if item else None,
+                "tier": item.tier if item else None,
+                "reason": item.reason if item else None,
                 "body_numerals": sorted(numeral_values(seen)),
                 "body_capitalised": capitalised_tokens(seen),
                 # Where the text those two were taken from came from. `unknown`
@@ -122,11 +149,11 @@ async def record_run(
             }
         )
 
-    article_ids = {s["article_id"] for s in stories}
+    article_ids = {story["article_id"] for story in stories}
     dup_rows = (
         await session.execute(select(Article).where(Article.dup_of.in_(article_ids)))
     ).scalars()
-    survivors = {a.id: a.title for _, a, _ in rows}
+    survivors = {article.id: article.title for _, article, _, _ in rows}
     dedupe_pairs = [
         {
             "article_id": dup.id,
@@ -139,32 +166,45 @@ async def record_run(
 
     # A run recorded before ADR 0022 has no step rows; the settings' knobs are
     # then what was believed when the fixture was cut, as they always were.
-    models = await _models_that_ran(session, run.id)
+    models = await _models_that_ran(session, run.id) if run else {}
     return {
         "schema": SCHEMA,
-        "run_id": run.id,
-        "language": run.language,
-        "run_started_at": run.started_at.isoformat() if run.started_at else None,
-        "run_finished_at": run.finished_at.isoformat() if run.finished_at else None,
-        # The run row first (2026-09-08), the steps for a run written before the
-        # columns existed, and the environment last - which is the order of how
-        # much each one knows about *this* run. The settings' knob is the weakest
-        # of the three and used to be second: a changed `.env` would name a model
-        # the run never saw.
+        "bulletin_id": bulletin.id,
+        "day": bulletin.day,
+        "version": bulletin.version,
+        "language": bulletin.language,
+        "agreement": bulletin.agreement,
+        "published_at": bulletin.created_at.isoformat() if bulletin.created_at else None,
+        "run_id": run.id if run else None,
+        # The run row first, the steps for a run written before the columns
+        # existed, and the environment last - which is the order of how much
+        # each one knows about *this* bulletin. The settings' knob is the
+        # weakest of the three and used to be second: a changed `.env` would
+        # name a model the run never saw.
         "model_summarize": (
-            run.model_summarize or models.get("summarize") or settings.openai_model_summarize
+            (run.model_summarize if run else None)
+            or models.get("summarize")
+            or settings.openai_model_summarize
         ),
-        "model_rank": run.model_rank or models.get("rank") or settings.openai_model,
+        "model_rank": bulletin.model_rank or models.get("rank") or settings.openai_model,
         "top_n": settings.digest_top_n,
-        "editor_note": run.editor_note,
+        "editor_note": bulletin.editor_note,
         "stories": stories,
         "dedupe_pairs": dedupe_pairs,
     }
 
 
 def fixture_name(fixture: dict[str, Any]) -> str:
-    day = (fixture.get("run_started_at") or "undated")[:10]
-    return f"{day}_{fixture['language']}.json"
+    """`YYYY-MM-DD_tr.json`, with the version only where there is more than one.
+
+    A day is what a person looks for, and the overwhelming majority of days
+    have one bulletin. Naming the first `..._v1` would put a version number on
+    every filename to disambiguate the rare second one.
+    """
+    day = fixture.get("day") or "undated"
+    version = fixture.get("version") or 1
+    tail = "" if version == 1 else f"_v{version}"
+    return f"{day}_{fixture['language']}{tail}.json"
 
 
 def _compact(value: Any) -> str:
