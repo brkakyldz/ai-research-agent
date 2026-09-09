@@ -448,7 +448,7 @@ one for no gain, since the row is one query away in a database the node is
 already talking to. Bodies stay in SQLite and the graph passes primary keys.
 
 **There is no checkpointer** (`graph.py`). A checkpoint is a way of not losing
-work when a run dies, and the work here is bought summaries — which are rows now,
+work when a run dies, and the work here is bought summaries — which are rows,
 committed by the branch that paid for them (§7.5). Durability that the archive
 already provides is durability worth nothing twice, and replaying a graph from a
 checkpoint whose prompts, models and state schema have since moved is a harder
@@ -592,8 +592,8 @@ What comes back per pick is a `tier` — `lead | major | notable | brief`, at mo
 one lead — which is the page's own vocabulary, rather than a corrected 1–5 on a
 scale the summariser was handed a rubric for (ADR 0030). Each pick also carries a
 `reason`, fifteen words on why this story and not the other angles on the same
-event; the prompt has always asked for that judgement and it used to leave nothing
-behind, checkable only by re-reading the day by hand.
+event. The prompt asks for that judgement either way; storing it is what makes it
+checkable by something other than re-reading the day by hand.
 
 **It reads the day three times, shuffled.** The model answers with numbers off a
 table, so its answer can depend on the order the table was in. `RANK_PASSES = 3`
@@ -637,8 +637,8 @@ three and explained in each costs more than a channel does.
 ### 7.7 persist
 
 `persist_run` (`pipeline/nodes/persist.py`) is where a run becomes something the
-dashboard can read a week later. It no longer writes the summaries — those were
-committed one at a time as they came back (§7.5) — so its job is the *other*
+dashboard can read a week later. It does not write the summaries: each was
+committed by its own branch as it came back (§7.5), so its job is the *other*
 object: one `Bulletin` for the day, in one language, with one `BulletinItem` per
 pick, and then the run row closed with counts, tokens, cost, up to 20 error lines,
 and `ok` or `partial`.

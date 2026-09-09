@@ -258,8 +258,8 @@ right.
   articles and as many summaries — about 200 KB in `app.db`, so a few megabytes a
   month at one press a day. The archive is the point of the tool and is never
   removed. `ainews prune` drops the one thing nothing can reach: articles past
-  the collect horizon that were never summarised, which `dedupe` no longer
-  considers and therefore can never summarise later. `--dry-run` counts them
+  the collect horizon that were never summarised, which `dedupe` does not
+  consider and therefore can never summarise later. `--dry-run` counts them
   first, and it refuses while a run is in flight. It is a command and not a
   schedule, for the same reason the digest is (ADR 0015).
 - **The schema migrates itself at startup.** Since ADR 0028 it is an Alembic
