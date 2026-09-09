@@ -6,7 +6,7 @@ story told by five outlets, summarises what is left with `gpt-5.6-luna`, ranks
 the whole day three times over and keeps what the three readings agree on, and
 serves the result as a page you read over coffee.
 
-One machine, one container, about **$2.50 a month**.
+One machine, one container, about **a dollar a month**.
 
 ![The digest](docs/screenshots/digest.png)
 
@@ -178,15 +178,23 @@ link is shareable and a screenshot is reproducible from its URL.
 
 Measured, not estimated:
 
-| | Articles | Tokens (in / out) | Cost | Time |
-|---|---|---|---|---|
-| First run (a week's backlog) | 136 | 191,960 / 64,126 | **$0.115** | 85s |
-| A three-hour delta | 21 | 30,600 / 8,200 | **$0.017** | 43s |
-| A two-day delta | 20 | 32,195 / 12,363 | **$0.021** | 58s |
+| | Summarised | Ranked | Tokens (in / out) | Cost | Time |
+|---|---|---|---|---|---|
+| First run (a week's backlog) | 136 | 136 | 191,960 / 64,126 | **$0.115** | 85s |
+| A three-hour delta | 21 | 21 | 30,600 / 8,200 | **$0.017** | 43s |
+| A two-day delta | 20 | 20 | 32,195 / 12,363 | **$0.021** | 58s |
+| A press over a standing pool | 32 | 129 | 137,057 / 22,563 | **$0.055** | 63s |
 
-About **$0.00085 per article**, so a normal day of 100 stories is roughly
-**$0.09** — **~$2.50 a month** against a $10 budget. Tavily stays on its free
-tier behind a 30-credit daily cap, and in practice rarely gets there, because two
+Two columns, because the bill has two halves that scale differently: a press pays
+for the stories that are new and re-ranks the whole window around them (ADR 0030).
+Summarising is **$0.0011 a story**. Ranking is three passes over the standing
+pool — **$0.020 at 129 candidates** — and does not care how many of them are new.
+
+Sixteen feeds deliver about **18 stories a day** after dedupe, which puts an
+ordinary press at **$0.034** and a month of daily presses at **~$1** against a $10
+budget. The measured run above cost $0.055 because three presses in six days left
+more standing in the pool than a daily one does. Tavily stays on its free tier
+behind a 30-credit daily cap, and in practice rarely gets there, because two
 cheaper enrichment tiers run first.
 
 That price is the reason every article gets summarised instead of a cheap

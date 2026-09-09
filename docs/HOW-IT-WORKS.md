@@ -26,7 +26,7 @@ at line 0007 of the table in §17.
 One process. It polls sixteen RSS feeds, throws away the same story told five
 times, summarises what is left with an LLM, ranks the whole day three times over
 and publishes what the three readings agree on, and serves the result as one
-page. It runs on one machine, in one container, for about $2.50 a month.
+page. It runs on one machine, in one container, for about a dollar a month.
 
 There is exactly one thing on a clock: the feed poll, every three hours, which
 costs nothing. The digest — the part that spends money — is started by a person
@@ -77,7 +77,7 @@ were deleted for saying it twice.
 
 ### 2.2 Money is a design material, not an implementation detail
 
-The budget was under $10 a month and the measured bill is $2.50. That constraint
+The budget was under $10 a month and the measured bill is about a dollar. That constraint
 is visible in the architecture, not just in the invoice:
 
 - Enrichment is **three tiers, cheapest first**, and the paid tier only runs for
@@ -85,7 +85,9 @@ is visible in the architecture, not just in the invoice:
 - The Tavily credit cap is a **database table**, not a counter in memory, because
   a process that restarts twice a day would otherwise reset its own budget twice
   a day.
-- Ranking is **one call over the whole day** rather than a comparison per pair.
+- Ranking reads **the whole day in one prompt**, three times over, rather than
+  comparing stories pair by pair: the price of a second and third reading is two
+  more prompts, not a quadratic number of them.
 - The price per million tokens is drawn **under the button, before the press**,
   because the tiers differ by up to fifty times and a surprise belongs on screen
   rather than in a billing dashboard next month (ADR 0020).
@@ -93,9 +95,9 @@ is visible in the architecture, not just in the invoice:
   unattended is the thing that is free.
 
 What the constraint did *not* buy is a cheap pre-filter. Every collected article
-is summarised, because at $0.00085 an article a title-only filter deciding in
-advance what deserves reading would save four cents and hide the story the day
-was actually about (ADR 0001).
+is summarised, because at $0.0011 a story a title-only filter deciding in
+advance what deserves reading would save a cent and hide the story the day was
+actually about (ADR 0001).
 
 ### 2.3 Degrade, never fail
 
@@ -1026,16 +1028,23 @@ The reasoning behind the page is choices 0008–0024 in §17; the short version:
 ## 13. Cost
 
 `gpt-5.6-luna` at $0.20 / $1.20 per million tokens (ADR 0001), one summarize call
-per new story with the body capped at 5000 characters, plus one rank call over the
-day. Measured at roughly **$2.50 a month** against a $10 budget. Tavily's free
-tier is 1,000 credits a month and the daily cap defaults to 30.
+per new story with the body capped at 5000 characters, plus three rank calls over
+the standing pool. Measured at roughly **$1 a month** against a $10 budget.
+Tavily's free tier is 1,000 credits a month and the daily cap defaults to 30.
 
-Two real runs:
+Four real runs. Only the last was made under ADR 0030, where ranking stopped being
+a function of the delta and became a function of the window:
 
-| | Articles | Tokens (in / out) | Cost | Time |
-|---|---|---|---|---|
-| First run (a week's backlog) | 136 | 191,960 / 64,126 | $0.115 | 85s |
-| A three-hour delta | 21 | 30,600 / 8,200 | $0.017 | 43s |
+| | Summarised | Ranked | Tokens (in / out) | Cost | Time |
+|---|---|---|---|---|---|
+| First run (a week's backlog) | 136 | 136 | 191,960 / 64,126 | $0.115 | 85s |
+| A three-hour delta | 21 | 21 | 30,600 / 8,200 | $0.017 | 43s |
+| A two-day delta | 20 | 20 | 32,195 / 12,363 | $0.021 | 58s |
+| A press over a standing pool | 32 | 129 | 137,057 / 22,563 | $0.055 | 63s |
+
+$0.0011 a story to summarise and $0.020 a press to rank 129 candidates, so at the
+eighteen stories a day the feeds actually deliver an ordinary press is $0.034 and
+a month of daily presses is about a dollar.
 
 Every run row carries its own token counts and estimated cost, `/runs` totals them
 for today, the last 7 days and the last 30, and `/runs/<id>` breaks one run down by
