@@ -350,7 +350,7 @@ def _majority_tier(votes: list[Tier]) -> Tier:
     return max((tier for tier in TIER_ORDER if counted.get(tier) == best), key=TIER_ORDER.index)
 
 
-def _aggregate(passes: list[_Pass], top_n: int) -> Ranking:
+def _aggregate(passes: list[_Pass], top_n: int, pool: int) -> Ranking:
     orders = [p.order for p in passes]
     order = borda(orders)[:top_n]
 
@@ -381,7 +381,7 @@ def _aggregate(passes: list[_Pass], top_n: int) -> Ranking:
         # published order, so the prose in front of the reader describes the
         # list the reader is looking at.
         editor_note=max(passes, key=lambda p: _overlap(p.order, order)).editor_note,
-        agreement=agreement(orders) if len(orders) > 1 else None,
+        agreement=agreement(orders, pool=pool) if len(orders) > 1 else None,
         passes=orders,
         tokens_in=sum(p.tokens_in for p in passes),
         tokens_out=sum(p.tokens_out for p in passes),
@@ -438,4 +438,4 @@ async def rank_day(
     if not usable:
         log.warning("every rank call failed; falling back to importance order")
         return _fallback(candidates, top_n, language)
-    return _aggregate(usable, top_n)
+    return _aggregate(usable, top_n, len(candidates))

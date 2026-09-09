@@ -102,7 +102,7 @@ async def test_a_note_is_kept_only_with_wrong(
     assert (rows[0].verdict, rows[0].note) == ("ok", None)
 
 
-async def test_pressing_wrong_again_does_not_erase_the_reason(
+async def test_pressing_wrong_again_does_not_erase_the_note(
     client: TestClient, summaries: list[int], session: AsyncSession
 ) -> None:
     """The two words carry no `note` field; only the note row does.
@@ -136,28 +136,28 @@ def test_the_page_renders_the_saved_state_after_a_reload(
     assert body.count('class="vd-note"') == 1, "only the wrong one grows a note row"
 
 
-def test_a_story_the_reader_has_judged_keeps_its_words_at_rest(
+def test_the_control_is_drawn_on_every_story_and_marks_the_one_judged(
     client: TestClient, summaries: list[int]
 ) -> None:
-    """V3 hides the control until the pointer arrives - but never a saved mark.
+    """Every story carries the words; the judged one carries the mark.
 
-    The reveal is CSS, so the only half of it a test can reach is the class the
-    server writes. Without it a reader who marked a story wrong would come back
-    to a page that shows no sign of it until he happens to hover the same card
-    again, which is the reader's own record hidden from him.
+    They were drawn only under the pointer until PLAN-V2 5.1, on the argument
+    that a page is read more often than it is judged. Three days of that
+    collected five labels over 138 summaries, and E3's calibration wants sixty -
+    so the reason the control existed was losing to the reason it was hidden.
     """
     client.post("/verdict", data={"summary_id": summaries[0], "verdict": "wrong"})
     body = client.get("/").text
-    assert body.count('class="vd vd--on"') == 1
-    assert body.count('class="vd"') == 1, "the unjudged story stays hover-only"
+    assert body.count('class="vd"') == 2, "both stories, judged or not"
+    assert body.count('aria-pressed="true"') == 1, "and one of them is marked"
 
 
 def test_the_fragment_swapped_in_after_a_press_carries_the_mark(
     client: TestClient, summaries: list[int]
 ) -> None:
-    """HTMX replaces the foot, not the page: the class has to come back with it."""
+    """HTMX replaces the foot, not the page: the mark has to come back with it."""
     text = client.post("/verdict", data={"summary_id": summaries[0], "verdict": "ok"}).text
-    assert 'class="vd vd--on"' in text
+    assert 'aria-pressed="true"' in text
 
 
 def test_wrong_opens_the_note_row_and_ok_closes_it(
@@ -175,6 +175,77 @@ def test_saving_a_note_says_so(client: TestClient, summaries: list[int]) -> None
         "/verdict", data={"summary_id": summaries[0], "verdict": "wrong", "note": "isim yanlış"}
     ).text
     assert "Kaydedildi" in text
+
+
+async def test_wrong_asks_which_of_the_four_and_keeps_the_answer(
+    client: TestClient, session: AsyncSession, summaries: list[int]
+) -> None:
+    """One word covered four claims, and only one of them is the judge's.
+
+    `calibrate` read every "wrong" as a grounding failure, so a reader marking a
+    correct summary of an irrelevant story counted against a judge that had
+    reported nothing wrong and was right (PLAN-V2 5.1).
+    """
+    wrong = client.post("/verdict", data={"summary_id": summaries[0], "verdict": "wrong"}).text
+    assert 'class="vd-why"' in wrong
+    assert "Yapay zekâ haberi değil" in wrong
+    assert 'aria-pressed="true"' not in wrong.split('class="vd-why"')[1], "nothing chosen yet"
+
+    chosen = client.post(
+        "/verdict",
+        data={"summary_id": summaries[0], "verdict": "wrong", "reason": "not_news"},
+    ).text
+    assert 'aria-pressed="true"' in chosen.split('class="vd-why"')[1]
+
+    row = (
+        await session.execute(select(Verdict).where(Verdict.summary_id == summaries[0]))
+    ).scalar_one()
+    assert (row.verdict, row.reason) == ("wrong", "not_news")
+
+
+async def test_pressing_wrong_again_does_not_erase_the_reason(
+    client: TestClient, session: AsyncSession, summaries: list[int]
+) -> None:
+    """The two words post no `reason` field, so the second press carries none.
+
+    Treating that as "no reason" would silently clear the classification the
+    reader had already given - the same failure the note row had, and the note
+    is the row E5 rewrites the judge prompt from.
+    """
+    client.post(
+        "/verdict",
+        data={"summary_id": summaries[0], "verdict": "wrong", "reason": "duplicate"},
+    )
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "wrong"})
+
+    row = (
+        await session.execute(select(Verdict).where(Verdict.summary_id == summaries[0]))
+    ).scalar_one()
+    assert row.reason == "duplicate"
+
+
+async def test_right_clears_the_reason_with_the_note(
+    client: TestClient, session: AsyncSession, summaries: list[int]
+) -> None:
+    client.post(
+        "/verdict",
+        data={"summary_id": summaries[0], "verdict": "wrong", "reason": "wrong_place"},
+    )
+    client.post("/verdict", data={"summary_id": summaries[0], "verdict": "ok"})
+
+    row = (
+        await session.execute(select(Verdict).where(Verdict.summary_id == summaries[0]))
+    ).scalar_one()
+    assert (row.verdict, row.reason, row.note) == ("ok", None, None)
+
+
+def test_a_reason_that_is_not_one_of_the_four_is_refused(
+    client: TestClient, summaries: list[int]
+) -> None:
+    response = client.post(
+        "/verdict", data={"summary_id": summaries[0], "verdict": "wrong", "reason": "vibes"}
+    )
+    assert response.status_code == 422
 
 
 def test_a_verdict_on_a_summary_that_does_not_exist_is_a_404(

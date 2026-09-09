@@ -19,6 +19,11 @@ Rules:
   announces something that changes what is buildable; 4 = a significant
   release, funding round or research result; 3 = worth knowing; 2 =
   incremental; 1 = noise, opinion or a rehash. Most items are 2 or 3.
+- `key_fact` is the **single concrete thing that makes this news**, copied from
+  the article as it appears there: a figure, a name, a version, a date. Five
+  words at most, no sentence. "GPT-6 Astra", "$3.5 billion", "13,000 lines".
+  Leave it empty only when the article genuinely gives none - an opinion piece
+  with no anchor - and never write one the text does not contain.
 - `relevant` is false when this is not AI or software-industry news at all -
   a personal essay, a hobby project, a piece about an unrelated field. Some
   feeds here are people's own blogs and carry both. A relevant item that is

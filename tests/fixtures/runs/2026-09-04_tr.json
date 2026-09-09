@@ -8,7 +8,7 @@
   "model_summarize": "gpt-5.6-luna",
   "published_at": "2026-09-04T11:18:29.237337",
   "run_id": "5c60e8eac09847e7bc09e3a002c28091",
-  "schema": 3,
+  "schema": 4,
   "top_n": 15,
   "version": 1,
   "dedupe_pairs": [

@@ -173,6 +173,7 @@ async def summarize_article(
             why_it_matters=draft.parsed.why_it_matters,
             tags_json=json.dumps(draft.parsed.tags, ensure_ascii=False),
             importance=draft.parsed.importance,
+            key_fact=draft.parsed.key_fact.strip() or None,
             relevant=draft.parsed.relevant,
             kind=draft.parsed.kind,
             model=draft.model,

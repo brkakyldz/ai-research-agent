@@ -1225,25 +1225,17 @@ kbd {
    taken (DESIGN.md), and a verdict is the reader's own note, not a state of
    the machine.
 
-   The same place as the first cut, but not drawn until the pointer is on the
-   story. The page is
-   read far more often than it is judged, and two words repeated under fifteen
-   stories are two words the reader has to skip fifteen times. The card is
-   already the hover unit - `.go` brightens on it three rules up - so this
-   costs no new interaction, only a new consequence: a control nobody can see
-   is a control nobody presses, and E3's calibration is starved of labels
-   before it starts. Three rules pay that back. It stays drawn once the story
-   carries a verdict (`.vd--on`, set in `_story_foot.html`), so the reader's
-   own marks are never hidden from him; `:focus-within` draws it for a keyboard
-   that has tabbed into it, which opacity alone would leave focused and
-   invisible; and a pointer that cannot hover gets it drawn always, because
-   `.item:hover` never fires on a touch screen and there is no second way in. */
+   It is drawn always, and quietly - the chips' own ink, not the body's. Hiding
+   it until the pointer was on the story cost less than it looked: the whole
+   evaluation layer runs on these labels, a control nobody sees is a control
+   nobody presses, and after three days the archive held five of them over 138
+   summaries. A reader who does not want to judge skips a word in `--ink-3`;
+   an evaluation with no labels has nothing to be calibrated against. The
+   hover step also never fired on a touch screen, so half the readers were
+   already being shown what the other half were not. */
 .vd {
   margin-left: auto; display: inline-flex; align-items: center; font-size: 12px;
-  opacity: 0; transition: opacity var(--dur) var(--ease);
 }
-.item:hover .vd, .vd:focus-within, .vd--on { opacity: 1; }
-@media (hover: none) { .vd { opacity: 1; } }
 .vd button {
   background: none; border: 0; padding: 4px 2px; font: inherit; font-weight: 500;
   color: var(--ink-3); cursor: pointer; transition: color var(--dur) var(--ease);
@@ -1258,9 +1250,27 @@ kbd {
    the link keeps its place as the row's last step. */
 .vd ~ .go { margin-left: 0; }
 
-/* The reason, when the verdict is "wrong": a second row under the foot line,
-   as quiet as the line above it. No box (ADR 0013) - an underlined field and
-   one word to save it. */
+/* Which of the four the "wrong" was about: a second row under the foot line,
+   drawn only after the reader has pressed "wrong". Four words and a question,
+   at the foot line's own size - it is the reader's own row, not a form, so it
+   gets no box and no fill (ADR 0013), and the chosen one is marked by full ink
+   and a check exactly as the two words above it are. */
+.vd-why {
+  flex-basis: 100%; margin-top: 6px; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 0 7px; font-size: 12px;
+}
+.vd-why__q { color: var(--ink-3); font-weight: 600; }
+.vd-why__b {
+  background: none; border: 0; padding: 4px 2px; font: inherit; font-weight: 500;
+  color: var(--ink-3); cursor: pointer; transition: color var(--dur) var(--ease);
+}
+.vd-why__b:hover, .vd-why__b[aria-pressed="true"] { color: var(--ink-0); }
+.vd-why__b[aria-pressed="true"]::after { content: " ✓"; }
+.vd-why__b + .vd-why__b::before { content: " b7"; margin-right: 7px; color: var(--line); }
+
+/* The reader's own words, when the verdict is "wrong": a third row, as quiet
+   as the two above it. No box (ADR 0013) - an underlined field and one word to
+   save it. */
 .vd-note { flex-basis: 100%; margin-top: 6px; display: flex; align-items: center; gap: 10px; }
 .vd-note input[type="text"] {
   flex: 1; min-width: 0; background: none; border: 0; border-bottom: 1px solid var(--line);
@@ -1682,11 +1692,13 @@ td.note {
   max-width: 400px;
 }
 td.verdict { font-family: var(--sans); font-size: 12px; font-weight: 600; }
-/* The two words in a table cell (the judge's findings, 2026-09-08). On a
-   story card they are drawn under the pointer; in a table there is no card to
-   hover, and a control the reader cannot see is not a control, so here they
-   are always painted and start at the cell's edge. */
-td.verdict .vd { opacity: 1; margin-left: 0; }
+/* The two words in a table cell (the judge's findings, 2026-09-08). The cell
+   has no auto margin to push them to its end, so the control starts at the
+   cell's edge. */
+td.verdict .vd { margin-left: 0; }
+/* Which of the four, on its own line under the word: quieter and lighter,
+   because it qualifies the verdict rather than repeating it. */
+.verdict__r { display: block; margin-top: 2px; font-weight: 500; color: var(--ink-3); }
 
 /* ---------- one run, node by node ---------- */
 
@@ -1735,6 +1747,32 @@ td.span { width: 26%; min-width: 150px; padding-right: 20px; }
 }
 .span__t b { position: relative; padding-left: 6px; font-weight: 400; color: var(--ink-1); }
 tr:hover .span__t i { opacity: 0.42; }
+
+/* The press's own checks on the bulletin it published: a label, a share, and a
+   bar on the step bar's ink and geometry. A definition list rather than a table
+   because there is one value per row and no second column to compare down; the
+   grid keeps the numbers on one right edge, which is the only alignment a
+   reader of six percentages needs.
+
+   No colour. The impact meter's three are spoken for (ADR 0012) and they mean
+   a band of a scale; these are shares of a whole, and painting 60% amber would
+   be inventing a threshold the code does not have. Every bar fills in the same
+   direction instead - a long bar is the good answer on every row - which is
+   what the "kept the budget" phrasing is for. */
+.qual { display: grid; gap: 2px; }
+.qual__r {
+  display: grid; grid-template-columns: 1fr auto 120px; align-items: center;
+  gap: 14px; padding: 5px 0; font-size: 12.5px;
+}
+.qual__r dt { color: var(--ink-1); }
+.qual__r dd { margin: 0; color: var(--ink-0); }
+.qual__b { position: relative; height: 6px; border-radius: 4px; background: var(--plate); }
+.qual__b i {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  width: max(3px, var(--w, 0%)); border-radius: 4px;
+  background: var(--ink-3); opacity: 0.55;
+}
+@media (max-width: 700px) { .qual__r { grid-template-columns: 1fr auto; } .qual__b { display: none; } }
 
 /* ---------- forms ---------- */
 

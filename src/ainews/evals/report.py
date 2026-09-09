@@ -12,6 +12,7 @@ Nothing here spends money. The judge and the probe are separate commands.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -23,11 +24,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.clock import day_bounds
 from ainews.config import PROJECT_ROOT, Settings, get_settings
-from ainews.db import Bulletin, BulletinItem, EvalResult, Summary, Verdict
+from ainews.db import VERDICT_REASONS, Bulletin, BulletinItem, EvalResult, Summary, Verdict
 from ainews.db.models import utcnow
-from ainews.evals import checks
 from ainews.evals.judge import Calibration, calibrate
-from ainews.evals.record import record_bulletin
+from ainews.evals.stability import FLOOR
+from ainews.pipeline.prompts import prompt_version
+from ainews.quality.stories import day_stories, published_checks
 
 DEFAULT_PATH = PROJECT_ROOT / "docs" / "evals.md"
 HEADER = """# Evaluation record
@@ -35,7 +37,7 @@ HEADER = """# Evaluation record
 One dated section per `ainews eval report` invocation, appended and never
 edited: a section is what was measured on that date. The functions named beside
 each number live in `src/ainews/evals/`; the bounds the test suite holds them to
-are in `tests/test_evals_checks.py`. What the numbers are for, and what they
+are in `tests/test_quality_checks.py`. What the numbers are for, and what they
 trigger, is `docs/PLAN-EVALS.md` (E4, E5) and ADR 0019.
 """
 
@@ -55,10 +57,14 @@ class BulletinReport:
     version: int
     language: str
     agreement: float | None
+    # Were the checks the press's own, or computed just now by today's code
+    # over a day published before the column existed?
+    at_publish: bool
     n_stories: int
     n_ranked: int
     product_cost: float
     budget: dict[str, Any]
+    content: dict[str, Any]
     ungrounded: list[tuple[int, list[str]]]
     tags: dict[str, Any]
     importance: dict[int, float]
@@ -78,8 +84,27 @@ class Report:
     bulletins: list[BulletinReport] = field(default_factory=list)
     calibration: Calibration | None = None
     n_labels: int = 0
+    # The prompt versions the calibration rows were measured under. More than
+    # one means the rate averages two experiments.
+    judge_prompts: list[str] = field(default_factory=list)
     product_cost: float = 0.0
     eval_cost: float = 0.0
+
+
+def _stored_checks(bulletin: Bulletin) -> tuple[dict[str, Any] | None, bool]:
+    """The checks the press wrote, or `(None, False)` if it wrote none.
+
+    Preferred over recomputing because a number is a claim about the prompts and
+    the check code that produced it, and both move. A bulletin published before
+    the column existed is re-scored by today's code, and the section says so
+    rather than passing it off as what was measured on the day.
+    """
+    if not bulletin.checks_json:
+        return None, False
+    try:
+        return json.loads(bulletin.checks_json), True
+    except json.JSONDecodeError:
+        return None, False
 
 
 async def _verdict_counts(
@@ -100,16 +125,21 @@ async def _verdict_counts(
     )
     rows = (
         await session.execute(
-            select(Verdict.verdict, func.count())
+            select(Verdict.verdict, Verdict.reason, func.count())
             .join(Summary, Summary.id == Verdict.summary_id)
             .where(Summary.language == bulletin.language)
             .where(in_bulletin | ((Summary.created_at >= start) & (Summary.created_at < end)))
-            .group_by(Verdict.verdict)
+            .group_by(Verdict.verdict, Verdict.reason)
         )
     ).all()
-    counts = {"ok": 0, "wrong": 0}
-    for verdict, n in rows:
-        counts[verdict] = int(n)
+    # The four reasons are counted beside the two words. Only `wrong_fact` is
+    # about the summariser; the other three are the relevance call, the dedupe
+    # and the ranker, each of which has no other measurement at all.
+    counts = {"ok": 0, "wrong": 0} | dict.fromkeys(VERDICT_REASONS, 0)
+    for verdict, reason, n in rows:
+        counts[verdict] = counts.get(verdict, 0) + int(n)
+        if verdict == "wrong" and reason:
+            counts[reason] = counts.get(reason, 0) + int(n)
     counts["unlabelled"] = max(n_stories - counts["ok"] - counts["wrong"], 0)
     return counts
 
@@ -143,7 +173,6 @@ async def _judge_summary(session: AsyncSession, bulletin_id: int) -> dict[str, A
 
 
 async def _stability_summary(session: AsyncSession, bulletin_id: int) -> dict[str, Any] | None:
-    import json
 
     row = (
         await session.execute(
@@ -160,18 +189,37 @@ async def _stability_summary(session: AsyncSession, bulletin_id: int) -> dict[st
     return {
         "tau": detail.get("tau"),
         "jaccard": detail.get("jaccard"),
+        # The number the gate reads: the weaker of tau and the Jaccard with this
+        # pool's chance level taken out. Printed beside the raw pair rather than
+        # instead of them, because "they shared 43% of the stories" and "that is
+        # 7% better than picking at random" are both worth seeing.
+        "score": detail.get("score"),
+        "passed": row.passed,
         "times": detail.get("times"),
         "n_fallback": detail.get("n_fallback", 0),
         "cost": row.est_cost_usd,
     }
 
 
-async def _calibration(session: AsyncSession) -> tuple[Calibration | None, int]:
+async def _calibration(session: AsyncSession) -> tuple[Calibration | None, int, list[str]]:
     """The 2x2 from rows already on record: the latest grounding row of every
-    summary that carries a verdict. No call is made here."""
+    summary that carries a verdict. No call is made here.
+
+    The prompt versions those rows came from are returned with it. A pass rate
+    is a claim about a prompt, and averaging rows written by two of them is the
+    mistake the 83-92% on record already made - so the number is reported with
+    the prompts it was measured under named beside it.
+    """
     rows = (
         await session.execute(
-            select(Verdict.verdict, EvalResult.passed, EvalResult.created_at, EvalResult.summary_id)
+            select(
+                Verdict.verdict,
+                Verdict.reason,
+                EvalResult.passed,
+                EvalResult.created_at,
+                EvalResult.summary_id,
+                EvalResult.prompt_version,
+            )
             .join(EvalResult, EvalResult.summary_id == Verdict.summary_id)
             .where(EvalResult.kind == "grounding")
             .order_by(EvalResult.summary_id, EvalResult.created_at)
@@ -179,11 +227,13 @@ async def _calibration(session: AsyncSession) -> tuple[Calibration | None, int]:
     ).all()
     n_labels = int((await session.execute(select(func.count()).select_from(Verdict))).scalar_one())
     if not rows:
-        return None, n_labels
-    latest: dict[int, tuple[str, bool | None]] = {}
-    for verdict, passed, _, summary_id in rows:
-        latest[summary_id] = (verdict, passed)
-    return calibrate(list(latest.values())), n_labels
+        return None, n_labels, []
+    latest: dict[int, tuple[str, str | None, bool | None]] = {}
+    versions: dict[int, str] = {}
+    for verdict, reason, passed, _, summary_id, version in rows:
+        latest[summary_id] = (verdict, reason, passed)
+        versions[summary_id] = version or "unknown"
+    return calibrate(list(latest.values())), n_labels, sorted(set(versions.values()))
 
 
 async def build_report(
@@ -213,8 +263,9 @@ async def build_report(
         query = query.where(Bulletin.id == bulletin_id)
     bulletins = list((await session.execute(query)).scalars())
     for bulletin in bulletins:
-        fixture = await record_bulletin(session, bulletin.id, settings)
-        stories = fixture["stories"]
+        stored, at_publish = _stored_checks(bulletin)
+        if stored is None:
+            stored = published_checks(await day_stories(session, bulletin), bulletin.editor_note)
         report.bulletins.append(
             BulletinReport(
                 bulletin_id=bulletin.id,
@@ -222,28 +273,30 @@ async def build_report(
                 version=bulletin.version,
                 language=bulletin.language,
                 agreement=bulletin.agreement,
-                n_stories=len(stories),
-                n_ranked=len(checks.ranked_order(stories)),
+                at_publish=at_publish,
+                n_stories=stored["n"],
+                n_ranked=stored["n_published"],
                 # What the day cost: the ranking on the bulletin, plus every
                 # summary it drew on. A summary carries its own spend now, so
                 # this is a sum rather than a run total that included stories
                 # published on another day.
                 product_cost=bulletin.est_cost_usd + await _summary_cost(session, bulletin),
-                budget=checks.word_budget(stories),
-                ungrounded=checks.ungrounded_numerals(stories),
-                tags=checks.tag_vocabulary(stories),
-                importance=checks.importance_distribution(stories),
-                overlap=checks.ranker_vs_fallback(stories),
-                tiers=checks.tier_shape(stories),
-                unrepresented=checks.unrepresented_fives(stories),
-                editor_note=checks.editor_note_shape(bulletin.editor_note),
-                verdicts=await _verdict_counts(session, bulletin, len(stories)),
+                budget=stored["budget"],
+                content=stored["content"],
+                ungrounded=[(row["article_id"], row["numerals"]) for row in stored["ungrounded"]],
+                tags=stored["tags"],
+                importance={int(k): v for k, v in stored["importance"].items()},
+                overlap=stored["overlap"],
+                tiers=stored["tiers"],
+                unrepresented=stored["unrepresented"],
+                editor_note=stored["editor_note"],
+                verdicts=await _verdict_counts(session, bulletin, stored["n"]),
                 judge=await _judge_summary(session, bulletin.id),
                 stability=await _stability_summary(session, bulletin.id),
             )
         )
 
-    report.calibration, report.n_labels = await _calibration(session)
+    report.calibration, report.n_labels, report.judge_prompts = await _calibration(session)
     report.product_cost = sum(b.product_cost for b in report.bulletins)
     report.eval_cost = float(
         (
@@ -287,6 +340,15 @@ def render_bulletin(run: BulletinReport) -> list[str]:
         f"### Bulletin {run.day}{version} · {run.language} · "
         f"{run.n_ranked} published of {run.n_stories} summarised · agreement {agreement}",
         "",
+        (
+            "Checks as the press ran them."
+            if run.at_publish
+            # Said out loud, because otherwise a re-scored old day reads as a
+            # measurement of that day, and it is a measurement of today's code.
+            else "Checks recomputed now: this bulletin was published before the press "
+            "stored its own, so these are today's checks over an older day."
+        ),
+        "",
         "| Measure | Value | Function |",
         "|---|---|---|",
         f"| Summaries over 55 words | {_pct(budget['over_share']['summary'])} "
@@ -295,6 +357,12 @@ def render_bulletin(run: BulletinReport) -> list[str]:
         f"| `checks.word_budget` |",
         f"| Titles over 10 words | {budget['over_count']['title_local']} | `checks.word_budget` |",
         f"| Summary sentence histogram | {budget['sentences']} | `checks.word_budget` |",
+        f"| Key fact named | {_pct(run.content['key_fact_share'])} of {run.content['n']} "
+        f"| `checks.content_floor` |",
+        f"| ↳ and kept in the writing | {_pct(run.content['key_fact_kept'])} "
+        f"| `checks.content_floor` |",
+        f"| A body figure survives into the summary | {_pct(run.content['numeral_recall'])} "
+        f"of {run.content['n_with_numerals']} | `checks.content_floor` |",
         f"| Ungrounded numerals | {len(run.ungrounded)} story(ies): "
         f"{', '.join(f'{aid} {nums}' for aid, nums in run.ungrounded) or 'none'} "
         f"| `checks.ungrounded_numerals` |",
@@ -315,6 +383,9 @@ def render_bulletin(run: BulletinReport) -> list[str]:
         f"{run.editor_note['words']} words | `checks.editor_note_shape` |",
         f"| Reader verdicts ok / wrong / unlabelled | {run.verdicts['ok']} / "
         f"{run.verdicts['wrong']} / {run.verdicts['unlabelled']} | `Verdict` rows |",
+        "| ↳ wrong: fact / not news / duplicate / place | "
+        f"{run.verdicts['wrong_fact']} / {run.verdicts['not_news']} / "
+        f"{run.verdicts['duplicate']} / {run.verdicts['wrong_place']} | `Verdict.reason` |",
     ]
     if run.judge:
         j = run.judge
@@ -331,9 +402,14 @@ def render_bulletin(run: BulletinReport) -> list[str]:
     if run.stability:
         s = run.stability
         fallback = f", {s['n_fallback']} fell back" if s["n_fallback"] else ""
+        gate = "not measured" if s["passed"] is None else ("pass" if s["passed"] else "FAIL")
         lines.append(
             f"| Rank stability (tau / top-N Jaccard) | {s['tau']} / {s['jaccard']} "
             f"over {s['times']} shuffles{fallback} | `stability.rank_stability` |"
+        )
+        lines.append(
+            f"| ↳ against chance, gate {FLOOR} | {s['score']} — {gate} "
+            "| `stability.StabilityReport.score` |"
         )
     else:
         lines.append("| Rank stability | not probed | `stability.rank_stability` |")
@@ -392,6 +468,22 @@ def render_markdown(report: Report, existing: str = "") -> str:
                 "Not enough labels to trust TPR and TNR: thirty per class needed. "
                 f"{report.n_labels} label(s) on record in total."
             )
+        prompts = report.judge_prompts
+        current = prompt_version("judge_grounding", "en")
+        if len(prompts) > 1:
+            lines.append(
+                "**These rows were judged under "
+                f"{len(prompts)} different prompts** (`{'`, `'.join(prompts)}`), so the "
+                "rate above averages two experiments. Re-judge the labelled set to "
+                "read one number."
+            )
+        elif prompts and prompts != [current]:
+            lines.append(
+                f"Judged under prompt `{prompts[0]}`; the prompt on disk is now "
+                f"`{current}`, so this measures the previous one."
+            )
+        elif prompts:
+            lines.append(f"Judge prompt `{current}`.")
     lines.append("")
     return "\n".join(lines) + "\n"
 

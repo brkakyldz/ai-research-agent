@@ -146,9 +146,30 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "verdict_note": "Neyi yanlış yaptı? (isteğe bağlı)",
         "verdict_save": "Kaydet",
         "verdict_saved": "Kaydedildi",
+        # The four things a story block claims, so a "wrong" says which one broke
+        # (PLAN-V2 5.1). Written as what the reader saw rather than as the field
+        # it grades: nobody reading a bulletin thinks in `relevant` or `tier`.
+        "verdict_why": "Yanlış olan ne?",
+        "reason_wrong_fact": "Bilgi yanlış",
+        "reason_not_news": "Yapay zekâ haberi değil",
+        "reason_duplicate": "Aynı haber tekrar",
+        "reason_wrong_place": "Sırası yanlış",
         # How many summaries carry one, on `/runs` beside the spend. A count and
         # not a call: the label names the thing, and the figure is a fraction
         # because "3" on its own says nothing without the 118 under it.
+        # What the press measured about the day it just published (PLAN-V2 5.5).
+        # Written as claims about the writing rather than as function names: the
+        # person reading this page is the one who has to decide whether the
+        # bulletin is any good, and "key_fact_kept" is not a sentence.
+        "quality_heading": "Bu bültenin ölçümleri",
+        "quality_lead": "Hepsi ücretsiz, baskının kendisi hesapladı.",
+        "quality_key_fact": "Haberi haber yapan şeyi adlandırdı",
+        "quality_key_fact_kept": "Ve bunu özete taşıdı",
+        "quality_numeral_recall": "Metindeki bir rakamı özete taşıdı",
+        "quality_budget": "Özet kelime sınırında kaldı",
+        "quality_vocabulary": "Etiketler ortak sözlükten",
+        "quality_ungrounded": "Metinde olmayan rakam taşıyan haber",
+        "quality_na": "yok",
         "verdicts_labelled": "Karar verilen",
         # `/runs/verdicts`: the labels themselves, under the count. The summary
         # line states the two figures the count states and no third one - what
@@ -362,6 +383,20 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "verdict_note": "What did it get wrong? (optional)",
         "verdict_save": "Save",
         "verdict_saved": "Saved",
+        "verdict_why": "What was wrong?",
+        "reason_wrong_fact": "A fact is wrong",
+        "reason_not_news": "Not AI news",
+        "reason_duplicate": "Same story again",
+        "reason_wrong_place": "In the wrong place",
+        "quality_heading": "What this bulletin measured",
+        "quality_lead": "All of it free, computed by the press itself.",
+        "quality_key_fact": "Named the thing that made it news",
+        "quality_key_fact_kept": "And carried it into the summary",
+        "quality_numeral_recall": "Carried a figure from the article",
+        "quality_budget": "Summary kept the word budget",
+        "quality_vocabulary": "Tags from the shared vocabulary",
+        "quality_ungrounded": "Stories with a figure the text lacks",
+        "quality_na": "none",
         "verdicts_labelled": "With a verdict",
         # See the note on the Turkish block.
         "verdicts_heading": "The reader's verdicts",

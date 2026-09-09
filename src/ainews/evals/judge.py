@@ -46,7 +46,7 @@ from ainews.pipeline.llm import judge as judge_model
 from ainews.pipeline.llm import usage_from_message
 from ainews.pipeline.nodes.summarize import MAX_BODY_CHARS
 from ainews.pipeline.pricing import estimate_cost, resolve_model
-from ainews.pipeline.prompts import load_prompt
+from ainews.pipeline.prompts import load_prompt, prompt_version
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +93,9 @@ class Candidate:
     summary: str
     why_it_matters: str
     human_verdict: str | None = None
+    # Which of the four a "wrong" was about. Only `wrong_fact` is a claim about
+    # this judge's subject, and `calibrate` sets the rest aside.
+    human_reason: str | None = None
     # The story's place in the bulletin, or None for one the editor left out.
     # What `choose_sample` prefers.
     position: int | None = None
@@ -143,6 +146,7 @@ def _candidate(
     source: Source,
     verdict: str | None,
     item: BulletinItem | None = None,
+    reason: str | None = None,
 ) -> Candidate:
     return Candidate(
         summary_id=summary.id,
@@ -156,6 +160,7 @@ def _candidate(
         summary=summary.summary,
         why_it_matters=summary.why_it_matters,
         human_verdict=verdict,
+        human_reason=reason,
         position=item.position if item else None,
         body_source=article.body_source,
     )
@@ -207,7 +212,7 @@ async def load_labelled(session: AsyncSession) -> list[Candidate]:
             .order_by(Summary.id)
         )
     ).all()
-    return [_candidate(s, a, src, v.verdict) for s, a, src, v in rows]
+    return [_candidate(s, a, src, v.verdict, reason=v.reason) for s, a, src, v in rows]
 
 
 def choose_sample(candidates: list[Candidate], sample: int, seed: int) -> list[Candidate]:
@@ -324,6 +329,7 @@ async def judge_candidates(
                 passed=outcome.passed,
                 detail=_detail(outcome),
                 model=model,
+                prompt_version=prompt_version("judge_grounding", "en"),
                 tokens_in=outcome.tokens_in,
                 tokens_out=outcome.tokens_out,
                 est_cost_usd=estimate_cost(model, outcome.tokens_in, outcome.tokens_out),
@@ -371,6 +377,11 @@ class Calibration:
     ok_passed: int = 0  # reader ok, judge passed
     ok_failed: int = 0  # reader ok, judge failed
     unparsed: int = 0
+    # Labels the grounding judge is not the right instrument for: a "wrong" the
+    # reader gave for `not_news`, `duplicate` or `wrong_place`, and a "wrong"
+    # from before the reader was asked which. Counted rather than discarded so
+    # the report can say how many labels exist that this rate does not use.
+    other_reason: int = 0
 
     @property
     def n_wrong(self) -> int:
@@ -409,11 +420,25 @@ class Calibration:
         return min(self.n_wrong, self.n_ok) >= MIN_LABELS_PER_CLASS
 
 
-def calibrate(pairs: list[tuple[str, bool | None]]) -> Calibration:
-    """`(human_verdict, judge_passed)` pairs in, the 2x2 out."""
+def calibrate(labels: list[tuple[str, str | None, bool | None]]) -> Calibration:
+    """`(human_verdict, reason, judge_passed)` triples in, the 2x2 out.
+
+    Only `wrong_fact` counts against the judge. The three other reasons are
+    about parts of the system this judge never looks at - whether the item is AI
+    news, whether it is the story above it again, and where the editor put it -
+    and reading them as grounding failures is what made a reader who spotted an
+    irrelevant story count against a judge that was right about the text. They
+    are not "ok" either: a story the reader rejected is not evidence that the
+    summary is faithful, so they leave the table entirely.
+
+    A `wrong` with no reason is one of those too. Nobody asked which of the four
+    the reader meant, and guessing on their behalf is how a rate becomes fiction.
+    """
     table = Calibration()
-    for human, judged in pairs:
-        if judged is None:
+    for human, reason, judged in labels:
+        if human == "wrong" and reason != "wrong_fact":
+            table.other_reason += 1
+        elif judged is None:
             table.unparsed += 1
         elif human == "wrong":
             if judged:
@@ -442,6 +467,11 @@ def format_calibration(table: Calibration) -> str:
     ]
     if table.unparsed:
         lines.append(f"{table.unparsed} judged but unparsable, not counted")
+    if table.other_reason:
+        lines.append(
+            f"{table.other_reason} label(s) set aside: a 'wrong' this judge does not "
+            "measure (not AI news, a duplicate, or in the wrong place)"
+        )
     if not table.trusted:
         lines.append(
             f"not enough labels to trust: {MIN_LABELS_PER_CLASS} per class needed, "
@@ -462,5 +492,7 @@ async def judge_labelled(
     outcomes = await judge_candidates(
         session, labelled, max_cost=max_cost, settings=settings, model=model
     )
-    pairs = [(o.candidate.human_verdict or "ok", o.passed) for o in outcomes]
-    return calibrate(pairs), outcomes
+    labels = [
+        (o.candidate.human_verdict or "ok", o.candidate.human_reason, o.passed) for o in outcomes
+    ]
+    return calibrate(labels), outcomes

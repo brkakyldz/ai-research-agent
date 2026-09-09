@@ -333,6 +333,12 @@ class Summary(Base):
     why_it_matters: Mapped[str] = mapped_column(Text)
     tags_json: Mapped[str] = mapped_column(Text, default="[]")
     importance: Mapped[int] = mapped_column(Integer, default=3)
+    # The one figure, name or version from the article that makes it news, as
+    # the summariser copied it. It is the content floor: everything else the
+    # evaluation measures is shape, and three generic numberless sentences at
+    # importance 3 clear every shape check there is. Null where the article
+    # carries none, and on rows written before the field existed.
+    key_fact: Mapped[str | None] = mapped_column(Text, default=None)
     # Is this AI news at all, and what shape of item is it. The ranker is given
     # only the relevant ones, and a roundup is never offered the lead.
     relevant: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -391,6 +397,12 @@ class Bulletin(Base):
     model_rank: Mapped[str | None] = mapped_column(String(60), default=None)
     agreement: Mapped[float | None] = mapped_column(Float, default=None)
     est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    # Every free check over this day, as JSON, computed when the bulletin was
+    # published (`quality.published_checks`). Stored rather than recomputed on
+    # demand for the reason `eval_results.prompt_version` exists: a number is a
+    # claim about the prompts and the check code that produced it, and both
+    # move. Null on a bulletin published before this was written.
+    checks_json: Mapped[str | None] = mapped_column(Text, default=None)
 
     run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
@@ -443,16 +455,40 @@ class BulletinItem(Base):
     )
 
 
-class Verdict(Base):
-    """The reader's own call on one summary: right, or wrong.
+# What a reader meant by "wrong". Four, because the story block holds four
+# separate claims - the facts, that this is AI news at all, that it is not the
+# same event as the story above it, and the size the editor gave it - and one
+# word for all four is a label no measurement can use. Each is answered by a
+# different part of the system, so each is its own row: `wrong_fact` is the only
+# one the grounding judge is calibrated against, `not_news` and `duplicate` are
+# the relevance call and the dedupe, and `wrong_place` is the first measurement
+# of the ranker anyone has been able to take.
+VerdictReason = Literal["wrong_fact", "not_news", "duplicate", "wrong_place"]
+VERDICT_REASONS: tuple[VerdictReason, ...] = (
+    "wrong_fact",
+    "not_news",
+    "duplicate",
+    "wrong_place",
+)
 
-    Binary, not a 1-5 score - a person reading a digest can say "that is
-    wrong" in one click and cannot honestly say "that is a 3", and the
-    grounding judge (`ainews eval judge --labelled`) is calibrated against
-    exactly this yes/no. One row per summary: a later verdict overwrites the
-    earlier one rather than accumulating a history nobody reads. `note` is the
-    reader's reason, free text, and it is the raw material a judge prompt is
-    rewritten from when its numbers say it should be (PLAN-EVALS E2, E5).
+
+class Verdict(Base):
+    """The reader's own call on one summary: right, or wrong, and about what.
+
+    Binary and not a 1-5 score - a person reading a digest can say "that is
+    wrong" in one click and cannot honestly say "that is a 3". `reason` is what
+    the one click was about, and it is what makes the label usable: without it,
+    a reader marking a correct summary of an irrelevant story counted against
+    the grounding judge, which had reported nothing wrong and was right.
+
+    `reason` is null on an `ok` verdict and on the labels collected before the
+    field existed; `unknown` is the truthful value for those and they are set
+    aside rather than folded into a rate (`judge.calibrate`).
+
+    One row per summary: a later verdict overwrites the earlier one rather than
+    accumulating a history nobody reads. `note` is the reader's own words, free
+    text, and it is the raw material a judge prompt is rewritten from when its
+    numbers say it should be (PLAN-EVALS E2, E5).
     """
 
     __tablename__ = "verdicts"
@@ -460,12 +496,19 @@ class Verdict(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     summary_id: Mapped[int] = mapped_column(ForeignKey("summaries.id"), unique=True)
     verdict: Mapped[str] = mapped_column(String(10))
+    reason: Mapped[str | None] = mapped_column(String(12), default=None)
     note: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     summary: Mapped[Summary] = relationship()
 
-    __table_args__ = (CheckConstraint("verdict in ('ok', 'wrong')", name="ck_verdicts_verdict"),)
+    __table_args__ = (
+        CheckConstraint("verdict in ('ok', 'wrong')", name="ck_verdicts_verdict"),
+        CheckConstraint(
+            "reason is null or reason in ('wrong_fact', 'not_news', 'duplicate', 'wrong_place')",
+            name="ck_verdicts_reason",
+        ),
+    )
 
 
 class EvalResult(Base):
@@ -496,6 +539,12 @@ class EvalResult(Base):
     # rank-stability row.
     detail: Mapped[str | None] = mapped_column(Text, default=None)
     model: Mapped[str] = mapped_column(String(60), default="")
+    # Which prompt produced this measurement (`prompts.prompt_version`). A rate
+    # is about a prompt as much as about a model: the judge prompt failed 8 of
+    # 12, was revised the same afternoon, and the revision was scored on the
+    # same 12. Null on rows written before the column existed, which is what
+    # `unknown` means everywhere else in this schema.
+    prompt_version: Mapped[str | None] = mapped_column(String(12), default=None)
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
     est_cost_usd: Mapped[float] = mapped_column(Float, default=0.0)

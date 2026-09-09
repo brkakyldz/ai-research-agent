@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ainews.db import Bulletin, Summary, Verdict, db_session
+from ainews.db import VERDICT_REASONS, Bulletin, Summary, Verdict, db_session
 from ainews.db.models import utcnow
 from ainews.web import queries
 from ainews.web.format import impact_split
@@ -185,6 +185,7 @@ async def post_verdict(
     request: Request,
     summary_id: int = Form(...),
     verdict: str = Form(...),
+    reason: str | None = Form(None),
     note: str | None = Form(None),
     frag: str | None = Form(None),
     session: AsyncSession = Depends(db_session),
@@ -205,6 +206,8 @@ async def post_verdict(
     language = language_of(request)
     if verdict not in ("ok", "wrong"):
         raise HTTPException(status_code=422, detail="verdict is 'ok' or 'wrong'")
+    if reason is not None and reason not in VERDICT_REASONS:
+        raise HTTPException(status_code=422, detail=f"reason is one of {VERDICT_REASONS}")
     if await session.get(Summary, summary_id) is None:
         raise HTTPException(status_code=404, detail="no such summary")
 
@@ -219,14 +222,18 @@ async def post_verdict(
     # row E5 rewrites the judge prompt from.
     if verdict != "wrong":
         cleaned = None
-    elif note is None:
-        cleaned = row.note if row is not None else None
+        chosen = None
     else:
-        cleaned = note.strip() or None
+        cleaned = (row.note if row is not None else None) if note is None else note.strip() or None
+        # The same rule for the reason: the two words post no `reason` field,
+        # so a reader pressing "wrong" again on a story they have already
+        # classified keeps the classification.
+        chosen = (row.reason if row is not None else None) if reason is None else reason
     if row is None:
-        session.add(Verdict(summary_id=summary_id, verdict=verdict, note=cleaned))
+        session.add(Verdict(summary_id=summary_id, verdict=verdict, reason=chosen, note=cleaned))
     else:
         row.verdict = verdict
+        row.reason = chosen
         row.note = cleaned
         row.created_at = utcnow()
     await session.commit()

@@ -18,7 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Settings
 from ainews.db import Article, Bulletin, BulletinItem, Source, Summary
-from ainews.pipeline.agreement import agreement, borda, jaccard, kendall_tau
+from ainews.pipeline.agreement import (
+    agreement,
+    borda,
+    chance_corrected_jaccard,
+    expected_jaccard,
+    jaccard,
+    kendall_tau,
+)
 from ainews.pipeline.nodes import rank as rank_module
 from ainews.pipeline.nodes.rank import (
     Candidate,
@@ -57,11 +64,36 @@ def test_agreement_is_the_weaker_of_the_two_measures() -> None:
     belong; a mean of the two would let the order hide the membership."""
     orders = [[1, 2, 3], [1, 2, 3, 4, 5, 6]]
     assert kendall_tau(*orders) == 1.0
-    assert agreement(orders) == pytest.approx(0.5)
+    # A pool wide enough that chance agreement rounds away, so what is left is
+    # the set measure alone: three shared of six between them.
+    assert agreement(orders, pool=10_000) == pytest.approx(0.5, abs=0.001)
 
 
 def test_one_reading_agrees_with_nothing_and_says_so() -> None:
-    assert agreement([[1, 2, 3]]) == 1.0
+    assert agreement([[1, 2, 3]], pool=20) == 1.0
+
+
+def test_two_selections_of_the_same_size_agree_by_chance_alone() -> None:
+    """Fifteen of twenty-seven is the shape of a real day, and two *random*
+    picks of fifteen from it score 0.385 - two thirds of a gate set at 0.6, off
+    the pool size and nothing else."""
+    assert expected_jaccard(15, 27) == pytest.approx(0.3846, abs=0.0001)
+    # A pool the size of the selection leaves nothing to disagree about.
+    assert expected_jaccard(15, 15) == 1.0
+    assert expected_jaccard(15, 0) == 0.0
+
+
+def test_the_set_measure_is_scored_against_chance_not_against_zero() -> None:
+    """Chance is 0.0 and identical selections are 1.0.
+
+    Subtracting the chance level instead of dividing by the room above it caps
+    a perfect ranker at 1 - 0.385 = 0.615 on that day, so a gate at 0.6 would be
+    reading the pool size rather than the ranker.
+    """
+    assert chance_corrected_jaccard(1.0, 15, 27) == 1.0
+    assert chance_corrected_jaccard(expected_jaccard(15, 27), 15, 27) == pytest.approx(0.0)
+    # And a day where every candidate ships has no room for chance to be wrong.
+    assert chance_corrected_jaccard(1.0, 15, 15) == 1.0
 
 
 # -- the aggregate ------------------------------------------------------------
@@ -115,7 +147,7 @@ def test_only_one_story_leads_however_many_readings_named_a_lead() -> None:
         _pass([1, 3, 2], {1: "lead", 3: "lead", 2: "major"}),
         _pass([2, 1, 3], {2: "lead", 1: "lead", 3: "notable"}),
     ]
-    ranking = _aggregate(passes, top_n=15)
+    ranking = _aggregate(passes, top_n=15, pool=20)
 
     leads = [sid for sid in ranking.order if ranking.tiers[sid] == "lead"]
     assert leads == [ranking.order[0]]
@@ -129,7 +161,7 @@ def test_the_editors_note_comes_from_the_reading_nearest_the_published_order() -
         _pass([1, 2, 3], {1: "lead", 2: "major", 3: "notable"}, note="also one two three"),
         _pass([8, 9], {8: "lead", 9: "major"}, note="about eight and nine"),
     ]
-    ranking = _aggregate(passes, top_n=15)
+    ranking = _aggregate(passes, top_n=15, pool=20)
 
     assert ranking.order == [1, 2, 3]
     assert "eight" not in ranking.editor_note
@@ -138,7 +170,7 @@ def test_the_editors_note_comes_from_the_reading_nearest_the_published_order() -
 def test_a_bulletin_from_one_surviving_call_carries_no_agreement_number() -> None:
     """`None` and not 1.0: one reading agrees with nothing, and a number
     invented for that case would look like a measured one."""
-    ranking = _aggregate([_pass([1, 2], {1: "lead", 2: "major"})], top_n=15)
+    ranking = _aggregate([_pass([1, 2], {1: "lead", 2: "major"})], top_n=15, pool=20)
     assert ranking.agreement is None
 
 

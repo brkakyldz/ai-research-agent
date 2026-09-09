@@ -23,6 +23,7 @@ from jinja2 import pass_context
 
 from ainews.clock import to_local
 from ainews.config import Language
+from ainews.db.models import VERDICT_REASONS
 from ainews.web.i18n import strings
 
 
@@ -52,6 +53,10 @@ def build_templates(directory: Path, *, auto_reload: bool) -> Jinja2Templates:
     templates.env.filters["number"] = number_filter
     templates.env.filters["band"] = impact_band
     templates.env.filters["paragraphs"] = split_paragraphs
+    # A global rather than a context key: the story foot is rendered from a page
+    # view and again from `POST /verdict`, and a list of four constants that has
+    # to be passed by both is a list one of them will eventually forget.
+    templates.env.globals["reasons"] = VERDICT_REASONS
     return templates
 
 

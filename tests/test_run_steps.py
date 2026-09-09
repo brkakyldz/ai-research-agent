@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from ainews.clock import local_day
 from ainews.config import Settings
-from ainews.db import Run, RunStep
+from ainews.db import Bulletin, Run, RunStep
 from ainews.db.models import utcnow
 from ainews.pipeline import graph as graph_module
 from ainews.pipeline import steps as steps_module
@@ -329,6 +329,49 @@ async def test_the_run_page_reads_each_node_in_its_own_words(
     turkish = client.get(f"/runs/{run.id}?lang=tr").text
     assert "tekrar ayıklandı" in turkish
     assert "restatement" not in turkish
+
+
+async def test_the_run_page_shows_what_the_press_measured(
+    client: TestClient,
+    session: AsyncSession,
+    settings: Settings,
+    fake_llm: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The free checks in front of the person who pressed the button.
+
+    They cost nothing and ran only when somebody remembered `ainews eval report`
+    over a freshly recorded fixture, so the person the evaluation is *for* never
+    saw one (PLAN-V2 5.5). The press stores them on the bulletin now and this
+    page reads them back; it never recomputes, because a page that re-scored an
+    old day with today's checks would report a different experiment under the
+    run's own heading.
+    """
+    run = await _run_the_graph(session, monkeypatch)
+    bulletin = (
+        await session.execute(select(Bulletin).where(Bulletin.run_id == run.id))
+    ).scalar_one()
+    assert bulletin.checks_json, "the press wrote them"
+
+    body = client.get(f"/runs/{run.id}?lang=en").text
+    assert "What this bulletin measured" in body
+    assert "Named the thing that made it news" in body
+    assert "Summary kept the word budget" in body
+    assert 'class="qual__b"' in body
+    # The row's number and its bar are the same quantity. `word_budget` counts
+    # the summaries that went *over*, and the row says how many kept it, so the
+    # share is inverted once - for both, or the page draws a full bar beside a
+    # 0% and means the opposite of what it says.
+    kept = body.split("Summary kept the word budget")[1][:400]
+    assert "100%" in kept, "the fake summaries are inside the budget"
+    assert "--w: 100" in kept
+
+    # A run that published nothing has nothing to draw, and the block is absent
+    # rather than empty - the same answer the step table gives for no steps.
+    empty = Run(kind="digest", language="tr", status="ok")
+    session.add(empty)
+    await session.commit()
+    assert "What this bulletin measured" not in client.get(f"/runs/{empty.id}?lang=en").text
 
 
 async def test_the_runs_table_links_into_the_run(

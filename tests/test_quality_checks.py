@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from ainews.evals import checks
 from ainews.evals.record import FIXTURE_DIR
+from ainews.quality import checks
 
 # fixture name -> {gap: reason}. The 2026-09-04 run predates E0.5 (the
 # "use a figure only if it appears in the text" line), the three-paragraph
@@ -30,6 +30,10 @@ KNOWN_GAPS: dict[str, dict[str, str]] = {
         "numerals": "predates E0.5: '500 binden fazla saat' is the figure the probe found",
         "editor_note": "predates the three-paragraph editor's-note prompt of 2026-09-05",
         "fives": "the ranked Astra lead (HN) was purged after the run; article 58 is unrepresented",
+        "key_fact": "predates the field; nobody asked these articles the question",
+    },
+    "2026-09-06_tr.json": {
+        "key_fact": "predates the field; nobody asked these articles the question",
     },
 }
 
@@ -81,6 +85,93 @@ def test_summaries_are_three_sentences(fixture: dict[str, Any]) -> None:
 def test_no_numeral_appears_that_the_body_did_not_contain(fixture: dict[str, Any]) -> None:
     flagged = checks.ungrounded_numerals(fixture["stories"])
     assert flagged == [], flagged
+
+
+# -- the content floor --------------------------------------------------------
+
+
+def _story(**over: Any) -> dict[str, Any]:
+    story = {
+        "article_id": 1,
+        "key_fact": "GPT-6 Astra",
+        "title_local": "OpenAI GPT-6 Astra modelini duyurdu",
+        "summary": "OpenAI GPT-6 Astra modelini duyurdu. 13.000 satir kod. Ucuncu cumle.",
+        "why_it_matters": "Onemli.",
+        "body_numerals": ["13000"],
+    }
+    return story | over
+
+
+def test_the_content_floor_catches_prose_that_says_nothing() -> None:
+    """The regression every other check passes.
+
+    Three generic, numberless sentences at importance 3 clear the word budget,
+    the sentence histogram, the tag spread and the note shape; they are flagged
+    by `ungrounded_numerals` never (no figure to flag) and by the grounding
+    judge never (no claim to disagree with). The 2026-09-06 run was already 70%
+    threes, so this is the direction the writing drifts in (PLAN-V2 5.6).
+    """
+    empty = _story(
+        title_local="Yeni bir gelisme",
+        summary="Sirket bir gelisme duyurdu. Sektor icin onemli olabilir. Takip edilmeli.",
+    )
+    assert checks.ungrounded_numerals([empty]) == [], "nothing invented, so nothing to flag"
+
+    floor = checks.content_floor([empty])
+    assert floor["key_fact_kept"] == 0.0, "the model knew what the story was and did not say it"
+    assert floor["numeral_recall"] == 0.0, "and it dropped the one figure the body had"
+
+    assert checks.content_floor([_story()]) == {
+        "n": 1,
+        "key_fact_share": 1.0,
+        "key_fact_kept": 1.0,
+        "n_with_numerals": 1,
+        "numeral_recall": 1.0,
+    }
+
+
+def test_a_key_fact_counts_as_kept_when_it_comes_back_inflected() -> None:
+    """The fact is copied from an English body into a Turkish summary.
+
+    Demanding the string back unchanged would measure the language rather than
+    the writing: "3,5 milyar dolarlik" is "$3.5 billion" written in Turkish.
+    """
+    story = _story(
+        key_fact="3.5 milyar dolar",
+        title_local="Nscale yatirim aldi",
+        summary="Nscale 3,5 milyar dolarlik bir tur kapatti. Iki. Uc.",
+        body_numerals=["3500000000"],
+    )
+    assert checks.content_floor([story])["key_fact_kept"] == 1.0
+
+
+def test_a_story_with_no_key_fact_is_not_counted_against_the_writing() -> None:
+    """An opinion piece has no figure or version in it, and the prompt says to
+    leave the field empty rather than invent one. The share is reported so a run
+    of empties is visible; the kept rate is asked only of the ones that have
+    one, and is `None` when none do."""
+    floor = checks.content_floor([_story(key_fact=""), _story(key_fact="  ")])
+    assert floor["key_fact_share"] == 0.0
+    assert floor["key_fact_kept"] is None
+
+
+def test_numeral_recall_asks_only_the_stories_that_can_answer() -> None:
+    floor = checks.content_floor([_story(body_numerals=[])])
+    assert floor["n_with_numerals"] == 0
+    assert floor["numeral_recall"] is None
+
+
+@pytest.mark.parametrize("fixture", _fixtures("key_fact"))
+def test_most_stories_name_the_thing_that_made_them_news(fixture: dict[str, Any]) -> None:
+    """Both fixtures on record fail this, and that is the point of writing it.
+
+    They were recorded before the field existed, so the bound has nothing to
+    read and the gap is counted rather than assumed away. The first run recorded
+    after PLAN-V2 5.6 is the first measurement of the content floor anywhere.
+    """
+    floor = checks.content_floor(fixture["stories"])
+    assert floor["key_fact_share"] >= 0.7, "a day is mostly releases, results and figures"
+    assert (floor["key_fact_kept"] or 0.0) >= 0.8, "and the writing keeps what it found"
 
 
 # -- tags and scores ----------------------------------------------------------

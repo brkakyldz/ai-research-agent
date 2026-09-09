@@ -112,6 +112,11 @@
             </td>
             <td class="verdict{% if label.verdict == 'wrong' %} bad{% endif %}">
               {{ t['verdict_' ~ label.verdict] }}
+              {# Which of the four, under the word. Three of them are not about
+                 the summariser at all - the relevance call, the dedupe and the
+                 ranker - and this line is the only place any of the three is
+                 ever reported. #}
+              {% if label.reason %}<span class="verdict__r">{{ t['reason_' ~ label.reason] }}</span>{% endif %}
             </td>
             {# The reader's own sentence, so it leaves the table's monospaced
                face (ADR 0011) and is allowed to wrap. A note runs to 500

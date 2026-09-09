@@ -12,10 +12,18 @@ at the time rather than being overwritten.
 Cost is computed here rather than reported by the API, from the token counts
 each LLM node carried back. It is an estimate and the run row says so - prompt
 caching in particular makes the real bill lower than this number.
+
+It also runs the free checks over the day it just published and stores them on
+the bulletin (PLAN-V2 5.5). They read rows and call nothing, so this costs a
+few milliseconds and no money - and it is what puts a quality number in front of
+someone who never opens a terminal. `ainews/quality/` is product code for
+exactly this reason; the paid evaluation stays in `evals/`, which nothing here
+imports (ADR 0019 §2).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy import func, select
@@ -26,6 +34,7 @@ from ainews.db import Bulletin, BulletinItem, Run
 from ainews.db.models import utcnow
 from ainews.pipeline.pricing import estimate_cost
 from ainews.pipeline.state import PipelineState
+from ainews.quality import day_stories, published_checks
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +86,18 @@ async def publish_bulletin(
                 reason=item["reason"] or None,
             )
         )
+    await session.flush()
+
+    try:
+        stories = await day_stories(session, bulletin)
+        bulletin.checks_json = json.dumps(
+            published_checks(stories, bulletin.editor_note), ensure_ascii=False
+        )
+    except Exception:
+        # A measurement that fails must not lose a bulletin the run paid for.
+        # The report recomputes where this column is null, so the cost of the
+        # miss is a slower report and not a missing page.
+        log.exception("could not compute the published checks for bulletin %d", bulletin.id)
     return bulletin
 
 

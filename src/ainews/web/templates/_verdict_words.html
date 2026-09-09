@@ -14,8 +14,10 @@
 
    Two words, the chips' face and size, the chosen one in full ink with a check
    after it. No fill and no colour: the accent's jobs are taken, and a verdict
-   is the reader's own note, not a state of the machine. #}
-<span class="vd{% if verdict %} vd--on{% endif %}" role="group" id="vd-{{ sid }}">
+   is the reader's own note, not a state of the machine. They are drawn always
+   rather than under the pointer - the whole evaluation layer runs on these
+   labels, and three days of hover-only collected five over 138 summaries. #}
+<span class="vd" role="group" id="vd-{{ sid }}">
   {%- for value in ('ok', 'wrong') %}
   <button type="button"
           {# Both states are written, not just the pressed one: a toggle that

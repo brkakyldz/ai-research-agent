@@ -8,13 +8,11 @@
    shape as `_run_action.html`: the page never reloads under a reader who is
    halfway down it.
 
-   Placement was picked by drawing the alternatives
-   (E2.1) - the reader's own line, beside the other things the reader does,
-   leaving the meta line to the machine, and drawn only under the pointer. The
-   `vd--on` class is the half of that the server can know: a story already
-   carrying a verdict keeps its two words visible at rest. Everything else
-   about the reveal is three rules in `theme.css`, which is where it belongs -
-   the control does not change, only when it is painted. #}
+   Placement was picked by drawing the alternatives (E2.1): the reader's own
+   line, beside the other things the reader does, leaving the meta line to the
+   machine. It is drawn at rest and not under the pointer - the labels are what
+   the evaluation layer is calibrated against, and a control nobody sees is a
+   control nobody presses. #}
 <div class="item__f" id="foot-{{ story.id }}">
   {% if story.tags %}
   {# Three, not all of them: the tag row is orientation, and a story
@@ -40,9 +38,26 @@
   </a>
 
   {% if story.verdict == 'wrong' %}
-  {# The reason, one line, optional. It is what a judge prompt gets rewritten
-     from when the numbers say so (E5), so it is asked for at the moment the
-     reader has it and never again. #}
+  {# Which of the four the "wrong" was about. Four separate claims sit in one
+     story block - the facts, that this is AI news, that it is not the story
+     above it again, and the size the editor gave it - and one word for all four
+     is a label the evaluation cannot use: only `wrong_fact` calibrates the
+     grounding judge (PLAN-V2 5.1). Asked after the click rather than instead of
+     it, so the first press is still one word. #}
+  <div class="vd-why">
+    <span class="vd-why__q">{{ t.verdict_why }}</span>
+    {% for value in reasons %}
+    <button type="button" class="vd-why__b"
+            aria-pressed="{{ 'true' if story.verdict_reason == value else 'false' }}"
+            hx-post="/verdict?lang={{ language }}"
+            hx-vals='{"summary_id": {{ story.id }}, "verdict": "wrong", "reason": "{{ value }}"}'
+            hx-target="#foot-{{ story.id }}" hx-swap="outerHTML">{{ t['reason_' ~ value] }}</button>
+    {% endfor %}
+  </div>
+
+  {# The reader's own words, one line, optional. It is what a judge prompt gets
+     rewritten from when the numbers say so (E5), so it is asked for at the
+     moment the reader has it and never again. #}
   <form class="vd-note"
         hx-post="/verdict?lang={{ language }}"
         hx-target="#foot-{{ story.id }}" hx-swap="outerHTML">

@@ -1,6 +1,7 @@
 """Persistence layer: models, engine/session wiring and schema creation."""
 
 from ainews.db.models import (
+    VERDICT_REASONS,
     Article,
     Base,
     Bulletin,
@@ -12,6 +13,7 @@ from ainews.db.models import (
     Source,
     Summary,
     Verdict,
+    VerdictReason,
     bulletin_runs,
 )
 from ainews.db.schema import init_db
@@ -25,6 +27,7 @@ from ainews.db.session import (
 )
 
 __all__ = [
+    "VERDICT_REASONS",
     "Article",
     "Base",
     "Bulletin",
@@ -36,6 +39,7 @@ __all__ = [
     "Source",
     "Summary",
     "Verdict",
+    "VerdictReason",
     "bulletin_runs",
     "create_engine",
     "db_session",

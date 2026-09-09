@@ -31,6 +31,7 @@ from ainews.db import (
 )
 from ainews.web.bulletin import tier_step
 from ainews.web.format import relative_age
+from ainews.web.i18n import Strings
 
 
 @dataclass(slots=True)
@@ -108,6 +109,9 @@ class Story:
     reason: str | None = None
     # The reader's verdict on this summary, if one was given: "ok" | "wrong".
     verdict: str | None = None
+    # Which of the four a "wrong" was about, or `None` on an `ok` and on the
+    # labels given before the reader was asked.
+    verdict_reason: str | None = None
     verdict_note: str | None = None
 
     @property
@@ -216,6 +220,7 @@ def _to_story(
         tier=item.tier if item else None,
         reason=item.reason if item else None,
         verdict=verdict.verdict if verdict else None,
+        verdict_reason=verdict.reason if verdict else None,
         verdict_note=verdict.note if verdict else None,
     )
 
@@ -746,6 +751,11 @@ class LabelledStory:
     source: str
     title_local: str
     verdict: str
+    # Which of the four a "wrong" was about, or `None`. Drawn beside the word
+    # rather than in the note column: only `wrong_fact` is about the summariser,
+    # and a table that does not say which is which is a table where three
+    # different findings look like the same one.
+    reason: str | None
     note: str | None
 
 
@@ -785,6 +795,7 @@ async def labelled_stories(session: AsyncSession, limit: int = 200) -> Page[Labe
                 source=source_name,
                 title_local=summary.title_local,
                 verdict=verdict.verdict,
+                reason=verdict.reason,
                 note=verdict.note,
             )
             for verdict, summary, source_name, bulletin_id in rows
@@ -906,3 +917,71 @@ def digest_top_n() -> int:
 
 def as_dicts(stories: list[Story]) -> list[dict[str, Any]]:
     return [s.__dict__ for s in stories]
+
+
+@dataclass(slots=True)
+class QualityRow:
+    """One measured thing about a published day, as the page draws it."""
+
+    label: str
+    value: str
+    # The bar's fill, 0..1, or None for a row that is a count rather than a
+    # share. A count has no denominator, and a bar drawn for one would be
+    # inventing a scale.
+    share: float | None = None
+
+
+async def published_quality(session: AsyncSession, run_id: str, t: Strings) -> list[QualityRow]:
+    """What the press measured about the bulletin it published.
+
+    Read off `bulletins.checks_json`, which the press wrote (PLAN-V2 5.5). Not
+    recomputed here: the web layer draws what was measured, and a page that
+    re-scored an old day with today's checks would be quietly reporting a
+    different experiment under the run's own heading.
+
+    Empty for a run that published nothing, and for one published before the
+    column existed - the block is simply not drawn, which is what the run log
+    already does for a run with no steps.
+    """
+    bulletin = (
+        await session.execute(
+            select(Bulletin)
+            .where(Bulletin.run_id == run_id)
+            .order_by(Bulletin.version.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if bulletin is None or not bulletin.checks_json:
+        return []
+    try:
+        stored = json.loads(bulletin.checks_json)
+    except json.JSONDecodeError:
+        return []
+
+    content = stored.get("content") or {}
+    budget = stored.get("budget") or {}
+    over = (budget.get("over_share") or {}).get("summary")
+    tags = stored.get("tags") or {}
+
+    def share_row(label: str, value: float | None, *, invert: bool = False) -> QualityRow:
+        """`invert` turns a share that went wrong into the share that went right.
+
+        The number and the bar are the same quantity. Inverting only the bar
+        would draw a full bar beside a 0%, which is the one thing a row with
+        both cannot do.
+        """
+        if value is None:
+            return QualityRow(label, t["quality_na"])
+        shown = 1.0 - value if invert else value
+        return QualityRow(label, f"{shown:.0%}", shown)
+
+    return [
+        share_row(t["quality_key_fact"], content.get("key_fact_share")),
+        share_row(t["quality_key_fact_kept"], content.get("key_fact_kept")),
+        share_row(t["quality_numeral_recall"], content.get("numeral_recall")),
+        # Drawn as "kept the budget" rather than "went over it", so every bar on
+        # the block fills in the same direction and a long bar is always good.
+        share_row(t["quality_budget"], over, invert=True),
+        share_row(t["quality_vocabulary"], tags.get("in_vocabulary_share")),
+        QualityRow(t["quality_ungrounded"], str(len(stored.get("ungrounded") or []))),
+    ]

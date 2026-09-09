@@ -55,6 +55,35 @@ def jaccard(a: Sequence[int], b: Sequence[int]) -> float:
     return len(sa & sb) / len(sa | sb)
 
 
+def expected_jaccard(kept: int, pool: int) -> float:
+    """What two *random* selections of `kept` stories from `pool` would score.
+
+    Two independent uniform subsets of size k from a pool of N share k**2/N
+    items on average and cover 2k - k**2/N between them, so their Jaccard is
+    k / (2N - k). Fifteen of twenty-seven scores 0.385 by coin flip, which is
+    most of the way to a gate set at 0.6 - a ranker that had learned nothing
+    would clear two thirds of the bar on the pool size alone.
+    """
+    if pool <= 0 or kept <= 0:
+        return 0.0
+    kept = min(kept, pool)
+    return kept / (2 * pool - kept)
+
+
+def chance_corrected_jaccard(observed: float, kept: int, pool: int) -> float:
+    """`observed` rescaled so chance is 0.0 and identical selections are 1.0.
+
+    Divided by the room above chance and not merely subtracted from it: with
+    fifteen of twenty-seven the best achievable raw excess is 1 - 0.385 = 0.615,
+    so a ranker that picked the *same fifteen every time* would score 0.615 and
+    a gate at 0.6 would be measuring the pool size rather than the ranker.
+    """
+    expected = expected_jaccard(kept, pool)
+    if expected >= 1.0:
+        return 1.0
+    return (observed - expected) / (1.0 - expected)
+
+
 def mean_pairwise(
     orders: Sequence[Sequence[int]], measure: Callable[[Sequence[int], Sequence[int]], float]
 ) -> float:
@@ -64,7 +93,7 @@ def mean_pairwise(
     return sum(measure(a, b) for a, b in pairs) / len(pairs)
 
 
-def agreement(orders: Sequence[Sequence[int]]) -> float:
+def agreement(orders: Sequence[Sequence[int]], *, pool: int) -> float:
     """One number for "did the three readings describe the same day".
 
     The **lower** of the order measure and the set measure, because they fail
@@ -72,10 +101,18 @@ def agreement(orders: Sequence[Sequence[int]]) -> float:
     perfectly on five stories while disagreeing about which five belong, and
     they can pick the same fifteen stories in three unrelated orders. A mean of
     the two would let each hide the other.
+
+    `pool` is how many candidates the readings chose from. The set measure is
+    corrected against it, so both halves of the minimum are on the same scale:
+    zero is what indifference scores and one is what agreement scores.
     """
     if len(orders) < 2:
         return 1.0
-    return min(mean_pairwise(orders, kendall_tau), mean_pairwise(orders, jaccard))
+    kept = round(sum(len(order) for order in orders) / len(orders))
+    return min(
+        mean_pairwise(orders, kendall_tau),
+        chance_corrected_jaccard(mean_pairwise(orders, jaccard), kept, pool),
+    )
 
 
 def borda(orders: Sequence[Sequence[int]], *, quorum: int = 2) -> list[int]:

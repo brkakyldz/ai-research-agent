@@ -22,10 +22,11 @@ The two sources:
   name apart, and one subject apart. Counted separately because they wait on the
   same embedding for the opposite reason - the recall gaps are merges that do
   not happen, these are merges that should not.
-- `test_evals_checks.py::KNOWN_GAPS` — three checks the 2026-09-04 fixture
-  cannot meet because it was recorded before the fix each one exists for. They
-  come off when a newer run is recorded, which is a fact about that file rather
-  than about the code.
+- `test_quality_checks.py::KNOWN_GAPS` — five checks the two recorded fixtures
+  cannot meet because each was recorded before the fix that check exists for.
+  Both predate `key_fact` (PLAN-V2 5.6), and the 2026-09-04 one predates three
+  more. They come off when a newer run is recorded, which is a fact about those
+  files rather than about the code.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from __future__ import annotations
 EXPECTED = {
     "golden pairs that should merge and cannot (E5 trigger)": 9,
     "golden pairs that should not merge and do (E5 trigger)": 2,
-    "checks the 2026-09-04 fixture predates": 3,
+    "checks the recorded fixtures predate": 5,
 }
 
 
@@ -44,7 +45,7 @@ def test_the_known_gaps_are_the_number_we_think_they_are() -> None:
     depend on being run with the whole suite."""
     from ainews.evals.record import FIXTURE_DIR
     from test_dedupe import GOLDEN_PAIRS
-    from test_evals_checks import KNOWN_GAPS
+    from test_quality_checks import KNOWN_GAPS
 
     marked = [row for row in GOLDEN_PAIRS if getattr(row, "marks", ())]
     # The third value of the row is `should_merge`, which is what separates a
@@ -57,14 +58,14 @@ def test_the_known_gaps_are_the_number_we_think_they_are() -> None:
 
     assert missed == EXPECTED["golden pairs that should merge and cannot (E5 trigger)"]
     assert wrong == EXPECTED["golden pairs that should not merge and do (E5 trigger)"]
-    assert predated == EXPECTED["checks the 2026-09-04 fixture predates"]
-    assert missed + wrong + predated == sum(EXPECTED.values()) == 14
+    assert predated == EXPECTED["checks the recorded fixtures predate"]
+    assert missed + wrong + predated == sum(EXPECTED.values()) == 16
 
 
 def test_every_known_gap_states_what_it_is_waiting_on() -> None:
     """A bare `xfail` is a test switched off. A reason is the difference between
     a measurement and a silence."""
-    from test_evals_checks import KNOWN_GAPS
+    from test_quality_checks import KNOWN_GAPS
 
     for name, gaps in KNOWN_GAPS.items():
         for check, reason in gaps.items():

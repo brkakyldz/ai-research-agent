@@ -24,6 +24,11 @@ Kurallar:
   En fazla 10 kelime; başlık tek satırda durmalı.
 - Teknik terimleri zorlama çevirme — "model", "agent", "open-source", "fine-tune"
   yerleşik kullanımlarıyla kalsın.
+- `key_fact`, **bu haberi haber yapan tek somut şeydir**: bir rakam, bir isim,
+  bir sürüm, bir tarih - metinde nasıl geçiyorsa öyle kopyala. En fazla beş
+  kelime, cümle değil. "GPT-6 Astra", "3,5 milyar dolar", "13.000 satır".
+  Yalnızca metin gerçekten hiçbiri vermiyorsa - dayanağı olmayan bir görüş
+  yazısı gibi - boş bırak; metinde geçmeyen bir şeyi asla yazma.
 - `relevant`, haber yapay zekâ ya da yazılım sektörüyle hiç ilgili değilse
   false olur: kişisel bir deneme, bir hobi projesi, alakasız bir alandan bir
   yazı. Buradaki bazı kaynaklar kişilerin kendi blogları ve ikisini de

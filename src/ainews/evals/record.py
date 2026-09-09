@@ -1,7 +1,7 @@
 """Turn a bulletin into a fixture: `ainews eval record --bulletin <ref>`.
 
 The fixture *is* the behaviour, the same way `prompts/*.md` are: re-recording is
-a reviewed diff, and the checks in `tests/test_evals_checks.py` assert bounds
+a reviewed diff, and the checks in `tests/test_quality_checks.py` assert bounds
 over it offline. The JSON is written deterministically - sorted keys, no
 timestamp of its own - so recording the same bulletin twice is byte-for-byte the
 same file, and a diff means the database changed.
@@ -22,17 +22,16 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ainews.clock import day_bounds
 from ainews.config import PROJECT_ROOT, Settings, get_settings
-from ainews.db import Article, Bulletin, BulletinItem, Run, RunStep, Source, Summary
-from ainews.evals.checks import numeral_values
-from ainews.pipeline.nodes.summarize import MAX_BODY_CHARS
+from ainews.db import Article, Bulletin, Run, RunStep
+from ainews.quality.stories import day_stories
 
 __all__ = ["FIXTURE_DIR", "record_bulletin", "write_fixture"]
 
 # Bumped when a story gains a field. 3 replaced `rank` and `editor_importance`
-# with `position` and `tier`, and added `relevant` and `kind` (ADR 0030).
-SCHEMA = 3
+# with `position` and `tier`, and added `relevant` and `kind` (ADR 0030); 4 adds
+# `key_fact`, which is what `checks.content_floor` reads.
+SCHEMA = 4
 FIXTURE_DIR = PROJECT_ROOT / "tests" / "fixtures" / "runs"
 
 # A capitalised token: a word starting with an uppercase letter in either
@@ -84,76 +83,13 @@ async def record_bulletin(
         raise LookupError(f"no bulletin {bulletin_id}")
     run = await session.get(Run, bulletin.run_id) if bulletin.run_id else None
 
-    start, end = day_bounds(bulletin.day)
-    rows = (
-        await session.execute(
-            select(Summary, Article, Source, BulletinItem)
-            .join(Article, Article.id == Summary.article_id)
-            .join(Source, Source.id == Article.source_id)
-            .outerjoin(
-                BulletinItem,
-                (BulletinItem.summary_id == Summary.id) & (BulletinItem.bulletin_id == bulletin_id),
-            )
-            .where(Summary.language == bulletin.language)
-            .where(
-                BulletinItem.id.isnot(None)
-                | ((Summary.created_at >= start) & (Summary.created_at < end))
-            )
-            .order_by(
-                BulletinItem.position.asc().nullslast(),
-                Summary.importance.desc(),
-                Summary.id.asc(),
-            )
-        )
-    ).all()
-
-    stories: list[dict[str, Any]] = []
-    for summary, article, source, item in rows:
-        try:
-            tags = json.loads(summary.tags_json or "[]")
-        except json.JSONDecodeError:
-            tags = []
-        # The numerals are taken from the text the model was shown, not the
-        # whole body: a figure past the prompt's cut-off is one the model could
-        # not have read, so it counts as ungrounded, which is the point.
-        seen = (article.body_text or "")[:MAX_BODY_CHARS]
-        stories.append(
-            {
-                "article_id": article.id,
-                "source": source.name,
-                "weight": source.weight,
-                "title": article.title,
-                "title_local": summary.title_local,
-                "summary": summary.summary,
-                "why_it_matters": summary.why_it_matters,
-                "tags": tags,
-                # The summariser's own score, given with one article in view.
-                # `checks` reads it for the free ordering and the distribution.
-                "importance": summary.importance,
-                "relevant": summary.relevant,
-                "kind": summary.kind,
-                # The editor's placement, or null for a story left out. Two
-                # fields where there were two scores, and neither is the other's
-                # fallback (ADR 0030).
-                "position": item.position if item else None,
-                "tier": item.tier if item else None,
-                "reason": item.reason if item else None,
-                "body_numerals": sorted(numeral_values(seen)),
-                "body_capitalised": capitalised_tokens(seen),
-                # Where the text those two were taken from came from. `unknown`
-                # is every row written before the article and the web context
-                # were separated (ADR 0029): its numerals may include figures
-                # from a search result rather than from the article, so a
-                # grounding floor computed over it is an upper bound.
-                "body_source": article.body_source,
-            }
-        )
+    stories = await day_stories(session, bulletin)
 
     article_ids = {story["article_id"] for story in stories}
     dup_rows = (
         await session.execute(select(Article).where(Article.dup_of.in_(article_ids)))
     ).scalars()
-    survivors = {article.id: article.title for _, article, _, _ in rows}
+    survivors = {story["article_id"]: story["title"] for story in stories}
     dedupe_pairs = [
         {
             "article_id": dup.id,

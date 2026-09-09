@@ -471,6 +471,10 @@ async def run_detail(
                 for s in steps
                 if s.model
             ],
+            # Empty for a run that published nothing and for one that ran before
+            # the press stored its checks; the block is then not drawn at all,
+            # the way the step table already handles a run with no steps.
+            "quality": await queries.published_quality(session, run_id, t),
         }
     )
     response = get_templates(request).TemplateResponse(request, "run_detail.html", context)

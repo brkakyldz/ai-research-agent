@@ -106,6 +106,35 @@
     {% endif %}
   </section>
 
+  {% if quality %}
+  {# What the press measured about the bulletin it published (PLAN-V2 5.5).
+     Here rather than only in `docs/evals.md`, because the record is written by
+     a command and this page is the one the person who pressed the button is
+     already looking at - a check that runs for free and is never seen is a
+     check that is not being used.
+
+     A bar per row on the impact meter's geometry but not its colours: those are
+     spoken for (ADR 0012), and this is a share rather than a state. Every bar
+     fills in the same direction, so a long bar is always the good answer. #}
+  <section class="panel">
+    <div class="ph">
+      <h2>{{ t.quality_heading }}</h2>
+      <span class="ph__s">{{ t.quality_lead }}</span>
+    </div>
+    <div class="pb">
+      <dl class="qual">
+        {% for row in quality %}
+        <div class="qual__r">
+          <dt>{{ row.label }}</dt>
+          <dd class="num">{{ row.value }}</dd>
+          <dd class="qual__b">{% if row.share is not none %}<i style="--w: {{ (row.share * 100)|round(1) }}%"></i>{% endif %}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+    </div>
+  </section>
+  {% endif %}
+
   {% if run.error %}
   <section class="panel">
     <div class="ph"><h2>{{ t.status_error }}</h2></div>

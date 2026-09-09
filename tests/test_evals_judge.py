@@ -31,6 +31,7 @@ from ainews.evals.judge import (
     judge_bulletin,
     judge_labelled,
 )
+from ainews.pipeline.agreement import jaccard, kendall_tau, mean_pairwise
 from ainews.pipeline.nodes import rank as rank_module
 from ainews.pipeline.state import Pick, RankedDigest
 
@@ -228,8 +229,10 @@ async def test_an_upstream_error_is_a_row_not_a_traceback(
 def test_tpr_and_tnr_are_reported_separately() -> None:
     """Nine ok summaries the judge passes and one wrong one it misses is 90%
     accuracy and a judge that catches nothing. The table has to say so."""
-    pairs: list[tuple[str, bool | None]] = [("ok", True)] * 9 + [("wrong", True)]
-    table = calibrate(pairs)
+    labels: list[tuple[str, str | None, bool | None]] = [("ok", None, True)] * 9 + [
+        ("wrong", "wrong_fact", True)
+    ]
+    table = calibrate(labels)
     assert table.tnr == 1.0
     assert table.tpr == 0.0
     assert (table.n_ok, table.n_wrong) == (9, 1)
@@ -240,22 +243,48 @@ def test_tpr_and_tnr_are_reported_separately() -> None:
 
 
 def test_a_trusted_table_needs_thirty_per_class() -> None:
-    pairs = [("ok", True)] * 30 + [("wrong", False)] * 29
-    assert calibrate(pairs).trusted is False
-    pairs.append(("wrong", False))
-    assert calibrate(pairs).trusted is True
+    labels = [("ok", None, True)] * 30 + [("wrong", "wrong_fact", False)] * 29
+    assert calibrate(labels).trusted is False
+    labels.append(("wrong", "wrong_fact", False))
+    assert calibrate(labels).trusted is True
 
 
 def test_unparsed_judgements_are_counted_apart() -> None:
-    table = calibrate([("ok", None), ("wrong", False)])
+    table = calibrate([("ok", None, None), ("wrong", "wrong_fact", False)])
     assert table == Calibration(wrong_caught=1, unparsed=1)
+
+
+def test_only_a_wrong_fact_is_scored_against_the_grounding_judge() -> None:
+    """Four claims sit in one story block and this judge reads one of them.
+
+    A reader marking a faithful summary of an irrelevant story used to count as
+    a grounding miss, so the judge's TPR fell for being right. `not_news`,
+    `duplicate` and `wrong_place` leave the table entirely - they are not "ok"
+    either, because a story the reader rejected is no evidence the summary is
+    faithful (PLAN-V2 5.1).
+    """
+    table = calibrate(
+        [
+            ("wrong", "wrong_fact", False),
+            ("wrong", "not_news", True),
+            ("wrong", "duplicate", True),
+            ("wrong", "wrong_place", True),
+            # A label from before the reader was asked which of the four.
+            ("wrong", None, True),
+            ("ok", None, True),
+        ]
+    )
+    assert (table.wrong_caught, table.wrong_missed) == (1, 0)
+    assert table.tpr == 1.0, "the judge is not punished for the three it never reads"
+    assert table.other_reason == 4
+    assert "set aside" in format_calibration(table)
 
 
 async def test_labelled_mode_judges_only_what_the_reader_labelled(
     session: AsyncSession, bulletin: Bulletin, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ids = list((await session.execute(select(Summary.id).order_by(Summary.id))).scalars())
-    session.add(Verdict(summary_id=ids[0], verdict="wrong", note="uydurma"))
+    session.add(Verdict(summary_id=ids[0], verdict="wrong", reason="wrong_fact", note="uydurma"))
     session.add(Verdict(summary_id=ids[1], verdict="ok"))
     await session.commit()
 
@@ -327,6 +356,50 @@ async def test_a_failed_call_is_counted_and_never_stands_in_for_an_answer(
     assert json.loads(row.detail or "{}")["n_fallback"] == 2
 
 
+def test_three_disjoint_orders_do_not_pass_the_gate() -> None:
+    """The failure the old gate could not see.
+
+    `kendall_tau` returned 1.0 below two shared items, so three pairwise-disjoint
+    top-5 orders scored tau 1.0 and passed a floor of 0.6 - the gate passed
+    hardest exactly where the readings shared least. tau is 0.0 there now, and
+    the floor reads `min(tau, corrected Jaccard)`, so both halves have to hold.
+    """
+    report = stability.StabilityReport(
+        bulletin_id=1,
+        times=3,
+        pool=27,
+        orders=[[1, 2, 3, 4, 5], [6, 7, 8, 9, 10], [11, 12, 13, 14, 15]],
+    )
+    report.tau = mean_pairwise(report.orders, kendall_tau)
+    report.jaccard = mean_pairwise(report.orders, jaccard)
+
+    assert report.tau == 0.0
+    assert report.jaccard == 0.0
+    assert report.passed is False
+
+
+def test_the_gate_is_not_cleared_by_the_pool_being_small() -> None:
+    """Fifteen of twenty-seven picked twice at random overlaps 0.385 of the time.
+
+    Against a raw Jaccard that is two thirds of a 0.6 floor bought with nothing,
+    and three readings agreeing only slightly better than coin flips would clear
+    it. Corrected, chance scores zero.
+    """
+    kept = list(range(15))
+    report = stability.StabilityReport(
+        bulletin_id=1,
+        times=2,
+        pool=27,
+        orders=[kept, kept[:9] + list(range(15, 21))],
+    )
+    report.tau = 1.0
+    report.jaccard = mean_pairwise(report.orders, jaccard)
+
+    assert report.jaccard == pytest.approx(0.4286, abs=0.0001), "above the 0.385 of chance"
+    assert report.adjusted_jaccard == pytest.approx(0.0714, abs=0.0001)
+    assert report.passed is False, "and nowhere near having earned a pass"
+
+
 # -- the sample follows the reader (2026-09-08) --------------------------------
 
 
@@ -352,8 +425,15 @@ def test_the_sample_is_drawn_from_the_published_stories_first() -> None:
 def test_precision_is_the_share_of_judge_failures_the_reader_agreed_with() -> None:
     """The number a one-reader tool acts on: when the judge raises its hand,
     is it right. Two failures the reader confirmed, one it did not: 67%."""
-    table = calibrate([("wrong", False), ("wrong", False), ("ok", False), ("ok", True)])
+    table = calibrate(
+        [
+            ("wrong", "wrong_fact", False),
+            ("wrong", "wrong_fact", False),
+            ("ok", None, False),
+            ("ok", None, True),
+        ]
+    )
     assert table.n_failed == 3
     assert table.precision == pytest.approx(2 / 3)
     assert "precision" in format_calibration(table)
-    assert calibrate([("ok", True)]).precision is None, "no failures, no precision"
+    assert calibrate([("ok", None, True)]).precision is None, "no failures, no precision"

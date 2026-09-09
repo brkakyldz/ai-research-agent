@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.factories import publish
 
@@ -21,6 +22,7 @@ from ainews.evals.report import (
     parse_since,
     render_markdown,
 )
+from ainews.pipeline.prompts import prompt_version
 
 
 @pytest.fixture
@@ -69,7 +71,7 @@ async def measured(session: AsyncSession) -> Bulletin:
         ids.append(summary.id)
     await session.commit()
     bulletin = await publish(session, ids[:2], run=run, editor_note="a b c\n\nd e f\n\ng h i")
-    session.add(Verdict(summary_id=ids[0], verdict="wrong", note="uydurma"))
+    session.add(Verdict(summary_id=ids[0], verdict="wrong", reason="wrong_fact", note="uydurma"))
     session.add_all(
         [
             EvalResult(
@@ -79,6 +81,7 @@ async def measured(session: AsyncSession) -> Bulletin:
                 passed=False,
                 detail="500 bin saat",
                 model="gpt-5.6-terra",
+                prompt_version=prompt_version("judge_grounding", "en"),
                 tokens_in=900,
                 tokens_out=30,
                 est_cost_usd=0.002,
@@ -89,6 +92,7 @@ async def measured(session: AsyncSession) -> Bulletin:
                 kind="grounding",
                 passed=True,
                 model="gpt-5.6-terra",
+                prompt_version=prompt_version("judge_grounding", "en"),
                 tokens_in=900,
                 tokens_out=30,
                 est_cost_usd=0.002,
@@ -97,8 +101,19 @@ async def measured(session: AsyncSession) -> Bulletin:
                 bulletin_id=bulletin.id,
                 kind="rank_stability",
                 passed=True,
-                detail=json.dumps({"tau": 0.8, "jaccard": 0.9, "times": 3, "n_fallback": 0}),
+                detail=json.dumps(
+                    {
+                        "tau": 0.8,
+                        "jaccard": 0.9,
+                        "adjusted_jaccard": 0.85,
+                        "score": 0.8,
+                        "pool": 6,
+                        "times": 3,
+                        "n_fallback": 0,
+                    }
+                ),
                 model="gpt-5.6-luna",
+                prompt_version=prompt_version("rank", "tr"),
                 tokens_in=3000,
                 tokens_out=200,
                 est_cost_usd=0.001,
@@ -107,6 +122,36 @@ async def measured(session: AsyncSession) -> Bulletin:
     )
     await session.commit()
     return bulletin
+
+
+async def test_the_calibration_says_which_prompt_it_measured(
+    session: AsyncSession, measured: Bulletin, settings: Settings
+) -> None:
+    """A pass rate is a claim about a prompt.
+
+    The judge prompt failed 8 of 12 on 2026-09-06, was revised the same
+    afternoon and the revision was scored on the same 12; the 83-92% on record
+    is a training-set score and the row it came from did not say so. Two prompts
+    in one calibration is now a sentence in the report rather than something the
+    reader has to remember.
+    """
+    text = render_markdown(await build_report(session, since_days=30, settings=settings))
+    assert f"Judge prompt `{prompt_version('judge_grounding', 'en')}`." in text
+
+    rows = (
+        (await session.execute(select(EvalResult).where(EvalResult.kind == "grounding")))
+        .scalars()
+        .all()
+    )
+    # A second labelled story, so the calibration draws on two rows and the two
+    # prompts are both inside it.
+    session.add(Verdict(summary_id=rows[1].summary_id, verdict="ok"))
+    rows[0].prompt_version = "0000deadbeef"
+    await session.commit()
+
+    text = render_markdown(await build_report(session, since_days=30, settings=settings))
+    assert "judged under 2 different prompts" in text.lower()
+    assert "averages two experiments" in text
 
 
 def test_since_is_a_number_of_days() -> None:
@@ -124,7 +169,15 @@ async def test_the_report_carries_every_number_and_its_function(
     run = report.bulletins[0]
     assert (run.n_stories, run.n_ranked) == (4, 2)
     assert run.ungrounded and run.ungrounded[0][1] == ["500000"], "500 bin, scaled"
-    assert run.verdicts == {"ok": 0, "wrong": 1, "unlabelled": 3}
+    assert run.verdicts == {
+        "ok": 0,
+        "wrong": 1,
+        "wrong_fact": 1,
+        "not_news": 0,
+        "duplicate": 0,
+        "wrong_place": 0,
+        "unlabelled": 3,
+    }, "the reasons are counted beside the two words: only one of the four is the judge's"
     assert run.judge and (run.judge["passed"], run.judge["failed"]) == (1, 1)
     assert run.judge["claims"] == ["500 bin saat"]
     assert run.stability and run.stability["tau"] == 0.8
@@ -149,6 +202,7 @@ async def test_the_report_carries_every_number_and_its_function(
         "judge.judge_bulletin",
         "stability.rank_stability",
         "judge.calibrate",
+        "Verdict.reason",
     ):
         assert f"`{name}`" in text, name
     assert "500 bin saat" in text

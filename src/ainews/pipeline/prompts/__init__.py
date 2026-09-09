@@ -10,6 +10,7 @@ They are read once and cached - they cannot change while the process runs.
 
 from __future__ import annotations
 
+import hashlib
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -75,3 +76,20 @@ def load_prompt(name: PromptName, language: str) -> str:
 
 def available_languages() -> list[str]:
     return sorted(p.name for p in PROMPT_DIR.iterdir() if p.is_dir() and not p.name.startswith("_"))
+
+
+@lru_cache(maxsize=8)
+def prompt_version(name: PromptName, language: str) -> str:
+    """Twelve hex characters identifying the text of one prompt file.
+
+    Stored on every `EvalResult` (PLAN-V2 5.3) because a number is about a
+    prompt, not about a model. The judge prompt failed 8 of 12, was revised the
+    same afternoon and the revision was scored on the same 12 - so the 83-92%
+    on record is a training-set score and nothing in the row said so. With the
+    hash on the row, mixing two prompts' results in one rate is something the
+    report can refuse to do rather than something a reader has to remember.
+
+    A hash of the text and not a version number a person increments: an edited
+    prompt is a new prompt whether or not anyone remembered to say so.
+    """
+    return hashlib.sha256(load_prompt(name, language).encode("utf-8")).hexdigest()[:12]

@@ -142,6 +142,124 @@ def ungrounded_numerals(stories: list[Story]) -> list[tuple[int, list[str]]]:
     return flagged
 
 
+# -- the content floor --------------------------------------------------------
+
+# Words too common to count as a match between a key fact and a summary. Both
+# languages, because a story is summarised in one and the fact is copied from an
+# English body: "the model" matching "modelin" would make the check pass on
+# nothing.
+_STOPWORDS = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "of",
+        "for",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "with",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "new",
+        "model",
+        "models",
+        "ai",
+        "research",
+        "company",
+        "release",
+        "version",
+        "ve",
+        "veya",
+        "ile",
+        "bir",
+        "bu",
+        "da",
+        "de",
+        "icin",
+        "için",
+        "yeni",
+        "model",
+        "modeli",
+        "yapay",
+        "zeka",
+        "zekâ",
+    ]
+)
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Lowercased words worth matching on, punctuation and stopwords dropped."""
+    words = re.findall(r"[\w']+", (text or "").lower(), re.UNICODE)
+    return {w for w in words if len(w) > 2 and w not in _STOPWORDS}
+
+
+def content_floor(stories: list[Story]) -> dict[str, Any]:
+    """Does the writing carry anything concrete, or only the right shape.
+
+    Every other check here measures shape - word budgets, sentence counts, tag
+    spread, score distribution, note paragraph lengths. A regression to three
+    generic numberless sentences at importance 3 clears all of them, and clears
+    the numeral check (no figure to flag) and the grounding judge (no claim to
+    disagree with) as well. The 2026-09-06 run was already 70% threes.
+
+    Two numbers, both shares of the stories they can be asked of:
+
+    `key_fact_share` - how many stories the summariser could name a concrete
+    thing for at all. `key_fact_kept` - of those, how many carry it in the
+    summary or the headline. A fact recorded and then written around is the
+    exact regression this exists to catch: the model still *knows* what the
+    story was and no longer tells the reader.
+
+    `numeral_recall` - of the stories whose body carries a figure, how many
+    summaries carry one of the body's own figures. It is the mirror of
+    `ungrounded_numerals`: that one catches a figure that was invented, this one
+    catches a summary that dropped every figure the article had. A run of
+    numberless prose scores 0.0 here and is flagged by nothing else.
+
+    Reported and not asserted, like the other distributions: the bar depends on
+    the day's mix of releases and opinion, and a threshold nobody can defend is
+    a threshold that gets raised until it passes.
+    """
+    with_fact = [s for s in stories if (s.get("key_fact") or "").strip()]
+    kept = 0
+    for story in with_fact:
+        fact = _content_tokens(story["key_fact"])
+        written = _content_tokens(f"{story.get('title_local', '')} {story.get('summary', '')}")
+        # Any content word in common. Not the whole phrase: a fact copied from
+        # an English body and written into a Turkish summary comes back
+        # inflected, and demanding the string return unchanged would measure the
+        # language rather than the writing.
+        if fact & written:
+            kept += 1
+
+    grounded = [s for s in stories if s.get("body_numerals")]
+    recalled = 0
+    for story in grounded:
+        body = set(story["body_numerals"])
+        text = f"{story.get('summary', '')} {story.get('why_it_matters', '')}"
+        if numeral_values(text) & body:
+            recalled += 1
+
+    n = len(stories)
+    return {
+        "n": n,
+        "key_fact_share": len(with_fact) / n if n else 0.0,
+        "key_fact_kept": kept / len(with_fact) if with_fact else None,
+        "n_with_numerals": len(grounded),
+        "numeral_recall": recalled / len(grounded) if grounded else None,
+    }
+
+
 # -- format budgets -----------------------------------------------------------
 
 _SENTENCE_END = re.compile(r"[.!?…](?:\s|$)")

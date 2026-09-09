@@ -62,6 +62,19 @@ class ArticleSummary(BaseModel):
     # 2026-09-08, and the JSON schema reaches the model beside the prompt, so
     # the rubric was stated twice to the same reader and could drift apart.
     importance: int = Field(ge=1, le=5, description="1 to 5, on the scale the instructions define.")
+    # The one concrete thing that makes this news. It costs no extra call - it
+    # is a field on an answer already being bought - and it is the only floor
+    # under *content*: every other check measures shape, and three generic
+    # numberless sentences at importance 3 pass every one of them, plus the
+    # numeral check (nothing to flag) and the judge (nothing unsupported).
+    key_fact: str = Field(
+        default="",
+        description=(
+            "The single figure, name, version or date from the article that makes "
+            "this news, copied as it appears there. Five words at most. Empty only "
+            "if the article genuinely contains none."
+        ),
+    )
     # The source list was the only thing deciding whether an item was AI news,
     # and one weight-1.5 source is a personal blog that also publishes on map
     # projections. Asked at summarise time and not at rank time because the
