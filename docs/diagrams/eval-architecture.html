@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>search_agent — how the evaluation works</title>
+<link rel="stylesheet" href="diagram.css">
+<style>
+  .layer { display: grid; grid-template-columns: 250px 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .layer > .box { align-self: stretch; }
+  .free { background: #dceefb; border-color: #2f7fbf; }
+  .paid { background: #fdeaa8; border-color: #cf9e34; }
+  .say { background: #f4f5f7; border-color: #c3c7cd; }
+  .seen { background: #fff; border: 1.5px dashed #9aa0a8; border-radius: 9px; padding: 12px 14px; }
+  .name { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
+  .free .name { color: #1f5c8f; }
+  .paid .name { color: #a35f0b; }
+  .tag { font-size: 11.5px; color: #5b6168; }
+  .cost { font-size: 11.5px; color: #6b7178; margin: 0; }
+  .paid .cost { color: #a35f0b; }
+  .trigger { background: #fdf1f0; border-color: #d05a4e; }
+  .trigger .name { color: #b23c2f; }
+  .banner { margin-bottom: 18px; }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div>
+    <h1>search_agent — how the evaluation works</h1>
+    <p class="lede">pytest stays offline and free; anything that spends money is a sibling command —
+      <span class="mono">ainews eval …</span> — and never a test (ADR 0019). The app has one paid
+      press and does not start an evaluation (ADR 0023). What changed with ADR 0033 is where the
+      line falls: the free half is product code and runs on every press.</p>
+  </div>
+  <div class="legend">
+    <b>blue</b> free, offline, deterministic<br>
+    <b>yellow</b> spends money on purpose
+  </div>
+</div>
+
+<div class="box plain banner">
+  <h3>The record · app.db (SQLite, WAL)</h3>
+  <p>Summary · Bulletin · BulletinItem · Verdict (the reader's) · EvalResult (judge, rank probe) ·
+    Run · run_steps</p>
+  <p><b>src/ainews/quality/</b> is imported by the pipeline on purpose: it reads rows, calls no
+    model and writes nothing, and persist stores what it returns on the bulletin.
+    <b>src/ainews/evals/</b> reads the database, quality/ and the pipeline's node functions, and is
+    imported by cli.py alone — never the pipeline, never the web layer. The arrow points one way,
+    and that is the whole rule.</p>
+</div>
+
+<div class="layer">
+  <div class="box free">
+    <p class="name">1 · CHECKS</p>
+    <p class="cost">free · at every press · $0</p>
+    <p class="cost">quality/checks.py — rows in, numbers out</p>
+  </div>
+  <div class="box say">
+    <p class="mono">persist → bulletins.checks_json → /runs/&lt;id&gt;</p>
+    <p>word_budget → ≤5% of summaries over 55 words; 0 over on why_it_matters and the title</p>
+    <p>ungrounded_numerals → a figure in the summary the body never carried</p>
+    <p>content_floor → did the summariser name the key fact, did it survive into the writing, did
+      the body's numerals reach the summary at all</p>
+    <p>tag_vocabulary → singleton share ≤70% · importance_distribution · tier_shape</p>
+    <p>ranker_vs_fallback → reported, never asserted: an overlap equal to the ceiling means the
+      rank call bought nothing</p>
+    <p>unrepresented_fives · editor_note_shape → 3 paragraphs of 25–40 words</p>
+  </div>
+  <div class="box say">
+    <p class="name">Computed once, at the press.</p>
+    <p>Stored on the bulletin rather than recomputed when the page is drawn: a page that re-scores
+      an old day with today's checks reports one experiment under another one's heading.</p>
+    <p>The same pure functions run over a recorded fixture inside pytest, which is what lets a
+      bound be asserted offline, with no key and no network.</p>
+    <p><b>Why a content check at all:</b> a regression to three generic, numberless sentences
+      passes every shape check here, and passes the grounding judge too — it asserted nothing.</p>
+  </div>
+  <div class="seen">
+<pre>bulletin 2026-09-08 · 20 stories in view
+
+named the key fact       0.00  &lt;- the field
+carried it into the text  n/a     postdates
+numeral recall           0.63     this run
+  19 of the 20 carried a figure
+summary over 55 words    0.00
+editor's note            3 paragraphs
+
+grounding compares values, not strings
+  body "$12.9 billion" -> {12.9, 12900000000}
+  "12,9 milyar"  -> 12900000000   ✓ grounded
+  "13 milyar"    -> 13000000000   ✗ flagged
+a rounded figure is one the text did not give</pre>
+  </div>
+</div>
+
+<div class="layer">
+  <div class="box free">
+    <p class="name">2 · THE READER</p>
+    <p class="cost">free · inside the app</p>
+    <p class="cost">the only ground truth there is</p>
+  </div>
+  <div class="box say">
+    <p class="mono">POST /verdict · _story_foot.html</p>
+    <p>Every story carries <b>Doğru · Yanlış</b>, drawn <b>at rest</b>. One Verdict row per
+      summary; a later verdict overwrites the earlier one.</p>
+    <p>A <i>Yanlış</i> opens four words, because a story block asserts four separate things:</p>
+    <p class="mono">wrong_fact &nbsp; not_news &nbsp; duplicate &nbsp; wrong_place</p>
+    <p>Only <b>wrong_fact</b> calibrates the judge. The other three leave the 2×2 entirely and are
+      counted on their own — they measure the relevance call, the dedupe and the ranker.</p>
+  </div>
+  <div class="box say">
+    <p class="name">Binary, and named.</p>
+    <p>A person reading a digest can say "that is wrong" in one click and cannot honestly say
+      "that is a 3", so there is no five-point scale. What was missing was never resolution — it
+      was <i>which claim</i>.</p>
+    <p>The hover reveal is gone. Three days of it collected five labels over 138 summaries, and on
+      a touch screen it never fired at all.</p>
+    <p>A "wrong" with no reason — every label from before the field existed — is set aside rather
+      than assigned one on the reader's behalf.</p>
+  </div>
+  <div class="seen">
+<pre>on record: 5 labels over 138 summaries
+  4 ok · 1 wrong · 0 with a reason
+  (every one predates the reason field)
+
+TNR (ok passed)     100.0% on 4 labels
+TPR (wrong caught)  n/a on 0 labelled wrong
+
+-> not enough labels to trust
+   thirty per class, both classes present,
+   before the judge's numbers are believed
+
+the honest fix is labelling. a generated
+golden set would be a lie in the exact
+place this layer claims honesty.</pre>
+  </div>
+</div>
+
+<div class="layer">
+  <div class="box paid">
+    <p class="name">3 · JUDGE</p>
+    <p class="cost">spends money on purpose</p>
+    <p class="cost">gpt-5.6-terra — a tier above the pipeline</p>
+  </div>
+  <div class="box say">
+    <p class="mono">ainews eval judge --run &lt;id&gt; --sample 12 --seed 0 --max-cost 0.10</p>
+    <p>1 · sample twelve summaries, seeded, <b>from the published stories first</b> — the reader
+      labels what the page showed, so a uniform sample over ninety lands nowhere near a label</p>
+    <p>2 · estimate the spend from prompt length before the first call; CostGuard raises above
+      --max-cost and nothing is sent</p>
+    <p>3 · one binary question: is every factual claim in summary + why_it_matters supported by
+      the body?</p>
+    <p>4 · one EvalResult row per summary, keyed on the bulletin, carrying the prompt's hash</p>
+  </div>
+  <div class="box say">
+    <p class="name">One question, and nothing else.</p>
+    <p>Not style, not length, not importance, not language: Turkish quality is judged by the
+      reader, never by a model. A verdict that fails to parse is recorded as passed = None, not
+      raised.</p>
+    <p><b>TPR and TNR separately, never one accuracy figure</b> — the classes are unbalanced and a
+      single number hides the only failure worth catching. Beside them, precision: of the
+      summaries the judge failed, the share the reader agreed were wrong.</p>
+    <p>Twelve a run is about $0.02, roughly $2 a month at one judged run a day, against the
+      product's own $2.50.</p>
+  </div>
+  <div class="seen">
+<pre>run 3f2cdfbc · 12 judged · 11 pass · 1 fail
+
+FAIL  summary 44
+  "Temmuzdaki Hugging Face ihlalinde agent
+   swarm'ı sandbox'tan çıkıp sunuculara ve
+   ardından OpenAI altyapısındaki araştırma
+   kümesine erişti."
+  the body carries the breach, not the cluster
+
+prompt_version  b833fc992b23
+-> a rate is never quoted under a prompt
+   that has since been edited</pre>
+  </div>
+</div>
+
+<div class="layer">
+  <div class="box paid">
+    <p class="name">4 · RANK STABILITY</p>
+    <p class="cost">≈ $0.006 · two extra rank calls</p>
+    <p class="cost">and the same number ships on every bulletin</p>
+  </div>
+  <div class="box say">
+    <p class="mono">ainews eval rank-stability --run &lt;id&gt; --times 3</p>
+    <p>The candidate table's order is an accident of the database. Shuffle it three ways under
+      seed + i, rank each, then compare what comes back.</p>
+    <p class="mono">score = min( mean Kendall τ , chance-corrected Jaccard )</p>
+    <p>τ returns <b>0.0</b> below two shared items, not 1.0 — three pairwise-disjoint top-5 orders
+      must not pass a gate hardest exactly where they share least.</p>
+    <p>A run that fell back to importance order records passed = None: a score over a
+      deterministic fallback measures nothing.</p>
+  </div>
+  <div class="box say">
+    <p class="name">Both halves, or neither means anything.</p>
+    <p>Three readings can pick the same fifteen in three unrelated orders, or order five
+      identically while disagreeing about which five belong.</p>
+    <p><b>Why corrected, not subtracted.</b> Fifteen picks out of twenty-seven candidates overlap
+      0.385 by coin flip. Subtracting that caps a perfect ranker at 0.615, and a 0.6 gate would
+      then be measuring the size of the pool. Dividing by the room above chance runs 0 at
+      indifference to 1 at agreement.</p>
+    <p>Production stores the same number on bulletins.agreement, so the probe is a check on a
+      figure the page already reports rather than the only reading of it.</p>
+  </div>
+  <div class="seen">
+<pre>shuffle A -> [8, 3, 5, 1]
+shuffle B -> [3, 8, 1, 5]
+concordant 4 · discordant 2 -> τ = 0.33
+
+E = k / (2N - k) = 15 / (54 - 15) = 0.385
+J = 0.62  ->  (0.62 - 0.385) / 0.615 = 0.38
+score = min(0.33, 0.38) = 0.33
+
+measured: τ 0.47 and 0.50, both before the
+page read the ranker's order and before the
+correction. the next press is the first
+reading that counts.</pre>
+  </div>
+</div>
+
+<div class="layer">
+  <div class="box paid">
+    <p class="name">5 · PROMPT COMPARISON</p>
+    <p class="cost">≈ $0.02 a comparison</p>
+    <p class="cost">refused above --max-cost before the first call</p>
+  </div>
+  <div class="box say">
+    <p class="mono">ainews eval corpus --size 40<br>
+      ainews eval compare --prompt-a a.md --prompt-b b.md</p>
+    <p><b>corpus</b> freezes article bodies out of the archive into a gitignored JSONL file, chosen
+      by a seeded hash of the id — same seed, same corpus, so two comparisons a week apart are
+      about the prompt and not about the week.</p>
+    <p><b>compare</b> summarises every one of them twice and prints the checks side by side. Same
+      bodies, same model, same seed.</p>
+  </div>
+  <div class="box say">
+    <p class="name">It names no winner.</p>
+    <p>The numbers are shape and content floors, not a preference: a prompt that writes shorter
+      summaries scores better on the word budget and may say less. What the command removes is the
+      need to buy a production run to find out what a wording did.</p>
+    <p>The corpus is gitignored for the reason the fixtures carry no bodies: the repository is
+      public and an article is someone else's text.</p>
+  </div>
+  <div class="seen">
+<pre>the shape of the output, not a reading:
+no comparison has been run yet.
+
+40 bodies · gpt-5.6-luna · tr · ~$0.02
+
+                        A       B
+over 55 words           .       .
+named the key fact      .       .
+key fact kept           .       .
+numeral recall          .       .
+ungrounded numerals     .       .
+
+no winner is printed. two prompts that
+differ on length differ on the word budget
+by construction, and that is not a verdict.</pre>
+  </div>
+</div>
+
+<div class="layer">
+  <div class="box free">
+    <p class="name">6 · REPORT</p>
+    <p class="cost">free</p>
+  </div>
+  <div class="box say">
+    <p class="mono">ainews eval report [--run &lt;id&gt;]</p>
+    <p>Prints every number above and appends one dated section to docs/evals.md — appended, never
+      edited: a section is what was measured on that date.</p>
+    <p>It prefers the checks the press stored on the bulletin and recomputes only where a bulletin
+      predates them, and it says on the page which of the two it drew.</p>
+    <p>Each row names the function that produced it. A block byte-identical to one already in the
+      file is written as a line pointing back, so the record grows by the run count and not by the
+      report count.</p>
+  </div>
+  <div class="box trigger" style="grid-column: span 2">
+    <p class="name">A response is triggered by a measurement, not by a schedule</p>
+    <p>score &lt; 0.6 across runs → the three shuffled rank calls are already in production; the
+      next lever is the candidate table, not the aggregation</p>
+    <p>ranker / fallback overlap = the ceiling on most runs → the rank call is buying nothing;
+      delete it</p>
+    <p>judge TPR or TNR &lt; 0.8 after thirty labels a class → rewrite the judge prompt from the
+      wrong notes, and compare the two over the frozen corpus before it ships</p>
+    <p>key fact named but not kept, run after run → the fault is the writing instruction, not the
+      model tier</p>
+    <p>golden duplicate pairs keep failing on new outlets → embedding dedupe, and its own ADR</p>
+    <p class="cost" style="margin-top:8px">docs/EVALUATING.md is the manual: what each number
+      means, when it is worth believing, and how to add a check.</p>
+  </div>
+</div>
+
+</body>
+</html>

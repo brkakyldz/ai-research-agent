@@ -21,6 +21,8 @@ from ainews import __version__
 from ainews.config import Settings, get_settings
 from ainews.db import dispose_engine, get_engine, init_db
 from ainews.db.session import checkpoint_wal, session_scope
+from ainews.demo import seed_demo
+from ainews.demo.seed import DemoNotEmpty
 from ainews.logging_conf import configure_logging
 from ainews.observability import enable_tracing
 from ainews.pipeline.api import reconcile_orphaned_runs
@@ -51,13 +53,32 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with session_scope() as session:
         await sync_sources(session)
 
+    # A fresh clone with `DEMO_MODE=true` and no API key: load the recorded day
+    # so `docker compose up` shows the application rather than an empty page and
+    # a button nobody can press. Only into an empty archive - `seed_demo` refuses
+    # otherwise, and mixing a recording into a real archive is the one mistake
+    # here that cannot be undone from the interface.
+    if settings.demo_mode:
+        async with session_scope() as session:
+            try:
+                await seed_demo(session)
+            except (DemoNotEmpty, LookupError) as exc:
+                log.info("demo seed skipped: %s", exc)
+
     # Before the scheduler winds, and before a request can be served: a run row
     # left `running` by a killed process is a run nothing will ever close, and
     # the advice block on `/runs` reads the state of the last one.
     await reconcile_orphaned_runs()
 
     scheduler = None
-    if settings.scheduler_enabled:
+    if settings.demo_mode:
+        # A demo polls no feeds. The one scheduled job left is the three-hourly
+        # collect (ADR 0015), and on a reviewer's machine it would make network
+        # calls nobody asked for and file live articles beside a recording -
+        # after which the page is half recorded and half real, and nothing on it
+        # says which half is which.
+        log.info("scheduler off: this is a demo, and a demo polls no feeds")
+    elif settings.scheduler_enabled:
         scheduler = start_scheduler(settings)
     else:
         log.info("scheduler disabled by configuration")

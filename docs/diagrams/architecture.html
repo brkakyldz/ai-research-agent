@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>search_agent — how it works</title>
+<link rel="stylesheet" href="diagram.css">
+<style>
+  .graph-row { display: flex; gap: 12px; align-items: stretch; }
+  .graph-row > .node { flex: 1; }
+  .stack { position: relative; }
+  .stack::before,
+  .stack::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1.5px solid #2f7fbf;
+    border-radius: 9px;
+    background: #c3e1f7;
+    z-index: -1;
+  }
+  .stack::before { transform: translate(10px, -10px); }
+  .stack::after { transform: translate(5px, -5px); }
+  .starters { display: flex; flex-direction: column; gap: 14px; flex: 0 0 300px; }
+  .machine { display: flex; gap: 16px; align-items: stretch; }
+  .machine > .frame { flex: 1; }
+  .pages { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  .foot { display: flex; gap: 16px; margin-top: 22px; align-items: stretch; }
+  .foot > .plain:first-child { flex: 1.85; }
+  .foot > .plain:last-child { flex: 1; }
+  .foot ul { margin: 8px 0 0; padding-left: 16px; color: #33383f; }
+  .foot li { margin-bottom: 3px; }
+  .outsides { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 14px; margin: 0 0 6px 316px; }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div>
+    <h1>search_agent — how it works</h1>
+    <p class="lede">A daily AI-news digest. Feeds in, one LangGraph run, a bulletin you read in
+      the browser. It runs on one laptop: Docker + SQLite, no cloud step, about $2.50 a month.</p>
+  </div>
+  <div class="legend">
+    <b class="k">$</b> spends money &nbsp;·&nbsp; <b>purple</b> what starts a run &nbsp;·&nbsp;
+    <b>yellow</b> outside the app<br>
+    <b>blue</b> the LangGraph run &nbsp;·&nbsp; <b>green</b> storage &nbsp;·&nbsp;
+    <b>grey</b> the browser
+  </div>
+</div>
+
+<div class="outsides">
+  <div class="box outside">
+    <h3>RSS feeds</h3>
+    <p>feedparser, 16 of them. ETag / 304, so a quiet feed costs nothing.</p>
+  </div>
+  <div class="box outside spends">
+    <h3>Tavily</h3>
+    <p>news search, only for items still empty. Capped at 30 credits a day.</p>
+  </div>
+  <div class="box outside spends">
+    <h3>OpenAI · gpt-5.6-luna</h3>
+    <p>Both LLM steps ask for a Pydantic model, not free text: a malformed answer fails as a
+      validation error at the node that produced it, not as a KeyError three nodes later.</p>
+  </div>
+</div>
+
+<div class="down">↓ ↓ ↓</div>
+
+<div class="machine">
+  <div class="starters">
+    <div class="box starts">
+      <h3>the clock — every 3 hours</h3>
+      <p>APScheduler, inside the API process. It runs collect and stops there: no model, no cost.</p>
+      <p>DEMO_MODE winds no clock at all — a recording polls nothing.</p>
+    </div>
+    <div class="box starts">
+      <h3>a person — the press on /runs</h3>
+      <p>The only paid action in the whole app. One click gets a question, not a run; only the
+        answer is a POST. You pick the model and the output language there.</p>
+    </div>
+  </div>
+
+  <div class="frame">
+    <div class="label">LangGraph StateGraph · no checkpointer</div>
+    <div class="graph-row">
+      <div class="box node">
+        <h3>collect</h3>
+        <p>poll every feed, keep what is new. A 404 is that source's failure, not the run's.</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box node">
+        <h3>dedupe</h3>
+        <p>one story filed by five outlets is one story. Fuzzy title match; the loser is marked,
+          never deleted.</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box node spends">
+        <h3>enrich</h3>
+        <p>give thin items a body, cheapest tier first: the feed's own HTML, then a fetch, then
+          one Tavily credit.</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box node stack spends">
+        <h3>summarize · Send ×N</h3>
+        <p>one branch per article, 10 in flight. Each branch commits its own summary row before
+          it returns.</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box node spends">
+        <h3>rank ×3</h3>
+        <p>the only step that sees the whole day, read three times shuffled and aggregated by
+          Borda count. How far the three agreed ships on the bulletin.</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="box node">
+        <h3>persist</h3>
+        <p>publishes the day as a new <i>version</i>, not a second entry; runs the free checks
+          over what it published; closes the run.</p>
+      </div>
+    </div>
+    <p class="note">every node writes its own run_steps row as it runs &nbsp;·&nbsp; nothing new
+      today? the graph skips straight to persist and the run still closes</p>
+  </div>
+</div>
+
+<div class="down">↓</div>
+
+<div class="box store">
+  <h3>SQLite · data/app.db · WAL, FTS5</h3>
+  <p>sources · articles · summaries · bulletins · bulletin_items · runs · run_steps · verdicts ·
+    eval_results</p>
+  <p>The graph state carries ids, not bodies — bodies stay here, which is what keeps a hundred
+    parallel branches cheap.</p>
+  <p>There is no checkpoint file. A summary belongs to its article and is committed by the branch
+    that paid for it, so a run that dies loses the ranking and nothing else; the next press ranks
+    what is already here.</p>
+</div>
+
+<div class="down">↓ read</div>
+
+<div class="frame">
+  <div class="label">FastAPI + Jinja + HTMX · localhost:8000 · a console shell: left rail, one
+    sticky bar, dark and light, TR / EN interface</div>
+  <div class="pages">
+    <div class="box page">
+      <h3>/</h3>
+      <p>today's bulletin, in the editor's order. The tier decides the headline size; the rest of
+        the day is one click below it.</p>
+      <p class="k">you mark a summary right or wrong here — and on a wrong, which of the four
+        claims failed</p>
+    </div>
+    <div class="box page">
+      <h3>/archive</h3>
+      <p>earlier days, one card each. A day pressed twice is one entry that names its version.</p>
+    </div>
+    <div class="box page">
+      <h3>/search</h3>
+      <p>FTS5 over every headline and summary ever written.</p>
+    </div>
+    <div class="box page">
+      <h3>/runs</h3>
+      <p>what state the app is in, when it last ran, and a countdown to when another run is worth
+        it. The press lives here and nowhere else.</p>
+    </div>
+    <div class="box page">
+      <h3>/runs/&lt;id&gt;</h3>
+      <p>the run node by node: counts in and out, tokens, cost — and the free quality checks on
+        the bulletin it published.</p>
+    </div>
+    <div class="box page">
+      <h3>/sources</h3>
+      <p>enable, disable or add a feed; the last thing each one said.</p>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  <div class="box plain">
+    <h3>An example run — pressed at 16:06, bulletin in Turkish</h3>
+    <pre>collect     16 feeds polled    1214 items seen  ->  31 new
+dedupe      31 candidates                      ->  24            "OpenAI ships GPT-5.6 Luna" = "GPT-5.6 Luna is here": 3 URLs, 1 story
+enrich      24 examined                        ->  22 with a body   18 from the feed's own HTML, 3 fetched, 1 Tavily credit
+summarize   24 branches, 10 at a time          ->  24 rows, each committed by the branch that bought it
+rank        24 summaries, read 3 times         ->  the day in order + a note, with the readings' agreement on the bulletin
+persist     1 bulletin v1, its items, 6 run_steps  ->  about $0.03 — a month of pressing this is $2-3</pre>
+    <p style="margin-top:10px">Then you open /, read it, and mark one summary wrong and say why;
+      that verdict goes to the verdicts table. /runs/&lt;id&gt; shows those six lines again with
+      their tokens, their cost, how long each one took, and what the checks made of the result.
+      Nothing above happens on its own: the clock only polls feeds, and the bulletin waits for a
+      press.</p>
+  </div>
+  <div class="box plain">
+    <h3>quality/ and evals/ — the free half and the paid half</h3>
+    <p><b>src/ainews/quality/</b> is product code. The deterministic checks call no model and
+      write no row, so persist runs them and /runs/&lt;id&gt; draws them.</p>
+    <p><b>src/ainews/evals/</b> is the half that spends. It is imported by neither the pipeline nor
+      the web layer — only by cli.py, so the app still has exactly one button that spends money.</p>
+    <ul>
+      <li>pytest, offline, over a recorded fixture</li>
+      <li>the reader's right / wrong, and which claim failed</li>
+      <li>a sampled grounding judge, uncalibrated until thirty labels a class</li>
+      <li>rank stability: min(τ, chance-corrected Jaccard), gate 0.6</li>
+      <li>two prompts over the same frozen bodies</li>
+    </ul>
+    <p class="mono" style="margin-top:8px">ainews eval report</p>
+  </div>
+</div>
+
+</body>
+</html>

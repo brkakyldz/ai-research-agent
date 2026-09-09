@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ainews.config import Language, Settings, get_settings
 from ainews.db import Bulletin, BulletinItem, Run, Source
+from ainews.demo import load_demo
 from ainews.pipeline.api import digest_in_flight
 from ainews.web import queries
 from ainews.web.format import format_gap, format_stamp_long
@@ -225,6 +227,23 @@ async def build_rail(
     )
 
 
+@lru_cache(maxsize=1)
+def demo_notice() -> str:
+    """The day the seeded run really happened, or `""` when this is not a demo.
+
+    Cached: it reads a file that ships inside the package and cannot change
+    while the process runs, and it is asked for on every render of every page.
+    """
+    if not get_settings().demo_mode:
+        return ""
+    try:
+        return load_demo().recorded_day
+    except (LookupError, ValueError):
+        # Demo mode with no data file is a misconfiguration, not a crash: the
+        # application is perfectly able to serve an empty archive.
+        return ""
+
+
 def base_context(request: Request, language: Language, page: str) -> dict[str, object]:
     """The keys `base.html` needs on every page."""
     return {
@@ -235,6 +254,11 @@ def base_context(request: Request, language: Language, page: str) -> dict[str, o
         "theme": theme_of(request),
         "theme_urls": theme_urls(request),
         "language_urls": language_urls(request),
+        # On every page and not only the reading: a reviewer who lands on
+        # `/runs` and sees a run log has to be told the runs are a recording
+        # too. The day it was really published comes from the file the seed was
+        # loaded from, so the band names a date rather than saying "demo".
+        "demo": demo_notice(),
     }
 
 

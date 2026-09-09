@@ -261,6 +261,18 @@
 
   <div class="col">
     <main class="main" id="main">
+      {% if demo %}
+      {# The one thing on this application that is not what it looks like.
+         Seeded data drawn as this morning's news would be the single dishonest
+         screen in the project, so the band names the day the run really
+         happened and says the button is dead. On every page, because a reviewer
+         who lands on `/runs` sees a run log and has to be told the runs are a
+         recording too.
+
+         It is a band and not a panel: it belongs to the page rather than to the
+         reading, and it is the same recipe as the stale-bulletin line. #}
+      <p class="demo-band">{{ t.demo_band.format(day=demo) }}</p>
+      {% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>

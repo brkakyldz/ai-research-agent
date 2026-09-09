@@ -22,7 +22,7 @@ spends money and says how much before it does.
 
 ---
 
-## Four layers, and only two of them cost anything
+## Five layers, and only three of them cost anything
 
 | Layer | Where | Costs | Answers |
 |---|---|---|---|
@@ -30,12 +30,13 @@ spends money and says how much before it does.
 | The reader's verdict | the story foot on every page | nothing | Was this story right, and about what? |
 | The grounding judge | `ainews eval judge` | ~$0.05 a run | Does a summary state a fact its article does not support? |
 | The rank probe | `ainews eval rank-stability` | ~$0.01 a run | Does the ranker's answer depend on the order it was shown? |
+| The prompt comparison | `ainews eval compare` | ~$0.02 a comparison | What did that wording actually change? |
 
 The first layer runs **at publish**, on its own, and the numbers land on the
 bulletin. You see them on `/runs/<id>` without running anything. The second is a
-control you press while reading. The last two are commands.
+control you press while reading. The last three are commands.
 
-`src/ainews/evals/` holds the two that cost money. Nothing in the application
+`src/ainews/evals/` holds the three that cost money. Nothing in the application
 imports that package — delete it and one CLI subcommand stops working (ADR 0019
 §2). `src/ainews/quality/` is the free half, and the pipeline calls it.
 
@@ -284,3 +285,13 @@ Nothing measures whether the digest picked the *right* stories in an absolute
 sense. There is no ground truth for that and inventing one would be worse than
 admitting it. What there is: how stably the ranker answers, how far it read
 against the free ordering, and whether you told it it was wrong.
+
+## On a demo database
+
+`DEMO_MODE` seeds three real recorded days, and the recording carries **no article
+bodies** — the repository is public and an article is someone else's text (ADR
+0034). Everything that reads a summary works on it: the checks, the verdicts you
+add yourself, the report. The two things that read an *article* do not, and they
+say so rather than reporting a zero: `ainews eval judge` has nothing to compare a
+summary against, and `ainews eval corpus` has nothing to freeze. Press the button
+once with your own key and both start working on the day it publishes.

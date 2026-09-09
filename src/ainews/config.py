@@ -81,6 +81,14 @@ class Settings(BaseSettings):
     digest_suggest_after_hours: int = Field(default=24, ge=1, le=168)
     timezone: str = "Europe/Istanbul"
 
+    # -- The demo -------------------------------------------------------------
+    # A recorded day, loadable with no API key (`ainews demo seed`). When this
+    # is on, the web application seeds an empty database at startup and draws a
+    # band above the reading naming the day the run really happened. Seeded news
+    # presented as this morning's would be the one dishonest screen here, and a
+    # reviewer who cannot press the button has to be told why the page is full.
+    demo_mode: bool = False
+
     # -- Storage --------------------------------------------------------------
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
 

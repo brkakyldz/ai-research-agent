@@ -924,6 +924,17 @@ kbd {
    it has. */
 .feed-col,
 .main > .brief { max-width: var(--read); margin-inline: auto; width: 100%; }
+
+/* The demo band: what this page is, above everything it draws. Quiet on
+   purpose - it is a caption, not a warning, and the accent's three jobs are
+   taken (DESIGN.md). A dashed rule rather than a fill, because a filled band is
+   the shape this application uses for the reader's own brief and for a failed
+   run, and this is neither. */
+.demo-band {
+  max-width: var(--read); margin-inline: auto; width: 100%;
+  border: 1px dashed var(--line); border-radius: 8px;
+  padding: 10px 14px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2);
+}
 .panel {
   background: var(--panel);
   border: 1px solid var(--panel-line);

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from pathlib import Path
 
 from ainews.config import get_settings
 from ainews.db import get_engine, init_db
@@ -57,6 +58,43 @@ async def _digest(
         model_rank=model_rank,
     )
     print(f"digest run {run_id} finished")
+    return 0
+
+
+async def _demo(args: argparse.Namespace) -> int:
+    """Export a recorded day, or load one.
+
+    Imported inside the function, like every other subcommand here, so `ainews
+    serve` does not pay for a parser tree it never walks.
+    """
+    from ainews.demo import DEMO_PATH, export_demo, load_demo, seed_demo, write_demo
+    from ainews.demo.seed import DemoEmpty, DemoNotEmpty
+
+    await init_db(get_engine())
+    if args.demo_command == "export":
+        async with session_scope() as session:
+            try:
+                data = await export_demo(session, bulletins=args.bulletins)
+            except DemoEmpty as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
+        path = write_demo(data, args.out)
+        print(
+            f"exported {len(data.bulletins)} bulletin(s) and {len(data.summaries)} summaries "
+            f"of {data.recorded_day} to {path}"
+        )
+        print("no article bodies: the repository is public and an article is someone else's text")
+        return 0
+
+    data = load_demo()
+    async with session_scope() as session:
+        try:
+            n = await seed_demo(session, data, force=args.force)
+        except DemoNotEmpty as exc:
+            print(f"{exc}; pass --force to seed anyway", file=sys.stderr)
+            return 2
+    print(f"seeded {n} summaries recorded on {data.recorded_day}, from {DEMO_PATH.name}")
+    print("set DEMO_MODE=true so the page says what it is showing")
     return 0
 
 
@@ -244,6 +282,24 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="list what would be repaired and spend nothing",
     )
+    demo = sub.add_parser(
+        "demo", help="a recorded day, exported into the repository and loadable with no key"
+    )
+    demo_sub = demo.add_subparsers(dest="demo_command", required=True)
+    exporting = demo_sub.add_parser(
+        "export", help="write the newest bulletins to src/ainews/demo/demo.json"
+    )
+    exporting.add_argument(
+        "--bulletins", type=int, default=3, help="how many published days (default 3)"
+    )
+    exporting.add_argument("--out", type=Path, default=None, help="file (default: the package)")
+    seeding = demo_sub.add_parser("seed", help="load the recorded day into an empty database")
+    seeding.add_argument(
+        "--force",
+        action="store_true",
+        help="seed even though this database already holds a bulletin",
+    )
+
     sub.add_parser("init", help="create the database and seed the feed list")
     sub.add_parser("serve", help="run the dashboard on HOST:PORT from the environment")
     add_eval_parser(sub)
@@ -269,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
                 return await _resummarize(
                     args.article_ids, args.unattributed, args.model, args.dry_run
                 )
+            if args.command == "demo":
+                return await _demo(args)
             if args.command == "eval":
                 return await run_eval(args)
             await _prepare()

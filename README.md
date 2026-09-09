@@ -3,7 +3,8 @@
 A local-first LangGraph pipeline that reads the day's AI news so you don't have to
 open sixteen tabs. It polls RSS feeds every three hours, throws away the same
 story told by five outlets, summarises what is left with `gpt-5.6-luna`, ranks
-the whole day in one pass, and serves the result as a page you read over coffee.
+the whole day three times over and keeps what the three readings agree on, and
+serves the result as a page you read over coffee.
 
 One machine, one container, about **$2.50 a month**.
 
@@ -25,9 +26,16 @@ it — the page's job is to say when that is worth doing, and then get out of th
 way.
 
 **Nothing the model says is taken on trust.** Every summary carries a *doğru ·
-yanlış* under it, those labels are the ground truth a sampled grounding judge is
-calibrated against, and the numbers live in a dated file the commands
-regenerate.
+yanlış* under it, and a *wrong* asks which of the four claims failed — the fact,
+the relevance, the duplicate, or the place the editor gave it. Those labels are
+the only ground truth in the system: they are what a sampled grounding judge is
+calibrated against, and there are **five of them over 138 summaries** on the days
+on record, which is not enough to calibrate anything. So the judge is not
+calibrated, and nothing here says it is. `ainews eval report` prints the sample
+size beside every rate and refuses to state a hit rate under thirty labels per
+class; the free checks, which cost nothing and need no labels, run on every press
+and land on `/runs/<id>`. A number this tool cannot honestly produce is absent
+from the page rather than estimated.
 
 It is also a portfolio piece, so the parts usually skipped are not: tests that
 cover the failure modes rather than the happy path, and a reason written next to
@@ -45,12 +53,17 @@ Six nodes, and each one exists because of a specific problem:
 | **dedupe** | The same launch reaches us from OpenAI, TechCrunch, The Verge and Ars Technica. A canonical-URL unique index catches syndication; fuzzy title matching catches independent write-ups. |
 | **enrich** | A linkblog gives you a sentence and someone else's link. Three tiers, cheapest first: the feed's own HTML, then the page itself, then one capped Tavily search. |
 | **summarize** | A `Send` fan-out, one branch per story, each returning a validated Pydantic model. A branch that fails becomes an error entry, not a dead run. |
-| **rank** | Importance was scored one article at a time, blind to the rest of the day. This is the only step that sees all of it. |
-| **persist** | Writes the summaries and closes the run row with tokens, cost and status. |
+| **rank** | Importance was scored one article at a time, blind to the rest of the day. This is the only step that sees all of it — three times, over the same candidates shuffled three ways, aggregated by Borda count. The three readings' agreement is stored on the bulletin, so a day nobody agreed on says so. |
+| **persist** | Publishes the day's bulletin over the summaries in view, runs the free quality checks on what it just published, and closes the run row with tokens, cost and status. |
 
 The repository is named *agent* and the graph is not one in the tool-calling
 sense: nothing in it decides which node runs next. A bulletin needs a fixed
 line of six nodes, one fan-out and structured output, and that is what it is.
+
+A summary belongs to an article and a bulletin belongs to a day, so `summarize`
+commits each summary the moment it comes back: a run that dies at `rank` has
+still bought ninety summaries, and the next press ranks them instead of paying
+for them again.
 
 Every node also writes down what it did — counts in and out, model, tokens, cost,
 duration — so a slow or expensive run can be read step by step at `/runs/<id>`.
@@ -60,8 +73,23 @@ The long version, from a feed being polled to a story being read, is
 
 ## Run it
 
-You need Docker and an OpenAI API key. Tavily is optional — without it the
-pipeline just skips the third enrichment tier.
+**Without a key.** The repository ships three real recorded days — the
+bulletins, the runs behind them, the quality numbers those runs produced and the
+reader's own labels — so a stranger can read the thing before deciding whether to
+pay for a key:
+
+```bash
+docker compose -f docker-compose.demo.yml up --build
+```
+
+A band above the reading names the day the press really ran, the feeds are not
+polled, and the control that spends money says there is no key. The recording
+carries headlines, links and the model's own writing but **no article bodies** —
+an article is someone else's text — so the grounding judge has nothing to read on
+it and says so.
+
+**With a key.** Docker and an `OPENAI_API_KEY`. Tavily is optional — without it
+the pipeline just skips the third enrichment tier.
 
 ```bash
 cp env.example.template .env    # then put your OPENAI_API_KEY in it
@@ -76,13 +104,24 @@ language to write in, with the price per million tokens under them.
 
 After that the feeds keep being polled every three hours and nothing else happens
 by itself. `/runs` leads with when the last bulletin landed and a countdown to
-when another one is worth starting. It advises and never refuses: a second run
-the same day only summarises what arrived since the first, so pressing twice
-costs nothing the second time — and the question says how many stories are
-waiting before you answer it. A run that failed part-way offers to finish from
-its checkpoint inside the same question, rather than summarising the day again.
+when another one is worth starting. It advises and never refuses: a second press
+the same day buys summaries only for what has arrived since, then re-ranks the
+whole day and publishes a new **version** of today's bulletin — so pressing twice
+improves the page instead of adding a second entry to the archive, and the
+version it replaced stays there as what the front page said at the time. The
+question tells you how many stories are waiting before you answer it. A press
+that dies half-way keeps every summary it had already paid for; there is nothing
+to resume, because the next press simply ranks them.
 
-Without Docker:
+Without Docker — the recording:
+
+```bash
+uv sync
+echo DEMO_MODE=true > .env
+uv run ainews serve      # seeds the recorded day on the first start
+```
+
+and the real thing:
 
 ```bash
 uv sync
@@ -96,21 +135,22 @@ call — there is no second implementation:
 ```bash
 uv run ainews collect     # poll the feeds; no LLM, no cost
 uv run ainews digest      # the full pipeline
-uv run ainews digest --resume <run>   # finish a failed run from its checkpoint
 uv run ainews sources     # what is being polled and what it last said
 uv run ainews prune --dry-run   # what could be dropped; drop it without the flag
+uv run ainews demo seed   # the recorded day, into an empty database
+uv run ainews demo export # a fresh recording out of your own archive
 ```
 
 ## The pages
 
 | | |
 |---|---|
-| `/` | Today's bulletin: the day's brief, a topic filter with the day's impact spread on the end of it, the top 15, and an expander for everything else summarised. |
-| `/archive` | Past bulletins, by day. |
+| `/` | Today's bulletin: the day's brief, a topic filter with the day's impact spread on the end of it, what the editor published — fifteen is a ceiling, not a quota — and an expander for the rest of the day's relevant summaries. |
+| `/archive` | Past bulletins, by day. A day pressed twice is one entry that names its version. |
 | `/search` | Full-text over every summary ever written (SQLite FTS5, prefix-matched so Turkish suffixes stop mattering). |
 | `/sources` | Enable, disable or add a feed; last status per source. |
 | `/runs` | The advice block and the press, spend for today / 7 days / 30 days, the week's story counts, and every run with its cost, duration and errors. |
-| `/runs/<id>` | One run, node by node: which step took the time, which took the money, which model wrote it. |
+| `/runs/<id>` | One run, node by node: which step took the time, which took the money, which model wrote it — and under it the free quality checks on the bulletin that run published, as they were computed at the press. |
 | `/runs/verdicts` | The sentences the grounding judge could not find in the article, each with the reader's two words under it, and the reader's own labels. |
 
 ![Runs](docs/screenshots/runs.png)
@@ -171,16 +211,28 @@ that says so and refuses above a cap.
 ```bash
 uv run ainews eval record --run latest          # a run → a JSON fixture; no key, no network
 uv run ainews eval judge --run latest           # 12 sampled summaries, grounding, ~$0.05
-uv run ainews eval rank-stability --run latest  # 3 shuffled rank calls, Kendall τ, ~$0.01
+uv run ainews eval rank-stability --run latest  # 3 shuffled rank calls, ~$0.01
+uv run ainews eval corpus                       # freeze 40 article bodies; no key, gitignored
+uv run ainews eval compare --prompt-a a.md --prompt-b b.md   # same bodies, two prompts, ~$0.02
 uv run ainews eval report                       # every number, appended to docs/evals.md
 uv run ainews eval report --run <id>            # one run; unchanged numbers fold to a line
 ```
 
+The free half of that — the deterministic checks, which read rows and call
+nothing — is product code in `ainews/quality/`, runs on every press and is drawn
+on `/runs/<id>`. `ainews/evals/` is the half that spends money, and nothing in
+the application imports it: deleting the package breaks one CLI subcommand and
+nothing else. [`docs/EVALUATING.md`](docs/EVALUATING.md) is the manual — what
+each number means, when it is worth believing, and how to add a check.
+
 The first measurements are in [`docs/evals.md`](docs/evals.md): 4.4% of summaries
 over the word budget, two ungrounded figures, and a rank stability of **τ 0.47
-and 0.50** on the two real runs — both under the 0.6 that triggers a change to
-the ranker. Both were measured while the page ignored the ranker's order
-(ADR 0025 fixed that); the next real run is the first honest reading.
+and 0.50** on the two real runs — both under the 0.6 gate. Those two readings
+were taken while the page still ignored the ranker's order, and the gate has
+since become `min(τ, chance-corrected Jaccard)`: fifteen picks out of twenty-seven
+candidates overlap 38% by coin flip, so an uncorrected set score measures the
+size of the pool rather than the ranker. The next real run is the first reading
+that counts on both halves.
 
 ![How the evaluation works](docs/eval-architecture.png)
 
@@ -203,13 +255,13 @@ right.
 - **One worker, forever.** A second uvicorn worker means a second scheduler, a
   second feed poll, and two writers on a database that has room for one.
 - **It grows, and only one command shrinks it.** A day of news is roughly 140
-  articles, 120 summaries and 200 checkpoint rows — about 200 KB in `app.db` and
-  300 KB in `checkpoints.db`, so around 15 MB a month at one run a day. The
-  archive is the point of the tool and is never removed. `ainews prune` drops the
-  two things nothing can reach: checkpoint threads for runs that cannot be
-  resumed, and articles past the collect horizon that were never summarised.
-  `--dry-run` counts them first. It is a command and not a schedule, for the same
-  reason the digest is (ADR 0015).
+  articles and as many summaries — about 200 KB in `app.db`, so a few megabytes a
+  month at one press a day. The archive is the point of the tool and is never
+  removed. `ainews prune` drops the one thing nothing can reach: articles past
+  the collect horizon that were never summarised, which `dedupe` no longer
+  considers and therefore can never summarise later. `--dry-run` counts them
+  first, and it refuses while a run is in flight. It is a command and not a
+  schedule, for the same reason the digest is (ADR 0015).
 - **The schema migrates itself at startup.** Since ADR 0028 it is an Alembic
   chain applied by `init_db()`; an archive created before migrations is stamped
   at the baseline rather than rebuilt, and the takeover was rehearsed on a copy
@@ -217,11 +269,24 @@ right.
 - **Feeds rot.** Anthropic has no official feed, so the seed list uses a
   community mirror; Reddit rate-limits. A source that fails five times running
   disables itself and says so on `/sources`.
+- **The recording is a demo, not a benchmark.** `DEMO_MODE` seeds three real
+  days that were really published, and every page says so in a band. It carries
+  no article bodies, so on a seeded database the grounding judge and
+  `ainews eval corpus` have nothing to read — and they say that rather than
+  reporting a zero.
 - **Cost is an estimate**, computed from token counts. Prompt caching makes the
   real bill lower.
-- **No auth.** It binds to loopback — `127.0.0.1` by default, and the container
-  publishes to `127.0.0.1:8000` — so nothing on the network can reach it. Do not
-  change `HOST` to `0.0.0.0` outside Docker unless you own the network.
+- **No auth, and that is a decision rather than an omission.** There is no
+  login, no user table and no session. A password here would be guarding a
+  loopback socket, and the only thing that can open one is a process already
+  running as you on this machine — which can read `data/app.db` directly and skip
+  the dashboard entirely. So the binding is the control, and it is the thing that
+  is actually held: `HOST` defaults to `127.0.0.1`, both compose files publish to
+  `127.0.0.1:8000` rather than `8000:8000`, and the same-origin check below
+  covers the one hole loopback leaves — a page in your own browser. Set `HOST` to
+  `0.0.0.0` outside Docker and none of that is true any more; put it behind
+  something that authenticates before it is reachable from a network you do not
+  own.
 - **No CSRF token, and no session to hang one on.** What guards the four POSTs
   that do something is a same-origin check on every state-changing request: a
   browser labels a cross-site POST itself (`Sec-Fetch-Site`, `Origin`) and page
@@ -240,8 +305,8 @@ uv run pre-commit install
 ```
 
 Tests use a fake model and `respx` for HTTP, so the whole suite runs offline in
-about twenty seconds and the graph tests exercise a full fan-out, rank and
-persist with nothing to pay for. `langgraph.json` is checked in for `langgraph
+about a minute and a half and the graph tests exercise a full fan-out, three rank
+calls and a publish with nothing to pay for. `langgraph.json` is checked in for `langgraph
 dev` if you want to step through the graph in Studio, and per-call tracing is
 available behind a dev profile:
 

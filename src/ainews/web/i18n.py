@@ -161,6 +161,14 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         # Written as claims about the writing rather than as function names: the
         # person reading this page is the one who has to decide whether the
         # bulletin is any good, and "key_fact_kept" is not a sentence.
+        # The demo band, on every page. It names the day rather than saying
+        # "demo": a reviewer needs to know what they are looking at, and a date
+        # says it without a word of jargon.
+        "demo_band": (
+            "Bu bir kayıt: gerçekten çalışmış baskılar, en yenisi {day} "
+            "tarihinde. Anahtarsız açılsın diye tarihleri bugüne taşındı; "
+            "çalıştır düğmesi bir anahtar olmadan çalışmaz."
+        ),
         "quality_heading": "Bu bültenin ölçümleri",
         "quality_lead": "Hepsi ücretsiz, baskının kendisi hesapladı.",
         "quality_key_fact": "Haberi haber yapan şeyi adlandırdı",
@@ -388,6 +396,11 @@ STRINGS: Final[dict[str, dict[str, str]]] = {
         "reason_not_news": "Not AI news",
         "reason_duplicate": "Same story again",
         "reason_wrong_place": "In the wrong place",
+        "demo_band": (
+            "This is a recording: presses that really ran, the newest on "
+            "{day}. The dates were moved to today so it opens without a key; "
+            "the run button does nothing without one."
+        ),
         "quality_heading": "What this bulletin measured",
         "quality_lead": "All of it free, computed by the press itself.",
         "quality_key_fact": "Named the thing that made it news",

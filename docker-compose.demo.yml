@@ -1,0 +1,52 @@
+# The recording, on a machine with no key and no dotenv file (ADR 0034).
+#
+#     docker compose -f docker-compose.demo.yml up
+#
+# A file of its own rather than a profile inside docker-compose.yml, because a
+# service that names no profile always starts: `--profile demo up` would bring
+# the real `app` up beside the demo and fail on the `.env` a fresh clone does
+# not have. The separate file also gives the demo its own volume, which is the
+# guarantee that matters - a recording seeded into the archive a real press
+# writes to is indistinguishable from a real run afterwards, and `seed_demo`
+# refuses exactly that.
+services:
+  demo:
+    build: .
+    image: ai-research-agent:latest
+    container_name: ainews-demo
+    restart: unless-stopped
+    # No `env_file`. Nothing here is secret and nothing here is the operator's
+    # choice: this is one fixed way to run, so it is written out rather than
+    # read from a file the reviewer would have to create first.
+    environment:
+      # Seeds the shipped day into the empty volume on the first start and
+      # draws the band that says when it really ran.
+      DEMO_MODE: "true"
+      # Stated, not merely absent: the page draws "no key" where the press
+      # button would be, and a demo that could spend money is not a demo.
+      OPENAI_API_KEY: ""
+      TAVILY_API_KEY: ""
+      DATABASE_URL: sqlite+aiosqlite:///./data/app.db
+      # Templates are not watched and a traceback does not reach the browser.
+      ENVIRONMENT: production
+      # Loopback inside a network namespace is unreachable from the host; the
+      # publish below is what keeps it off the network. Same rule as `app`.
+      HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Its own volume, never `ainews-data`. See the note at the top.
+      - ainews-demo-data:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  ainews-demo-data:
