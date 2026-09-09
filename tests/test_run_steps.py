@@ -9,6 +9,8 @@ breakdown: it would be a second set of numbers about the same two minutes.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,6 +31,8 @@ from ainews.pipeline.steps import step
 from ainews.web.format import format_step_duration
 from ainews.web.i18n import note_text, strings
 from test_graph import SUMMARY, FakeLLM, _no_collect, _no_enrich, _seed_articles
+
+ROOT = Path(__file__).resolve().parents[1]
 
 INITIAL: dict[str, Any] = {
     "language": "tr",
@@ -493,3 +497,25 @@ def test_a_note_falls_back_to_what_was_stored() -> None:
     # written with `{}` instead of `{n}` must fall back like everything else.
     positional = dict(t, note_probe="{} of {}")
     assert note_text(positional, '{"k":"probe","n":1}') == '{"k":"probe","n":1}'
+
+
+def test_every_note_a_node_records_has_a_sentence() -> None:
+    """The fallback above is a safety net, not the plan.
+
+    `note_text` prints the stored JSON when it cannot find `note_<k>`, so a key
+    a node records and nobody wrote a sentence for does not fail anywhere: it
+    reaches the reader as `{"k":"rank_agreement","agreement":40,"passes":3}` in
+    the Not column, which is the one thing ADR 0022 built that column to stop.
+    Only the run detail page shows it, and only after a real run, so it survives
+    the suite otherwise. Read the keys out of the source instead.
+    """
+    recorded = {
+        key
+        for path in (ROOT / "src" / "ainews").rglob("*.py")
+        for key in re.findall(r'note_key\(\s*"([a-z_]+)"', path.read_text(encoding="utf-8"))
+    }
+    assert recorded, "the pattern stopped matching, not the notes stopped existing"
+    for lang in ("tr", "en"):
+        t = strings(lang)
+        missing = sorted(key for key in recorded if "note_" + key not in t)
+        assert not missing, f"no {lang} sentence for {missing}"
