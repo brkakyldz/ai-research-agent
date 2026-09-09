@@ -253,57 +253,6 @@ right.
 
 ![The reader's verdicts and the judge's failures](docs/screenshots/verdicts.png)
 
-## Known limits
-
-- **One language per bulletin.** `tr` or `en`, chosen at the press. The switch in
-  the bar is the *interface* language and filters nothing; when the bulletin on
-  screen was written in the other one, the bar says so.
-- **Nothing runs while you are away.** A week unopened is a week of collected
-  articles and no bulletins; the next press summarises what is still inside the
-  seven-day horizon and nothing older.
-- **One worker, forever.** A second uvicorn worker means a second scheduler, a
-  second feed poll, and two writers on a database that has room for one.
-- **It grows, and only one command shrinks it.** A day of news is roughly 140
-  articles and as many summaries — about 200 KB in `app.db`, so a few megabytes a
-  month at one press a day. The archive is the point of the tool and is never
-  removed. `ainews prune` drops the one thing nothing can reach: articles past
-  the collect horizon that were never summarised, which `dedupe` does not
-  consider and therefore can never summarise later. `--dry-run` counts them
-  first, and it refuses while a run is in flight. It is a command and not a
-  schedule, for the same reason the digest is (ADR 0015).
-- **The schema migrates itself at startup.** Since ADR 0028 it is an Alembic
-  chain applied by `init_db()`; an archive created before migrations is stamped
-  at the baseline rather than rebuilt, and the takeover was rehearsed on a copy
-  of the real one. A schema change is a revision, not a deleted database.
-- **Feeds rot.** Anthropic has no official feed, so the seed list uses a
-  community mirror; Reddit rate-limits. A source that fails five times running
-  disables itself and says so on `/sources`.
-- **The recording is a demo, not a benchmark.** `DEMO_MODE` seeds three real
-  days that were really published, and every page says so in a band. It carries
-  no article bodies, so on a seeded database the grounding judge and
-  `ainews eval corpus` have nothing to read — and they say that rather than
-  reporting a zero.
-- **Cost is an estimate**, computed from token counts. Prompt caching makes the
-  real bill lower.
-- **No auth, and that is a decision rather than an omission.** There is no
-  login, no user table and no session. A password here would be guarding a
-  loopback socket, and the only thing that can open one is a process already
-  running as you on this machine — which can read `data/app.db` directly and skip
-  the dashboard entirely. So the binding is the control, and it is the thing that
-  is actually held: `HOST` defaults to `127.0.0.1`, both compose files publish to
-  `127.0.0.1:8000` rather than `8000:8000`, and the same-origin check below
-  covers the one hole loopback leaves — a page in your own browser. Set `HOST` to
-  `0.0.0.0` outside Docker and none of that is true any more; put it behind
-  something that authenticates before it is reachable from a network you do not
-  own.
-- **No CSRF token, and no session to hang one on.** What guards the four POSTs
-  that do something is a same-origin check on every state-changing request: a
-  browser labels a cross-site POST itself (`Sec-Fetch-Site`, `Origin`) and page
-  script cannot forge either label, so a stranger's tab cannot press the button
-  that spends money. A caller sending neither header is not a browser and has no
-  ambient cookies to ride, so the terminal still works. `web/security.py` says
-  why that is the proportionate answer for a single-user tool.
-
 ## Development
 
 ```bash
