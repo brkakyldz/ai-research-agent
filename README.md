@@ -239,8 +239,9 @@ and 0.50** on the two real runs — both under the 0.6 gate. Those two readings
 were taken while the page still ignored the ranker's order, and the gate has
 since become `min(τ, chance-corrected Jaccard)`: fifteen picks out of twenty-seven
 candidates overlap 38% by coin flip, so an uncorrected set score measures the
-size of the pool rather than the ranker. The next real run is the first reading
-that counts on both halves.
+size of the pool rather than the ranker. The press pictured above is the first
+reading that counts on both halves, and the three passes agree **0.40** — still
+under the gate, and now about an order the page reads.
 
 ![How the evaluation works](docs/eval-architecture.png)
 

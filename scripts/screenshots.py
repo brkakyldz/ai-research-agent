@@ -63,7 +63,10 @@ SHOTS: list[Shot] = [
     # `{run}` is filled in with the newest bulletin's id: the page is about one
     # run, and hard-coding an id would make the script stop working the first
     # time the database it reads is not the one it was written against.
-    Shot("/runs/{run}?theme=dark", "run-detail.png", height=640),
+    # 960 is the six-node table plus the free checks under it: `main` is the
+    # height of its content and the shell clips it at the window, so a window
+    # shorter than the page cuts a block in half rather than scrolling it.
+    Shot("/runs/{run}?theme=dark", "run-detail.png", height=960),
     Shot("/runs/verdicts?theme=dark", "verdicts.png"),
     Shot("/search?q=model&theme=dark", "search.png"),
     Shot("/archive?theme=light", "archive-light.png"),
